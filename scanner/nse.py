@@ -56,20 +56,31 @@ def _num(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s.astype(str).str.strip().replace({"-": None, "": None}), errors="coerce")
 
 
+MIN_STOCK_ROWS = 1000   # a complete EQ bhavcopy has ~2,500+ rows; fewer means a truncated/blocked response
+
+
 class DayFile:
-    """Result of fetching one trading day. status: 'ok' | 'missing' (404 / other day's file) | 'error'."""
+    """Result of fetching one day.
+    status: 'ok'      - official data for that day
+            'holiday' - NSE served another day's file: no trading that day
+            'missing' - not published (yet): 404
+            'error'   - blocked / server error / unparsable: retry later, never treat as holiday"""
 
     def __init__(self, day: date, status: str, stocks: pd.DataFrame | None = None, indices: pd.DataFrame | None = None):
         self.day, self.status, self.stocks, self.indices = day, status, stocks, indices
 
 
-def _parse_stocks(text: str, day: date) -> pd.DataFrame | None:
+class _OtherDay(Exception):
+    pass
+
+
+def _parse_stocks(text: str, day: date) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(text))
     df.columns = [c.strip() for c in df.columns]
     for c in ("SYMBOL", "SERIES", "DATE1"):
         df[c] = df[c].astype(str).str.strip()
     if pd.to_datetime(df["DATE1"].iloc[0], format="%d-%b-%Y").date() != day:
-        return None  # holiday: NSE served another day's file
+        raise _OtherDay()  # holiday: NSE served another day's file
     df = df[df["SERIES"].isin(SERIES_PRIORITY)].copy()
     df["_rank"] = df["SERIES"].map({s: i for i, s in enumerate(SERIES_PRIORITY)})
     df = df.sort_values("_rank").drop_duplicates("SYMBOL")
@@ -82,12 +93,12 @@ def _parse_stocks(text: str, day: date) -> pd.DataFrame | None:
     return out[out["close"] > 0]
 
 
-def _parse_indices(text: str, day: date) -> pd.DataFrame | None:
+def _parse_indices(text: str, day: date) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(text))
     df.columns = [c.strip() for c in df.columns]
     df["Index Name"] = df["Index Name"].astype(str).str.strip()
     if pd.to_datetime(df["Index Date"].astype(str).iloc[0], format="%d-%m-%Y").date() != day:
-        return None
+        raise _OtherDay()
     out = pd.DataFrame({
         "open": _num(df["Open Index Value"]), "high": _num(df["High Index Value"]),
         "low": _num(df["Low Index Value"]), "close": _num(df["Closing Index Value"]),
@@ -104,13 +115,27 @@ def fetch_day(day: date, use_cache: bool = True) -> DayFile:
         return DayFile(day, "ok", pd.read_parquet(sp), pd.read_parquet(ip))
     d = day.strftime("%d%m%Y")
     st_code, st_text = _get(BHAV_URL.format(d=d))
-    ix_code, ix_text = _get(INDEX_URL.format(d=d))
-    if st_code == -1 or ix_code == -1 or st_code >= 500 or ix_code >= 500:
-        return DayFile(day, "error")
-    stocks = _parse_stocks(st_text, day) if st_code == 200 else None
-    indices = _parse_indices(ix_text, day) if ix_code == 200 else None
-    if stocks is None or indices is None or stocks.empty:
+    if st_code == 404:
         return DayFile(day, "missing")
+    if st_code != 200:
+        return DayFile(day, "error")
+    try:
+        stocks = _parse_stocks(st_text, day)
+    except _OtherDay:
+        return DayFile(day, "holiday")
+    except Exception:
+        return DayFile(day, "error")
+    if len(stocks) < MIN_STOCK_ROWS:
+        return DayFile(day, "error")
+    ix_code, ix_text = _get(INDEX_URL.format(d=d))
+    try:
+        indices = _parse_indices(ix_text, day) if ix_code == 200 else None
+    except Exception:
+        indices = None
+    if indices is None:
+        # The index file is sometimes published a little later: wait for it on recent days so the
+        # Nifty series has no holes; for older days use the stock file alone (not cached).
+        return DayFile(day, "ok" if (date.today() - day).days > 2 else "missing", stocks, None)
     stocks.to_parquet(sp)
     indices.to_parquet(ip)
     return DayFile(day, "ok", stocks, indices)

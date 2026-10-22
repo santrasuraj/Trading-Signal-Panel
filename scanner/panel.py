@@ -99,7 +99,8 @@ class Factors:
         gain = delta.clip(lower=0).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
         loss = (-delta.clip(upper=0)).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
         rsi = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
-        return rsi.where(~(loss == 0) | gain.isna(), 100.0)
+        rsi = rsi.where(~((loss == 0) & (gain > 0)), 100.0)     # only gains: 100
+        return rsi.where(~((loss == 0) & (gain == 0)), 50.0)    # flat / suspended: neutral 50
 
     def high_n(self, n: int, include_today: bool = False) -> pd.DataFrame:
         h = self.p.high.rolling(n, min_periods=min(n, 60)).max()

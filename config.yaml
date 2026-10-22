@@ -1,52 +1,77 @@
 # ---------------------------------------------------------------------------
-#  NSE Stock Scanner - settings. Edit and save; the next scan uses them.
+#  NSE Stock Scanner v2 - settings. Edit and save; the next scan uses them.
 # ---------------------------------------------------------------------------
 
-# auto  = Fyers live data if you're logged in today, otherwise Yahoo (~15 min delayed)
-# fyers = same as auto (falls back to Yahoo with a warning if login expired)
-# yahoo = always use Yahoo
+# Your account - used to size positions (how many shares to buy).
+account:
+  capital: 500000            # rupees you plan to invest with these strategies
+
+# auto  = Fyers real-time live prices when logged in, otherwise Yahoo (~15 min delayed)
+# yahoo = never use Fyers
 data_source: auto
+fyers_plan: standard         # standard (free: 50 data calls/min) or prime - sets the request speed limit
 
 # Which stocks to scan: nifty50 | nifty100 | nifty200 | nifty500
 universe: nifty500
 
-# Days of price history to keep (~3 years: needed for 200-DMA + 2-year backtest)
-lookback_days: 1100
+# Days of price history (~8 years: covers the 2020 crash, 2021 boom, 2022 chop, 2025-26 fall)
+lookback_days: 3000
 
-# Skip illiquid / penny stocks in signals and movers
+# Only trade liquid stocks
 filters:
-  min_price: 50            # rupees
-  min_avg_volume: 100000   # shares per day (20-day average)
+  min_price: 50              # rupees
+  min_turnover_cr: 5         # average daily traded value, Rs crore (20 days)
 
-# Used for suggested stop-loss/target on buy signals, and for holdings without their own values
+# Your own holdings (holdings.csv) without their own stop/target use these
 holdings_defaults:
-  stop_loss_pct: 5
-  target_pct: 10
+  stop_loss_pct: 8
+  target_pct: 20
 
 movers_count: 15
 
-# Backtest = test each rule on past data
-backtest:
-  years: 2
-  stop_loss_pct: 5
-  target_pct: 10
-  max_hold_days: 15        # exit after this many trading days if no stop/target hit
-  cost_pct: 0.25           # brokerage + STT + charges + slippage, round trip
+# Trading charges per order (NSE equity delivery, 2025-26). Adjust if your broker differs.
+costs:
+  brokerage_pct: 0.3         # % of order value ...
+  brokerage_max: 20          # ... capped at Rs 20 per order
+  stt_pct: 0.1               # buy + sell
+  exchange_pct: 0.00297
+  sebi_pct: 0.0001
+  stamp_buy_pct: 0.015
+  gst_pct: 18
+  dp_per_sell: 15.34         # depository charge per stock per sell day
+  slippage_pct: 0.10         # assumed price slippage per side
 
-# Signal rules. Set enabled: false to switch one off, or change its numbers.
-rules:
-  # ---- BUY ----
-  ma50_breakout:       {enabled: true, min_vol_ratio: 2.0, require_uptrend: true}
-  high52_breakout:     {enabled: true, min_vol_ratio: 1.5}
-  rsi_bounce:          {enabled: true, level: 30, require_uptrend: false}
-  macd_bull_cross:     {enabled: true, require_uptrend: true}
-  ema_bull_cross:      {enabled: true, min_vol_ratio: 1.2}
-  # ---- SELL ----
-  ma50_breakdown:      {enabled: true, min_vol_ratio: 1.5}
-  low52_breakdown:     {enabled: true, min_vol_ratio: 1.5}
-  rsi_overbought_exit: {enabled: true, level: 70}
-  macd_bear_cross:     {enabled: true}
-  ema_bear_cross:      {enabled: true, min_vol_ratio: 1.2}
+# Strategies. Each is re-tested on 8 years of data after every scan.
+# Set enabled: false to hide one, or change its numbers (the backtest updates automatically).
+strategies:
+  momentum:
+    enabled: true
+    top_n: 15                # hold the 15 strongest stocks
+    keep_rank: 30            # keep a holding while it stays in the top 30
+    rebalance: monthly       # monthly | biweekly | weekly
+    require_uptrend: true    # only stocks above their 200-day average
+    use_regime: true         # no new buys while Nifty is below its 200-day average
+    regime_action: hold      # hold = keep holdings, cash = sell everything in a downtrend
+  near_high:
+    enabled: true
+    top_n: 15
+    keep_rank: 30
+    rebalance: monthly
+  trend_breakout:
+    enabled: true
+    rs_min: 70
+    min_vol_ratio: 1.5
+    stop_pct: 8
+    trail_pct: 15
+    max_positions: 10
+  rsi2_pullback:
+    enabled: true
+    rsi2_below: 10
+    stop_pct: 10
+    max_hold: 10
+    max_positions: 10
+  legacy_rules:
+    enabled: true            # the old v1 rules, kept only as a comparison
 
 telegram:
-  top_n: 10                # how many buy/sell signals to include in the message
+  top_n: 10

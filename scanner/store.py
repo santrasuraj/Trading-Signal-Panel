@@ -14,6 +14,9 @@ Only completed days are saved; the live candle is kept in memory only.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
@@ -21,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 from . import corporate, nse
-from .providers import COLS, INDEX_SYMBOLS, YahooProvider
+from .providers import COLS, INDEX_SYMBOLS, FyersAuthError, YahooProvider
 from .settings import HISTORY_DIR, SESSION_START, ist_now, ist_today
 
 STORE_DIR = HISTORY_DIR / "store"
@@ -44,24 +47,68 @@ class PanelStore:
             except Exception:
                 pass
 
-    def load(self) -> dict[str, pd.DataFrame]:
+    # Each save writes a complete new generation folder, then atomically repoints CURRENT at it,
+    # so readers always see one consistent set of files (never half old, half new).
+    def _generations(self) -> list:
+        return sorted((p for p in STORE_DIR.glob("gen_*") if p.is_dir()), reverse=True)
+
+    def _read(self, folder) -> dict[str, pd.DataFrame]:
         frames = {}
         for f in FIELDS:
-            p = STORE_DIR / f"{f}.parquet"
+            p = folder / f"{f}.parquet"
             frames[f] = pd.read_parquet(p) if p.exists() else pd.DataFrame(index=pd.DatetimeIndex([], name="date"))
         return frames
 
+    def load(self) -> dict[str, pd.DataFrame]:
+        current = STORE_DIR / "CURRENT"
+        candidates = []
+        if current.exists():
+            candidates.append(STORE_DIR / current.read_text(encoding="utf-8").strip())
+        candidates += [g for g in self._generations() if g not in candidates]
+        candidates.append(STORE_DIR)  # legacy layout (files directly in the store folder)
+        for folder in candidates:
+            try:
+                if (folder / "close.parquet").exists():
+                    return self._read(folder)
+            except Exception:
+                continue  # damaged generation: fall back to the previous one
+        return {f: pd.DataFrame(index=pd.DatetimeIndex([], name="date")) for f in FIELDS}
+
     def save(self, frames: dict[str, pd.DataFrame]) -> None:
+        name = f"gen_{ist_now():%Y%m%d_%H%M%S}_{os.getpid()}"
+        folder = STORE_DIR / name
+        folder.mkdir(parents=True, exist_ok=True)
         for f in FIELDS:
-            tmp = STORE_DIR / f"{f}.parquet.tmp"
-            frames[f].to_parquet(tmp)
-            tmp.replace(STORE_DIR / f"{f}.parquet")  # atomic: readers never see a half-written file
+            frames[f].to_parquet(folder / f"{f}.parquet")
+        tmp = STORE_DIR / f"CURRENT.{os.getpid()}.tmp"
+        tmp.write_text(name, encoding="utf-8")
+        _replace(tmp, STORE_DIR / "CURRENT")
         self.save_meta()
+        for old in self._generations()[2:]:          # keep the newest two generations
+            shutil.rmtree(old, ignore_errors=True)
+        for legacy in STORE_DIR.glob("*.parquet"):     # files from the old single-folder layout
+            legacy.unlink(missing_ok=True)
+
+    def version(self) -> str:
+        current = STORE_DIR / "CURRENT"
+        return current.read_text(encoding="utf-8").strip() if current.exists() else ""
 
     def save_meta(self) -> None:
-        tmp = self.meta_path.with_suffix(".tmp")
+        tmp = STORE_DIR / f"meta.{os.getpid()}.tmp"
         tmp.write_text(json.dumps(self.meta, indent=0), encoding="utf-8")
-        tmp.replace(self.meta_path)
+        _replace(tmp, self.meta_path)
+
+
+def _replace(src, dst, tries: int = 10) -> None:
+    """os.replace with retries: on Windows it fails while another process has the target open."""
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.2 * (i + 1))
 
 
 def _clean(df: pd.DataFrame) -> pd.DataFrame:
@@ -95,13 +142,26 @@ def _wide(per_symbol: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
     return {f: pd.DataFrame({s: df[f] for s, df in per_symbol.items() if f in df.columns}) for f in COLS}
 
 
-def _weekdays(start: date, end: date) -> list[date]:
-    out, d = [], start
-    while d <= end:
-        if d.weekday() < 5:
-            out.append(d)
-        d += timedelta(days=1)
-    return out
+def _days(start: date, end: date) -> list[date]:
+    return [start + timedelta(days=i) for i in range((end - start).days + 1)]
+
+
+def _fill_from_yahoo(frames: dict, yahoo: YahooProvider, syms: list[str], days: list[date],
+                     provisional: set[str], log=print) -> bool:
+    """Temporarily fill trading days NSE hasn't published (or is blocking) from Yahoo. The days are
+    remembered as provisional and replaced by NSE's official file as soon as it is available."""
+    start, end = min(days), max(days)
+    got = yahoo.history(syms, {s: start for s in syms}, end)
+    wanted = pd.DatetimeIndex([pd.Timestamp(d) for d in days])
+    rows = {s: _clean(df.loc[df.index.isin(wanted)]) for s, df in got.items() if len(df)}
+    rows = {s: df for s, df in rows.items() if len(df)}
+    if not rows:
+        return False
+    _merge(frames, _wide(rows))
+    filled = sorted({d.date().isoformat() for df in rows.values() for d in df.index})
+    provisional.update(filled)
+    log(f"Filled {len(filled)} day(s) from Yahoo while NSE data is unavailable: {', '.join(filled)}")
+    return True
 
 
 def _apply_corporate_action(frames: dict, sym: str, before: pd.Timestamp, factor: float) -> None:
@@ -254,19 +314,24 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
         log(f"Downloading history for {len(starts)} symbols"
             f"{f' ({n_full} new - first run takes ~2-4 min)' if n_full > 20 else ''}...")
         fetched = yahoo.history(list(starts), starts, today, progress=progress)
+        if yahoo.outage:
+            log("Yahoo looks throttled/unavailable for part of the download - those symbols will be retried.")
         good, replace = {}, set()
         for s, df in fetched.items():
             df = df[df.index < pd.Timestamp(today)]  # today's row comes from NSE / live quotes
             if df.empty:
-                fl = meta["failed"].get(s, {})
-                meta["failed"][s] = {"count": fl.get("count", 0) + 1, "last_try": today.isoformat()}
                 errors[s] = yahoo.errors.get(s, "no data from Yahoo")
+                if not yahoo.outage:  # don't blacklist symbols because of a provider outage
+                    fl = meta["failed"].get(s, {})
+                    meta["failed"][s] = {"count": fl.get("count", 0) + 1, "last_try": today.isoformat()}
                 continue
             meta["failed"].pop(s, None)
             good[s] = _clean(df)
             if starts[s] == start_full:
-                replace.add(s)
-                meta["symbols"][s] = {"full_from": start_full.isoformat()}
+                existing = frames["close"][s].count() if s in frames["close"].columns else 0
+                if len(good[s]) >= 0.9 * existing:  # never swap a long history for a truncated one
+                    replace.add(s)
+                    meta["symbols"][s] = {"full_from": start_full.isoformat()}
         _merge(frames, _wide(good), replace)
         changed = bool(good)
         touched = list(good)
@@ -290,18 +355,29 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
     if len(frames["close"]):
         lasts.append(frames["close"].index[-1].date())
     nse_status = "up to date"
+    provisional = set(meta.get("provisional", []))   # days filled from Yahoo while NSE was unavailable
     if lasts:
         from_day = min(lasts) + timedelta(days=1)
         last_try_day = today if now.hour >= NSE_PUBLISH_HOUR else today - timedelta(days=1)
-        days = [d for d in _weekdays(from_day, last_try_day) if d.isoformat() not in holidays]
+        # Every calendar day (weekends too: Diwali Muhurat / Budget-day sessions), minus known holidays,
+        # plus provisional days so they get replaced by official data.
+        days = sorted({d for d in _days(from_day, last_try_day) if d.isoformat() not in holidays}
+                      | {date.fromisoformat(x) for x in provisional})
         if days:
             files = nse.fetch_days(days)
             ok_days = sorted(d for d, fl in files.items() if fl.status == "ok")
+            unavailable = []
             for d, fl in files.items():
-                if fl.status == "missing" and (today - d).days >= 2:
-                    holidays.add(d.isoformat())  # no file two days later => market holiday
-                elif fl.status == "error":
-                    nse_status = "NSE archive unreachable for some days - will retry next scan"
+                if fl.status == "holiday" or (fl.status == "missing" and d.weekday() >= 5 and d < today):
+                    holidays.add(d.isoformat())   # NSE served another day's file: no trading that day
+                elif fl.status in ("missing", "error") and d.weekday() < 5 and (today - d).days >= 2:
+                    unavailable.append(d)
+            for d in ok_days:
+                provisional.discard(d.isoformat())
+            if unavailable:
+                nse_status = (f"NSE file not available for {', '.join(x.isoformat() for x in unavailable)} - "
+                              "using Yahoo for those days until it is")
+                changed |= _fill_from_yahoo(frames, yahoo, all_syms, unavailable, provisional, log)
             for d in ok_days:
                 fl = files[d]
                 ts = pd.Timestamp(d)
@@ -326,10 +402,11 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
                         if adj:
                             _apply_corporate_action(frames, s, ts, adj["factor"])
                             corp_actions.append(adj)
-            if ok_days:
+            if ok_days and not unavailable:
                 nse_status = f"NSE official data to {ok_days[-1].isoformat()}"
 
-    meta["holidays"] = sorted(holidays)[-400:]
+    meta["holidays"] = sorted(holidays)[-600:]
+    meta["provisional"] = sorted(provisional)
     if corp_actions:
         log("Price history adjusted: " + ", ".join(f"{c['symbol']} {c['date']} x{c['factor']:.4g} ({c['reason']})" for c in corp_actions))
         meta["corporate_actions"] = (meta.get("corporate_actions", []) + corp_actions)[-300:]
@@ -346,10 +423,14 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
     live_source = None
     if trading_today and session_started and complete_upto and today > complete_upto:
         if fyers is not None:
-            for s, (qdate, row) in fyers.live_rows(all_syms).items():
-                if (qdate is None or qdate == today) and row.get("close"):
-                    live_rows[s] = {c: float(row.get(c) or 0) for c in COLS}
-            live_source = "Fyers (real-time)" if live_rows else None
+            try:
+                for s, (qdate, row) in fyers.live_rows(all_syms).items():
+                    if (qdate is None or qdate == today) and row.get("close"):
+                        live_rows[s] = {c: float(row.get(c) or 0) for c in COLS}
+                live_source = "Fyers (real-time)" if live_rows else None
+            except FyersAuthError as e:
+                log(f"Fyers session expired ({e}) - using Yahoo for live prices. Run 1_login.bat.")
+                errors["fyers"] = "session expired - run 1_login.bat"
         if not live_rows:
             recent = yahoo.history(all_syms, {s: today - timedelta(days=5) for s in all_syms}, today)
             for s, df in recent.items():

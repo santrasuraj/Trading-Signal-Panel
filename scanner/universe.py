@@ -22,6 +22,7 @@ SOURCES = [
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 CACHE_DAYS = 7
+EXPECTED_SIZE = {"nifty50": 50, "nifty100": 100, "nifty200": 200, "nifty500": 500}
 
 # Used only if the NSE list cannot be downloaded and nothing is cached.
 FALLBACK_NIFTY50 = [
@@ -41,7 +42,8 @@ def _normalise(raw: pd.DataFrame) -> pd.DataFrame:
         "company": raw.get("Company Name", raw["Symbol"]).astype(str).str.strip(),
         "industry": raw.get("Industry", pd.Series([""] * len(raw))).astype(str).str.strip(),
     })
-    return df[df["symbol"] != ""].drop_duplicates("symbol").reset_index(drop=True)
+    df = df[(df["symbol"] != "") & ~df["symbol"].str.startswith("DUMMY")]  # NSE placeholders for demergers
+    return df.drop_duplicates("symbol").reset_index(drop=True)
 
 
 def get_universe(name: str) -> tuple[pd.DataFrame, str]:
@@ -58,7 +60,7 @@ def get_universe(name: str) -> tuple[pd.DataFrame, str]:
             r = requests.get(url.format(file=file), headers=HEADERS, timeout=20)
             r.raise_for_status()
             df = _normalise(pd.read_csv(io.StringIO(r.text)))
-            if len(df) >= 40:
+            if len(df) >= 0.9 * EXPECTED_SIZE.get(name, 50):  # reject truncated lists
                 df.to_csv(cache, index=False)
                 return df, f"{name.upper()} ({len(df)} stocks, fresh from NSE)"
         except Exception:

@@ -1,10 +1,12 @@
-fyers-apiv3
-pandas
-numpy
-pyarrow
-yfinance
-streamlit
-plotly
-python-dotenv
-requests
-pyyaml
+# Exact versions this project is tested with. Upgrade deliberately, then run: python -m pytest
+fyers-apiv3==3.2.0
+numpy==2.5.4
+pandas==3.1.0
+plotly==7.1.0
+pyarrow==26.0.0
+python-dotenv==1.2.4
+PyYAML==6.0.3
+requests==2.31.0
+streamlit==1.66.1
+yfinance==1.7.0
+pytest==8.4.2
