@@ -1,0 +1,10 @@
+fyers-apiv3
+pandas
+numpy
+pyarrow
+yfinance
+streamlit
+plotly
+python-dotenv
+requests
+pyyaml

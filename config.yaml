@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+#  NSE Stock Scanner - settings. Edit and save; the next scan uses them.
+# ---------------------------------------------------------------------------
+
+# auto  = Fyers live data if you're logged in today, otherwise Yahoo (~15 min delayed)
+# fyers = same as auto (falls back to Yahoo with a warning if login expired)
+# yahoo = always use Yahoo
+data_source: auto
+
+# Which stocks to scan: nifty50 | nifty100 | nifty200 | nifty500
+universe: nifty500
+
+# Days of price history to keep (~3 years: needed for 200-DMA + 2-year backtest)
+lookback_days: 1100
+
+# Skip illiquid / penny stocks in signals and movers
+filters:
+  min_price: 50            # rupees
+  min_avg_volume: 100000   # shares per day (20-day average)
+
+# Used for suggested stop-loss/target on buy signals, and for holdings without their own values
+holdings_defaults:
+  stop_loss_pct: 5
+  target_pct: 10
+
+movers_count: 15
+
+# Backtest = test each rule on past data
+backtest:
+  years: 2
+  stop_loss_pct: 5
+  target_pct: 10
+  max_hold_days: 15        # exit after this many trading days if no stop/target hit
+  cost_pct: 0.25           # brokerage + STT + charges + slippage, round trip
+
+# Signal rules. Set enabled: false to switch one off, or change its numbers.
+rules:
+  # ---- BUY ----
+  ma50_breakout:       {enabled: true, min_vol_ratio: 2.0, require_uptrend: true}
+  high52_breakout:     {enabled: true, min_vol_ratio: 1.5}
+  rsi_bounce:          {enabled: true, level: 30, require_uptrend: false}
+  macd_bull_cross:     {enabled: true, require_uptrend: true}
+  ema_bull_cross:      {enabled: true, min_vol_ratio: 1.2}
+  # ---- SELL ----
+  ma50_breakdown:      {enabled: true, min_vol_ratio: 1.5}
+  low52_breakdown:     {enabled: true, min_vol_ratio: 1.5}
+  rsi_overbought_exit: {enabled: true, level: 70}
+  macd_bear_cross:     {enabled: true}
+  ema_bear_cross:      {enabled: true, min_vol_ratio: 1.2}
+
+telegram:
+  top_n: 10                # how many buy/sell signals to include in the message
