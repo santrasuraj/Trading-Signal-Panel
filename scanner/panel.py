@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cached_property
 
+import bottleneck as bn
 import numpy as np
 import pandas as pd
 
@@ -78,6 +79,17 @@ def _min_periods(n: int) -> int:
     return max(1, n - n // 10)
 
 
+_MOVE = {"mean": bn.move_mean, "max": bn.move_max, "min": bn.move_min, "std": bn.move_std}
+
+
+def rolling(df: pd.DataFrame, how: str, n: int, min_count: int) -> pd.DataFrame:
+    """Rolling window over every column at once (bottleneck, C speed - ~30x faster than pandas'
+    column-by-column rolling). NaNs are skipped; a value needs at least `min_count` observations."""
+    kw = {"ddof": 1} if how == "std" else {}
+    arr = _MOVE[how](df.to_numpy(dtype=float), n, min_count=min_count, axis=0, **kw)
+    return pd.DataFrame(arr, index=df.index, columns=df.columns)
+
+
 class Factors:
     """Lazily computed, cached indicators over a Panel. Access like attributes: f.sma200, f.rsi2 ..."""
 
@@ -86,7 +98,7 @@ class Factors:
 
     # ---------------------------------------------------------------- helpers
     def sma(self, n: int) -> pd.DataFrame:
-        return self.p.close.rolling(n, min_periods=_min_periods(n)).mean()
+        return rolling(self.p.close, "mean", n, _min_periods(n))
 
     def ema(self, n: int) -> pd.DataFrame:
         return self.p.close.ewm(span=n, adjust=False, min_periods=n).mean()
@@ -103,11 +115,11 @@ class Factors:
         return rsi.where(~((loss == 0) & (gain == 0)), 50.0)    # flat / suspended: neutral 50
 
     def high_n(self, n: int, include_today: bool = False) -> pd.DataFrame:
-        h = self.p.high.rolling(n, min_periods=min(n, 60)).max()
+        h = rolling(self.p.high, "max", n, min(n, 60))
         return h if include_today else h.shift(1)
 
     def low_n(self, n: int, include_today: bool = False) -> pd.DataFrame:
-        lo = self.p.low.rolling(n, min_periods=min(n, 60)).min()
+        lo = rolling(self.p.low, "min", n, min(n, 60))
         return lo if include_today else lo.shift(1)
 
     # ---------------------------------------------------------------- trend
@@ -165,12 +177,12 @@ class Factors:
     def vol_ann(self) -> pd.DataFrame:
         """Annualised volatility of daily log returns over the past year."""
         lr = np.log(self.p.close).diff()
-        return lr.rolling(TRADING_DAYS, min_periods=200).std() * np.sqrt(TRADING_DAYS)
+        return rolling(lr, "std", TRADING_DAYS, 200) * np.sqrt(TRADING_DAYS)
 
     # ---------------------------------------------------------------- volume / liquidity
     @cached_property
     def vol_avg20(self):
-        return self.p.volume.rolling(20, min_periods=15).mean().shift(1)
+        return rolling(self.p.volume, "mean", 20, 15).shift(1)
 
     @cached_property
     def vol_ratio(self):
@@ -179,7 +191,7 @@ class Factors:
     @cached_property
     def turnover_avg20_cr(self):
         """Average daily traded value over the past 20 days, in Rs crore."""
-        return (self.p.close * self.p.volume).rolling(20, min_periods=15).mean() / 1e7
+        return rolling(self.p.close * self.p.volume, "mean", 20, 15) / 1e7
 
     # ---------------------------------------------------------------- 52-week range
     @cached_property

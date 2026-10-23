@@ -103,7 +103,23 @@ def build_strategies(cfg: dict) -> list:
             use_regime=opt(k, "use_regime", True),
         ))
 
-    # 5. Old v1 rules, kept only as a comparison baseline
+    # 5. Low volatility (NSE Nifty100 Low Vol 30 methodology, approximated)
+    k = "low_vol"
+    if enabled(k):
+        big = int(opt(k, "universe_size", 150))
+        out.append(RankStrategy(
+            key=k, name="Low volatility",
+            description=("Holds the steadiest large, liquid stocks (lowest 1-year volatility), reviewed quarterly - "
+                         "the method behind NSE's Nifty100 Low Vol 30 index. Historically lost much less in crashes "
+                         "(2008: -43% vs -54%), so it balances the more aggressive momentum strategy."),
+            score=lambda f: -f.vol_ann,
+            eligible=lambda f: (f.turnover_avg20_cr.rank(axis=1, ascending=False) <= big) & f.vol_ann.notna(),
+            top_n=int(opt(k, "top_n", 20)), keep_rank=int(opt(k, "keep_rank", 40)),
+            rebalance=opt(k, "rebalance", "quarterly"), use_regime=opt(k, "use_regime", False),
+            regime_action=opt(k, "regime_action", "hold"), stop_pct=opt(k, "stop_pct", None),
+        ))
+
+    # 6. Old v1 rules, kept only as a comparison baseline
     k = "legacy_rules"
     if enabled(k, default=True):
         out.append(EventStrategy(

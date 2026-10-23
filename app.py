@@ -195,23 +195,30 @@ with tabs[0]:
         full, y1, m6 = s["metrics"]["full"], s["metrics"].get("12m", {}), s["metrics"].get("6m", {})
         rows.append({
             "name": s["name"], "status": STATUS.get(s["status"], (s["status"],))[0],
-            "cagr": full.get("cagr_pct"), "dd": full.get("max_dd_pct"), "sharpe": full.get("sharpe"),
+            "cagr": full.get("cagr_pct"), "at": full.get("after_tax_cagr_pct"),
+            "dd": full.get("max_dd_pct"), "sharpe": full.get("sharpe"),
             "y1": y1.get("return_pct"), "y1n": (y1.get("benchmark") or {}).get("return_pct"),
             "m6": m6.get("return_pct"), "win": full.get("win_rate"), "trades": full.get("trades"),
         })
-    table(rows, {"name": "Strategy", "status": "Status", "cagr": "Yearly return %", "dd": "Worst drop %",
+    table(rows, {"name": "Strategy", "status": "Status", "cagr": "Yearly return %", "at": "After tax %",
+                 "dd": "Worst drop %",
                  "sharpe": "Sharpe", "y1": "Last 12m %", "y1n": "Nifty 12m %", "m6": "Last 6m %",
                  "win": "Win rate %", "trades": "Trades"},
-          signed=("cagr", "y1", "y1n", "m6", "dd"),
-          fmt={"cagr": "{:+.1f}", "dd": "{:.1f}", "sharpe": "{:.2f}", "y1": "{:+.1f}", "y1n": "{:+.1f}",
+          signed=("cagr", "at", "y1", "y1n", "m6", "dd"),
+          fmt={"cagr": "{:+.1f}", "at": "{:+.1f}", "dd": "{:.1f}", "sharpe": "{:.2f}", "y1": "{:+.1f}", "y1n": "{:+.1f}",
                "m6": "{:+.1f}", "win": "{:.0f}", "trades": "{:.0f}"})
     full0 = strats[0]["metrics"]["full"]
     bench = full0.get("benchmark", {})
     ew = full0.get("ew_benchmark", {})
     st.caption(f"Same period ({full0['start']} → {full0['end']}): Nifty 50 {pct(bench.get('cagr_pct'))}/yr "
-               f"(worst drop {pct(bench.get('max_dd_pct'), signed=False)}); average stock in this universe "
-               f"{pct(ew.get('cagr_pct'))}/yr. ⚠️ The universe is *today's* index list, which flatters every strategy "
-               "(companies that collapsed are missing). Judge strategies by how much they beat the **average stock**.")
+               f"({pct(bench.get('after_tax_cagr_pct'))} after tax, worst drop {pct(bench.get('max_dd_pct'), signed=False)}); "
+               f"average stock in this universe {pct(ew.get('cagr_pct'))}/yr. *After tax* = short-term gains taxed at "
+               "20.8% every April, long-term at 13% above ₹1.25 lakh (buy & hold pays once, at the end).")
+    st.warning("**Reality check:** these tests use *today's* Nifty 500 list, so companies that collapsed or were "
+               "dropped are missing - every number above is flattered. NSE's own momentum indices (no such bias) "
+               "made about 19-22% a year since 2005 vs 15-16% for their parent index, beat it in 15 of 20 years, "
+               "and fell harder in crashes (-68% in 2008). Expect an edge of a few % a year, not 40%. "
+               "Judge strategies by how much they beat the **average stock** line.")
 
     curves = cached_curves(file_mtime(CURVES_FILE))
     if curves is not None and not curves.empty:

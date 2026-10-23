@@ -1,159 +1,150 @@
-# NSE Stock Scanner: plan and user guide
+# NSE Scanner v2: user guide and plan
 
-A personal tool that scans NSE stocks every day and shows:
+A personal, evidence-based tool for the Indian stock market. Every day it:
 
-- **Buy signals**: stocks matching your buy rules, with the reason for each
-- **Sell signals**: stocks showing weakness
-- **My holdings**: alerts when your stop-loss or target is hit, or a sell signal fires on a stock you own
-- **Today's movers**: top gainers, top losers, volume spikes
-- **Market mood**: Nifty trend, India VIX, how many stocks are rising
-- **Backtest**: how often each rule actually worked over the last 2 years
-- **Charts**: candlesticks with moving averages, RSI and past signal markers
+1. **Updates prices** for about 500 Nifty 500 stocks, using 8 years of history, NSE's official end-of-day files, and Fyers real-time prices.
+2. **Re-tests every strategy** on that 8-year history. Each test buys at the next day's open and pays full Indian charges and tax.
+3. **Shows which strategies are working now**, meaning which beat Nifty and the average stock over the last 12 and 6 months.
+4. **Lists the orders** each strategy would place at the next open, sized for your capital, with stop-losses.
+5. **Checks your own holdings**: stop-loss, target, trend, momentum rank, and splits/bonuses since you bought.
 
-> ⚠️ **These are rule-based signals, not investment advice.** No system knows tomorrow's prices.
-> The goal is to replace tips and guesswork with clear rules that have been tested on past data.
-> You make the final decision. Sharing these signals as recommendations with other people
-> requires SEBI Research Analyst registration.
+> ⚠️ **Rule-based signals tested on history - not investment advice.** No system knows tomorrow's
+> prices. Past results don't guarantee future returns. You decide; always use a stop-loss.
+> Sharing these signals as recommendations with others requires SEBI Research Analyst registration.
 
 ---
 
-## 1. Daily routine (after setup)
+## 1. Daily use
 
-| Time (IST) | What to do |
+| When (IST) | What to do |
 |---|---|
-| Before 9:15 AM | Double-click **`1_login.bat`** and log in to Fyers. Fyers tokens expire every morning. |
-| Any time | Double-click **`3_dashboard.bat`**, then click **🔄 Run scan now** |
-| 9:45 AM / 3:05 PM | Automatic Telegram summaries arrive (if you set up step 5) |
-| After 3:30 PM | Best time to scan. Daily candles are complete, so signals are final. |
+| After 9:15 AM, once a day | **🔑 Log in to Fyers.** Click the button in the dashboard, or double-click `1_login.bat`. SEBI rules require a daily login since April 2026. |
+| Any time | Double-click **`3_dashboard.bat`**, then click **🔄 Run scan now**. A scan takes about 15–20 seconds. |
+| 3:40 PM / 7:15 PM | Automatic Telegram summaries, if you set them up (section 5). |
+| **After about 7 PM** | **Best time to decide.** NSE's official end-of-day data is published, so signals are final. |
 
-**Signals during market hours can change before 3:30 PM.** A breakout at 11 AM may fail by the
-close. Swing traders usually act on the scan from around 3:00 PM or after the close.
+Orders marked *provisional* are based on a candle that is still forming during market hours. They can change before 3:30 PM.
 
----
+### Fyers login, step by step
+1. Click **🔑 Log in to Fyers**. A small window opens, and so does the Fyers login page.
+2. Log in with your Fyers ID, PIN and TOTP.
+3. Your app's redirect address is `127.0.0.1:8000`, which your Docker setup is also using. So after login the browser may show an error page. **That's fine.** Copy the **full address** from the browser's address bar (it contains `auth_code=`), paste it into the small window, and press Enter.
+4. You'll see "✅ Logged in". Refresh the dashboard.
 
-## 2. One-time setup
-
-Python, the libraries and the project folders are **already installed** on this PC.
-
-### Step 1: Create a Fyers API app (5 minutes)
-1. Go to **https://myapi.fyers.in/dashboard** and log in with your Fyers account.
-2. Click **Create App**:
-   - App name: anything, e.g. `My Scanner`
-   - **Redirect URL:** `http://127.0.0.1:8765/fyers/callback` (copy it exactly)
-   - Permissions: tick everything related to **data / quotes / history / profile**. Order placement is not needed.
-3. After creating it, note the **App ID** (looks like `ABCD1234EF-100`) and the **Secret ID**.
-
-### Step 2: Put your keys in `.env`
-Open the file **`.env`** in this folder with Notepad and fill in:
-```
-FYERS_CLIENT_ID=ABCD1234EF-100
-FYERS_SECRET_KEY=your-secret-id
-FYERS_REDIRECT_URI=http://127.0.0.1:8765/fyers/callback
-```
-Never share this file with anyone.
-
-### Step 3: Log in
-Double-click **`1_login.bat`**. A browser opens the Fyers login page. Log in with your client ID,
-PIN and TOTP, and the window shows "✅ Logged in".
-
-### Step 4: First scan
-Double-click **`3_dashboard.bat`**, then click **🔄 Run scan now**. The first scan downloads about 3 years of
-prices for about 500 stocks, which takes **about 10 minutes with Fyers** because of its API limit of 200 requests a minute.
-After that, scans take seconds. Then click **🧪 Run backtest** once.
-
-### Step 5 (optional): Telegram alerts on your phone
-1. In Telegram, message **@BotFather**, send `/newbot`, and copy the **bot token**.
-2. Send any message to your new bot, then message **@userinfobot** to get your **chat ID**.
-3. Put both in `.env` (`TELEGRAM_BOT_TOKEN=...`, `TELEGRAM_CHAT_ID=...`).
-4. Test it: run `2_scan.bat --telegram` from a terminal, or `python run_scan.py --telegram`.
-5. For automatic messages every weekday at 9:45 and 15:05: right-click **`setup_schedule.ps1`**, then **Run with PowerShell**.
-
-**If you forget to log in:** everything still works with **Yahoo Finance data, delayed about 15 minutes**.
-The dashboard and the Telegram message tell you when this happens.
+*To make login fully automatic:* in the [Fyers API dashboard](https://myapi.fyers.in/dashboard), change your app's Redirect URL to `http://127.0.0.1:8765/fyers/callback`. Then put the same address in `.env` as `FYERS_REDIRECT_URI`.
 
 ---
 
-## 3. The rules (what each signal means)
+## 2. The strategies (and the evidence)
 
-| Signal | Side | Meaning |
+| Strategy | What it does | Evidence |
 |---|---|---|
-| 50-DMA breakout | BUY | Price crossed above its 50-day average on 2× or more normal volume, while in a long-term uptrend (above the 200-DMA) |
-| 52-week high breakout | BUY | Closed at a new 1-year high on 1.5× or more volume |
-| RSI oversold bounce | BUY | RSI climbed back above 30, so heavy selling may be ending |
-| MACD bullish crossover | BUY | MACD crossed above its signal line, in a long-term uptrend |
-| EMA 9/21 bullish crossover | BUY | Short-term trend turned up, price above the 50-DMA, volume above normal |
-| 50-DMA breakdown | SELL | Fell below the 50-day average on 1.5× or more volume |
-| 52-week low breakdown | SELL | New 1-year low on 1.5× or more volume |
-| RSI overbought reversal | SELL | RSI fell back below 70, so the rally may be fading |
-| MACD bearish crossover | SELL | MACD crossed below its signal line, price below the 50-DMA |
-| EMA 9/21 bearish crossover | SELL | Short-term trend turned down on above-normal volume |
+| **Momentum leaders** | Holds the 15 strongest stocks by risk-adjusted 6- and 12-month return (NSE's momentum-index formula), reviewed monthly. A holding is kept while it stays in the top 30. Only stocks above their 200-day average. No new buys when Nifty is below its 200-day average. | The best-documented stock-selection effect, in India and globally. NSE Nifty200 Momentum 30: about 19% CAGR vs 15% for Nifty 200 since 2005. Beat it in 15 of 20 years, but fell harder in crashes. |
+| **Trend-template breakout** | Buys a stock in a strong uptrend (above rising 50/150/200-day averages, near its high, top relative strength) when it breaks its 20-day high on heavy volume. 8% stop, 15% trailing stop, exit below the 50-day average. | A practitioner method (Minervini). Works in bull phases. In our tests it roughly matched the average stock. |
+| **Near 52-week high** | Holds uptrending stocks closest to their 52-week high, reviewed monthly. | Academic (George & Hwang; Indian study by Raju 2023). Works best as a filter, not on its own. |
+| **Low volatility** | Holds the 20 steadiest large, liquid stocks, reviewed quarterly (Nifty100 Low Vol 30 method). | Lost less in crashes (2008: −43% vs −54%). Defensive; lags in strong rallies. |
+| RSI-2 pullback | Buys sharp dips in uptrending stocks. | Short-term reversal mostly works in illiquid stocks. After realistic costs it fails here. |
+| Old textbook rules | The v1 rules (50-DMA / 52-week breakouts, 5% stop / 10% target). | **Lost money** in testing (−12%/year). Kept only for comparison. |
 
-**Tuning:** open `config.yaml` to change any number, switch a rule off (`enabled: false`), change the
-stock universe (`nifty50` / `nifty100` / `nifty200` / `nifty500`), the price and volume filters, or the stop-loss and target %.
-
-### How to read a signal
-- **Signals** (count): more rules agreeing means a stronger setup. The list is sorted by this.
-- **Volume ×**: today's volume compared with the 20-day average. Moves on high volume are more meaningful.
-- **Past win %**: from the backtest, how often this rule's trades made money over the last 2 years.
-- **Stop-loss / Target**: from your % settings. **Always decide your stop-loss before buying.**
+### Honest expectations
+- The tests use **today's** Nifty 500 list. Companies that collapsed or were dropped are missing, so **every result is flattered.** Even the "average stock" line shows 27%/year.
+- **Judge a strategy by how much it beats the average stock**, not Nifty.
+- NSE's own momentum indices, which don't have this bias, beat their parent index by **about 3–6% a year** over 20 years. That is a realistic edge. 40% a year is not.
+- **Momentum crashes happen.** Expect 30–40% drops (−68% in 2008) and 1–2 years of lagging. NSE's Nifty200 Momentum 30 returned −0.5% in the 12 months to Sep 2026.
+- **Tax:** momentum sells within a year, so gains are taxed at 20.8% every April. The dashboard shows after-tax returns. Frequent trading can also be treated as business income; ask a CA.
 
 ---
 
-## 4. The backtest (the most important part)
+## 3. One-time setup (already done on this PC)
 
-Before trusting a rule, check the **🧪 Backtest** tab:
+- Python, all libraries (pinned versions), and 8 years of cleaned price data are installed in this folder.
+- Your Fyers App ID, Secret and Redirect URL are saved in **`.env`**. That file is private: never share it or upload it anywhere.
+- **Your capital:** edit `account: capital:` in `config.yaml`. Order quantities are sized from it.
 
-- **BUY rules:** the test buys at the next day's open and exits at −5% stop, +10% target, or after 15 days.
-  It subtracts 0.25% for brokerage, STT and slippage.
-- **SELL rules:** the test measures how often the stock fell over the next 15 days.
-- **Baseline:** the result of buying *every* stock on *every* day. A rule is only useful if it **beats the baseline**.
-- **Verdict:** *Worked better than random* / *No real edge* / *Worse than random* / *Not enough data*
-
-**The first test on Nifty 50 stocks (Oct 2026) found that most textbook rules had no real edge over
-the last 2 years.** That's normal: popular rules are popular because they're simple, not because they work.
-Use the backtest to switch off rules that don't work, adjust parameters, and re-test.
-Never trust a rule with fewer than about 30 past signals.
+On a new PC: install Python 3.12, then double-click `setup.bat`, fill in `.env`, then run `3_dashboard.bat`. The first scan downloads and repairs 8 years of data, which takes about 4 minutes.
 
 ---
 
-## 5. Honest limits
+## 4. Where the data comes from (and how it's kept clean)
 
-- **Nobody can predict tomorrow.** Even a good rule loses on many trades. It makes money only over
-  many trades, **with stop-losses**, and with position sizes that never risk more than 1–2% of your capital on one trade.
-- **Market mood matters.** When the dashboard says *Bearish*, most buy signals fail. Consider waiting.
-- **Built for swing trading** (holding days to weeks) using daily candles. It is **not** built for intraday scalping.
-- **Splits and bonus issues:** after a stock does a split or bonus, delete its file in
-  `data/history/<source>/` so the next scan re-downloads clean history.
-- **Not covered:** news, quarterly results dates, and company fundamentals. Check these yourself before buying.
-  A stock can break out on day 1 and crash on its results on day 3.
-
----
-
-## 6. Roadmap (next phases)
-
-| Phase | Feature | Status |
-|---|---|---|
-| 1 | Daily scan, signals, movers, holdings alerts, dashboard | ✅ Done |
-| 2 | Backtesting of every rule | ✅ Done |
-| 3 | Telegram alerts and Windows scheduling | ✅ Done |
-| 4 | Results/earnings calendar and corporate actions (avoid buying just before results) | Next |
-| 5 | Sector strength: which sectors are leading or lagging | Next |
-| 6 | Intraday mode (15-minute candles, live Fyers WebSocket) if you trade intraday | Later |
-| 7 | Paper-trading log: record what you'd have done and track real performance | Later |
-| 8 | Auto-sync holdings from your Fyers account | Later |
-
----
-
-## 7. Files
-
-| File | Purpose |
+| Data | Source |
 |---|---|
-| `1_login.bat` | Daily Fyers login |
-| `2_scan.bat` | Run a scan in a terminal window (`--telegram`, `--backtest`, `--source yahoo`) |
-| `3_dashboard.bat` | Open the web dashboard |
-| `config.yaml` | All settings and rule parameters |
-| `holdings.csv` | Your holdings (also editable in the dashboard) |
-| `.env` | Your Fyers and Telegram keys (private) |
-| `setup_schedule.ps1` | Create the 9:45 / 15:05 weekday auto-scans |
-| `scanner/` | The code: data download, indicators, rules, scan, backtest, alerts |
-| `data/` | Downloaded prices, scan results, login token (safe to delete; it will re-download) |
+| 8 years of daily history | Yahoo Finance, bulk download |
+| Every completed trading day | **NSE official end-of-day files** (official OHLC, volume, delivery %) |
+| Splits, bonuses, demergers | **NSE corporate-action notices**. History is rescaled by the exact factor (e.g. BONUS 1:1 → ×0.5; demerger → special-session price). |
+| Symbol renames | NSE symbol-change list (e.g. TATAMOTORS → TMPV) |
+| Today's live prices | Fyers quotes (real-time) when logged in; otherwise Yahoo (~15 minutes delayed) |
+| Holidays | Detected from NSE's own files, including Diwali Muhurat and Budget-day sessions |
+
+The first build repaired Yahoo's history automatically:
+- removed 1,290 fake "flat" bars;
+- filled missing days from NSE;
+- fixed 125 split, bonus and demerger errors (VEDL, TMPV, HEGAM, TRENT and others);
+- kept genuine crashes untouched (YES Bank 2020, POLICYBZR 2026).
+
+If NSE is unreachable for more than a day, Yahoo fills in temporarily. Those days are replaced with official data as soon as it is available.
+
+---
+
+## 5. Telegram alerts and automatic scans (optional)
+
+1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token. Then send any message to your new bot, and message **@userinfobot** to get your chat ID.
+2. Put both in `.env` (`TELEGRAM_BOT_TOKEN=...`, `TELEGRAM_CHAT_ID=...`).
+3. Right-click **`setup_schedule.ps1`** and choose **Run with PowerShell**. This sets up weekday scans at 3:40 PM and 7:15 PM that send a summary to your phone.
+
+If a scan fails, you get a Telegram alert. Details go to `data\logs\scanner.log`.
+
+---
+
+## 6. Your holdings
+
+In the dashboard, open **💼 My holdings**:
+- add stocks by hand (symbol, quantity, buy price, **buy date**), or click **⬇️ Import my holdings from Fyers**;
+- the **buy date** lets the app adjust your buy price if the stock had a split or bonus since you bought, so no false "stop-loss hit" alerts;
+- alerts include: stop-loss hit, target reached, below the 50/200-day average, momentum rank, and renamed symbols.
+
+`holdings.csv` stays on your PC. It is excluded from git.
+
+---
+
+## 7. Settings (`config.yaml`)
+
+- `account`: capital, minimum position size
+- `universe`: nifty50 / nifty100 / nifty200 / nifty500
+- `filters`: minimum price, minimum daily traded value
+- `costs`: brokerage, STT, stamp duty, GST, DP charge, slippage (FYERS Standard plan rates, Oct 2026)
+- `tax`: STCG 20.8%, LTCG 13% above ₹1.25 lakh
+- `strategies`: switch any strategy on or off, or change its settings. The next scan re-tests automatically.
+
+---
+
+## 8. For developers
+
+```
+scanner/
+  store.py       price store (atomic generations, NSE completion, history repair, live overlay)
+  nse.py         NSE end-of-day files (stocks + indices), validated and cached
+  corporate.py   NSE corporate-action notices, purpose parsing, symbol renames
+  providers.py   Yahoo (history) and Fyers (live quotes; plan-aware throttle, timeouts, auth errors)
+  panel.py       whole-market vectorized factors (bottleneck): momentum, RS, 52w, ATR, regime
+  engine.py      portfolio simulator: next-open fills, stops, ranking/rebalance, costs, tax, metrics
+  strategies.py  strategy definitions (parameters from config.yaml)
+  daily.py       one scan = refresh + re-test + today's orders + holdings check -> latest.json
+  holdings.py    holdings file, corporate-action-adjusted buy price
+  lock.py        one scan at a time across processes
+app.py           Streamlit dashboard (scans run in a background process)
+run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
+login.py         daily Fyers OAuth login
+tests/           pytest suite: costs, tax, corporate actions, factors (no look-ahead), engine
+```
+
+Run the tests with `.venv\Scripts\python.exe -m pytest -q`.
+
+### Roadmap
+| Next | Why |
+|---|---|
+| Results calendar: flag stocks with results in the next 7 days | Avoid buying just before a results surprise |
+| Survivorship-free universe: point-in-time top 500 by turnover from NSE's full archive | Honest backtests |
+| Paper-trading journal that records every signal and tracks real outcomes | Live proof, not just backtests |
+| Sector strength from NSE sector indices | Avoid weak sectors |
+| Momentum + low-volatility combined portfolio | Smoother returns |

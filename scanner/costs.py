@@ -1,7 +1,7 @@
 """Indian equity-delivery trading costs (per order), used by the backtest engine.
 
-All percentages are in percent of traded value. Defaults reflect NSE delivery charges in 2025-26;
-override any of them under `costs:` in config.yaml if your broker's rates differ.
+All percentages are in percent of traded value. Defaults are NSE delivery charges and FYERS
+(Standard plan) rates as of Oct 2026; override any of them under `costs:` in config.yaml.
 """
 from __future__ import annotations
 
@@ -13,12 +13,14 @@ class CostModel:
     brokerage_pct: float = 0.3        # broker fee as % of order value ...
     brokerage_max: float = 20.0       # ... capped at this many rupees per order
     stt_pct: float = 0.1              # Securities Transaction Tax, delivery: buy and sell
-    exchange_pct: float = 0.00297     # NSE transaction charge
+    exchange_pct: float = 0.00307     # NSE transaction charge incl. IPFT (Rs 307/crore from Mar-2026)
     sebi_pct: float = 0.0001          # SEBI turnover fee (Rs 10 per crore)
     stamp_buy_pct: float = 0.015      # stamp duty, buy side only
     gst_pct: float = 18.0             # GST on brokerage + exchange + SEBI fees
-    dp_per_sell: float = 15.34        # depository charge per scrip per sell day (incl. GST)
-    slippage_pct: float = 0.10        # assumed execution slippage per side
+    dp_per_sell: float = 14.75        # FYERS depository charge per scrip per sell day (Rs 12.5 + GST)
+    slippage_pct: float = 0.10        # assumed execution slippage per side, liquid stocks
+    slippage_illiquid_pct: float = 0.20   # ... and for stocks trading under `illiquid_below_cr`
+    illiquid_below_cr: float = 25.0       # average daily traded value, Rs crore
 
     @classmethod
     def from_config(cls, cfg: dict | None) -> "CostModel":
@@ -46,3 +48,18 @@ class CostModel:
         """Total round-trip cost incl. slippage as % of `value` (for display)."""
         rupees = self.buy_cost(value) + self.sell_cost(value) + 2 * value * self.slippage_pct / 100
         return rupees / value * 100
+
+
+@dataclass(frozen=True)
+class TaxModel:
+    """Indian capital-gains tax on listed shares (STT paid), FY Apr-Mar, rates incl. 4% cess.
+    Short term (held <= 12 months) 20% + cess; long term 12.5% + cess above Rs 1.25 lakh a year."""
+    stcg_pct: float = 20.8
+    ltcg_pct: float = 13.0
+    ltcg_exempt: float = 125000.0
+
+    @classmethod
+    def from_config(cls, cfg: dict | None) -> "TaxModel":
+        cfg = cfg or {}
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: float(v) for k, v in cfg.items() if k in known})

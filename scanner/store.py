@@ -53,8 +53,12 @@ class PanelStore:
         return sorted((p for p in STORE_DIR.glob("gen_*") if p.is_dir()), reverse=True)
 
     def _read(self, folder) -> dict[str, pd.DataFrame]:
+        if (folder / "dates.npy").exists():   # fast format: raw arrays sharing one date/symbol axis
+            dates = pd.DatetimeIndex(np.load(folder / "dates.npy").astype("datetime64[ns]"), name="date")
+            cols = pd.Index(json.loads((folder / "symbols.json").read_text(encoding="utf-8")))
+            return {f: pd.DataFrame(np.load(folder / f"{f}.npy"), index=dates, columns=cols) for f in FIELDS}
         frames = {}
-        for f in FIELDS:
+        for f in FIELDS:                     # older parquet generations
             p = folder / f"{f}.parquet"
             frames[f] = pd.read_parquet(p) if p.exists() else pd.DataFrame(index=pd.DatetimeIndex([], name="date"))
         return frames
@@ -68,7 +72,7 @@ class PanelStore:
         candidates.append(STORE_DIR)  # legacy layout (files directly in the store folder)
         for folder in candidates:
             try:
-                if (folder / "close.parquet").exists():
+                if (folder / "dates.npy").exists() or (folder / "close.parquet").exists():
                     return self._read(folder)
             except Exception:
                 continue  # damaged generation: fall back to the previous one
@@ -78,8 +82,14 @@ class PanelStore:
         name = f"gen_{ist_now():%Y%m%d_%H%M%S}_{os.getpid()}"
         folder = STORE_DIR / name
         folder.mkdir(parents=True, exist_ok=True)
+        dates = frames["close"].index
+        cols = frames["close"].columns
         for f in FIELDS:
-            frames[f].to_parquet(folder / f"{f}.parquet")
+            dates, cols = dates.union(frames[f].index), cols.union(frames[f].columns)
+        np.save(folder / "dates.npy", dates.values.astype("datetime64[ns]").astype("int64"))
+        (folder / "symbols.json").write_text(json.dumps(list(cols)), encoding="utf-8")
+        for f in FIELDS:
+            np.save(folder / f"{f}.npy", frames[f].reindex(index=dates, columns=cols).to_numpy(dtype=float))
         tmp = STORE_DIR / f"CURRENT.{os.getpid()}.tmp"
         tmp.write_text(name, encoding="utf-8")
         _replace(tmp, STORE_DIR / "CURRENT")

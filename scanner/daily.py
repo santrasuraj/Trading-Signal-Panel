@@ -13,7 +13,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
-from .costs import CostModel
+from .costs import CostModel, TaxModel
 from .engine import EventStrategy, evaluate, equal_weight_index, simulate, working_status
 from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
@@ -121,8 +121,10 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     trad = tradable_mask(f, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)))
     ew = equal_weight_index(f, trad)
     costs = CostModel.from_config(cfg.get("costs"))
+    tax = TaxModel.from_config(cfg.get("tax"))
     acct = cfg.get("account") or {}
     capital = float(acct.get("capital", 500000))
+    min_position = float(acct.get("min_position", 0))
 
     last = p.dates[-1]
     observed_last = p.observed.iloc[-1]
@@ -131,8 +133,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
 
     strat_out, curves = [], {}
     for s in build_strategies(cfg):
-        res = simulate(s, f, costs, trad)
-        m = evaluate(res, p.index_close, ew)
+        res = simulate(s, f, costs, trad, capital=capital, min_position=min_position)
+        m = evaluate(res, p.index_close, ew, tax=tax)
         status, why = working_status(m)
         eq = res.equity.dropna()
         curves[s.key] = eq / eq.iloc[0]

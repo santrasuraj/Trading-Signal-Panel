@@ -172,13 +172,18 @@ def test_engine_fills_next_open_and_hits_stop(frames_factory):
     sig = pd.DataFrame(False, index=p.dates, columns=["A"])
     sig.iloc[261] = True                             # signal at close of day 261
     strat = EventStrategy("t", "t", "", entries=lambda _: sig, stop_pct=8, max_positions=1, use_regime=False)
-    costs = CostModel(slippage_pct=0.1)
-    res = simulate(strat, f, costs, tradable=pd.DataFrame(True, index=p.dates, columns=["A"]), capital=100_000, warmup=252)
+    costs = CostModel(slippage_pct=0.1, illiquid_below_cr=0)     # treat the test stock as liquid
+    trad = pd.DataFrame(True, index=p.dates, columns=["A"])
+    res = simulate(strat, f, costs, tradable=trad, capital=100_000, warmup=252)
     t = res.trades[0]
     assert t.entry_date == p.dates[262] and t.entry_price == pytest.approx(101 * 1.001)
     assert t.reason == "stop-loss" and t.exit_date == p.dates[263]
     assert t.exit_price == pytest.approx(80 * 0.999)             # gapped below the stop: filled at the open
     assert t.pnl < 0 and t.ret_pct < -20
+    # The same stock as an illiquid one (~Rs 10 crore/day < 25) pays the higher slippage.
+    t2 = simulate(strat, f, CostModel(slippage_pct=0.1, slippage_illiquid_pct=0.3), tradable=trad,
+                  capital=100_000, warmup=252).trades[0]
+    assert t2.entry_price == pytest.approx(101 * 1.003)
 
 
 def test_rank_strategy_holds_top_n_and_respects_regime(frames_factory):
@@ -209,3 +214,43 @@ def test_scan_lock_blocks_second_scan():
                 pass
     with scan_lock("again"):   # released afterwards
         pass
+
+
+# ------------------------------------------------------------------ tax
+def _result_with(trades, equity):
+    from scanner.engine import SimResult
+    return SimResult("x", equity, equity * 0 + 1, trades, [], [], 0)
+
+
+def test_after_tax_short_term_gain_taxed_next_april():
+    from scanner.costs import TaxModel
+    from scanner.engine import Trade, after_tax_equity
+    idx = pd.bdate_range("2024-01-01", "2025-06-30")
+    eq = pd.Series(np.linspace(100_000, 150_000, len(idx)), index=idx)
+    t = Trade("A", pd.Timestamp("2024-05-01"), 100, pd.Timestamp("2024-09-01"), 120, 1000, 20_000, 20, 85, "x")
+    out = after_tax_equity(_result_with([t], eq), TaxModel())
+    assert out.loc[:"2025-03-31"].equals(eq.loc[:"2025-03-31"])           # nothing paid during FY24-25
+    pay = out.index[out.index >= "2025-04-01"][0]
+    assert out.loc[pay] == pytest.approx(eq.loc[pay] - 20_000 * 0.208)     # 20.8% of the gain, next April
+
+
+def test_after_tax_losses_offset_and_ltcg_exemption():
+    from scanner.costs import TaxModel
+    from scanner.engine import Trade, after_tax_equity
+    idx = pd.bdate_range("2023-01-02", "2025-06-30")
+    eq = pd.Series(1_000_000.0, index=idx)
+    trades = [
+        Trade("A", pd.Timestamp("2023-05-01"), 1, pd.Timestamp("2023-08-01"), 1, 1, -30_000, -3, 60, "x"),  # ST loss
+        Trade("B", pd.Timestamp("2023-05-01"), 1, pd.Timestamp("2023-09-01"), 1, 1, 50_000, 5, 80, "x"),   # ST gain
+        Trade("C", pd.Timestamp("2022-01-01"), 1, pd.Timestamp("2023-10-01"), 1, 1, 100_000, 10, 400, "x"),  # LT gain
+    ]
+    out = after_tax_equity(_result_with(trades, eq), TaxModel())
+    # ST net 20k -> 4,160 tax; LT 100k is under the 1.25L exemption -> 0
+    assert out.iloc[-1] == pytest.approx(1_000_000 - 20_000 * 0.208)
+
+
+def test_quarterly_and_semiannual_rebalance():
+    d = pd.bdate_range("2025-01-01", "2025-12-31")
+    q = [x.date().isoformat() for x in d[rebalance_days(d, "quarterly")]]
+    h = [x.date().isoformat() for x in d[rebalance_days(d, "semiannual")]]
+    assert q == ["2025-03-31", "2025-06-30", "2025-09-30"] and h == ["2025-06-30"]

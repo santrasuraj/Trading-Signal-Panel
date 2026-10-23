@@ -10,3 +10,4 @@ requests==2.31.0
 streamlit==1.66.1
 yfinance==1.7.0
 pytest==8.4.2
+bottleneck==1.6.0

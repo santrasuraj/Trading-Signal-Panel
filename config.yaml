@@ -5,6 +5,7 @@
 # Your account - used to size positions (how many shares to buy).
 account:
   capital: 500000            # rupees you plan to invest with these strategies
+  min_position: 15000        # skip buys smaller than this (fixed Rs 20 + Rs 14.75 charges hurt tiny orders)
 
 # auto  = Fyers real-time live prices when logged in, otherwise Yahoo (~15 min delayed)
 # yahoo = never use Fyers
@@ -29,17 +30,25 @@ holdings_defaults:
 
 movers_count: 15
 
-# Trading charges per order (NSE equity delivery, 2025-26). Adjust if your broker differs.
+# Trading charges per order: NSE equity delivery + FYERS Standard plan, Oct 2026.
 costs:
   brokerage_pct: 0.3         # % of order value ...
-  brokerage_max: 20          # ... capped at Rs 20 per order
+  brokerage_max: 20          # ... capped at Rs 20 per order (FYERS Prime: 15)
   stt_pct: 0.1               # buy + sell
-  exchange_pct: 0.00297
+  exchange_pct: 0.00307      # NSE Rs 307/crore incl. IPFT
   sebi_pct: 0.0001
   stamp_buy_pct: 0.015
   gst_pct: 18
-  dp_per_sell: 15.34         # depository charge per stock per sell day
-  slippage_pct: 0.10         # assumed price slippage per side
+  dp_per_sell: 14.75         # FYERS DP charge per stock per sell day (Rs 12.5 + GST)
+  slippage_pct: 0.10         # assumed price slippage per side, liquid stocks
+  slippage_illiquid_pct: 0.20
+  illiquid_below_cr: 25      # stocks trading under Rs 25 crore/day get the higher slippage
+
+# Capital-gains tax used for the "after tax" returns (individual, listed shares, incl. 4% cess).
+tax:
+  stcg_pct: 20.8             # held <= 12 months
+  ltcg_pct: 13.0             # held > 12 months ...
+  ltcg_exempt: 125000        # ... above Rs 1.25 lakh per financial year
 
 # Strategies. Each is re-tested on 8 years of data after every scan.
 # Set enabled: false to hide one, or change its numbers (the backtest updates automatically).
@@ -70,6 +79,13 @@ strategies:
     stop_pct: 10
     max_hold: 10
     max_positions: 10
+  low_vol:
+    enabled: true
+    universe_size: 150       # the 150 most traded stocks (stand-in for "large caps")
+    top_n: 20                # hold the 20 steadiest
+    keep_rank: 40
+    rebalance: quarterly
+    use_regime: false        # defensive by design: stays invested
   legacy_rules:
     enabled: true            # the old v1 rules, kept only as a comparison
 

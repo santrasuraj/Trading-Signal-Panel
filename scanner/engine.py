@@ -19,7 +19,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from .costs import CostModel
+from .costs import CostModel, TaxModel
 from .panel import TRADING_DAYS, Factors
 
 Frame = Callable[[Factors], pd.DataFrame]
@@ -54,7 +54,7 @@ class RankStrategy:
     eligible: Frame | None = None        # bool filter applied before ranking
     top_n: int = 20
     keep_rank: int | None = 40           # existing holdings are kept while ranked within this
-    rebalance: str = "monthly"           # "monthly" | "weekly" | "biweekly"
+    rebalance: str = "monthly"           # weekly | biweekly | monthly | quarterly | semiannual
     use_regime: bool = True
     regime_action: str = "hold"          # Nifty below 200-DMA: "hold" (no new buys) or "cash" (sell all)
     stop_pct: float | None = None        # optional per-position stop between rebalances
@@ -93,44 +93,55 @@ class SimResult:
 def rebalance_days(dates: pd.DatetimeIndex, how: str) -> np.ndarray:
     """True on the last trading day of each period (decide at close, trade next open).
     The final row is never a rebalance day because the period may not be over yet."""
+    year = dates.year.to_numpy() * 100
     if how == "weekly":
-        key = dates.isocalendar().week.to_numpy() + dates.year.to_numpy() * 100
+        key = dates.isocalendar().week.to_numpy() + year
     elif how == "biweekly":
-        key = (dates.isocalendar().week.to_numpy() // 2) + dates.year.to_numpy() * 100
+        key = (dates.isocalendar().week.to_numpy() // 2) + year
+    elif how == "quarterly":
+        key = (dates.month.to_numpy() - 1) // 3 + year
+    elif how == "semiannual":
+        key = (dates.month.to_numpy() - 1) // 6 + year
     else:
-        key = dates.month.to_numpy() + dates.year.to_numpy() * 100
+        key = dates.month.to_numpy() + year
     out = np.zeros(len(dates), dtype=bool)
     out[:-1] = key[:-1] != key[1:]
     return out
 
 
 def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostModel,
-             tradable: pd.DataFrame, capital: float = 1_000_000.0, warmup: int = TRADING_DAYS) -> SimResult:
+             tradable: pd.DataFrame, capital: float = 1_000_000.0, warmup: int = TRADING_DAYS,
+             min_position: float = 0.0) -> SimResult:
+    """Run the strategy over the whole panel. `min_position` skips buys smaller than that many
+    rupees (fixed charges make tiny positions expensive)."""
     p = f.p
-    dates, symbols = p.dates, p.symbols
+    idx, symbols = p.dates, p.symbols
+    dates = list(idx)   # plain list: fast element access inside the loop
     O, H, L, C = (x.to_numpy(dtype=float) for x in (p.open, p.high, p.low, p.close))
     C_ffill = p.close.ffill().to_numpy(dtype=float)
     T, N = C.shape
-    trad = tradable.reindex(index=dates, columns=symbols).fillna(False).to_numpy(dtype=bool)
-    regime = f.regime_up.reindex(dates).fillna(True).to_numpy(dtype=bool)
+    trad = tradable.reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
+    regime = f.regime_up.reindex(idx).fillna(True).to_numpy(dtype=bool)
     atr = f.atr14.to_numpy(dtype=float)
-    slip = costs.slippage_pct / 100
+    # Slippage per stock and day: thinly traded stocks cost more to get in and out of.
+    liquid = (f.turnover_avg20_cr.shift(1) >= costs.illiquid_below_cr).to_numpy(dtype=bool)
+    slip_arr = np.where(liquid, costs.slippage_pct, costs.slippage_illiquid_pct) / 100
     t0 = min(warmup, T - 1)
 
     is_event = strategy.kind == "event"
     if is_event:
-        entries = strategy.entries(f).reindex(index=dates, columns=symbols).fillna(False).to_numpy(dtype=bool) & trad
-        exit_sig = (strategy.exit_signal(f).reindex(index=dates, columns=symbols).fillna(False).to_numpy(dtype=bool)
+        entries = strategy.entries(f).reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool) & trad
+        exit_sig = (strategy.exit_signal(f).reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
                     if strategy.exit_signal else None)
         prio_src = strategy.priority(f) if strategy.priority else None
     else:
-        score = strategy.score(f).reindex(index=dates, columns=symbols)
-        elig = (strategy.eligible(f).reindex(index=dates, columns=symbols).fillna(False).to_numpy(dtype=bool)
+        score = strategy.score(f).reindex(index=idx, columns=symbols)
+        elig = (strategy.eligible(f).reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
                 if strategy.eligible else np.ones((T, N), dtype=bool))
         score_np = np.where(elig & trad, score.to_numpy(dtype=float), np.nan)
-        rebal = rebalance_days(dates, strategy.rebalance)
+        rebal = rebalance_days(idx, strategy.rebalance)
         prio_src = None
-    prio = (prio_src.reindex(index=dates, columns=symbols).to_numpy(dtype=float)
+    prio = (prio_src.reindex(index=idx, columns=symbols).to_numpy(dtype=float)
             if prio_src is not None else np.zeros((T, N)))
     prio = np.nan_to_num(prio, nan=-np.inf)
 
@@ -152,7 +163,7 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
     def close_position(t: int, c: int, raw_px: float, reason: str) -> None:
         nonlocal cash
         ps = pos.pop(c)
-        fill = raw_px * (1 - slip)
+        fill = raw_px * (1 - slip_arr[t, c])
         value = ps["qty"] * fill
         proceeds = value - costs.sell_cost(value)
         cash += proceeds
@@ -177,7 +188,7 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                 px = O[t, c]
                 if c in pos or math.isnan(px) or px <= 0:
                     continue
-                fill = px * (1 + slip)
+                fill = px * (1 + slip_arr[t, c])
                 stop = None
                 if strategy.stop_pct:
                     stop = fill * (1 - strategy.stop_pct / 100)
@@ -189,7 +200,7 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                     alloc = min(eq_open * strategy.risk_pct / 100 / (fill - stop) * fill, 2 * alloc)
                 alloc = min(alloc, cash / (1 + 0.003))  # leave room for charges
                 qty = int(alloc // fill)
-                if qty < 1:
+                if qty < 1 or qty * fill < min_position:
                     continue
                 value = qty * fill
                 cost = value + costs.buy_cost(value)
@@ -267,8 +278,8 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
     next_orders = ([{"action": "SELL", "symbol": symbols[c], "reason": r} for c, r in pending_sell.items()] +
                    [{"action": "BUY", "symbol": symbols[c], "reason": "entry signal" if is_event else "enters top ranks"}
                     for c in pending_buy])
-    return SimResult(strategy.key, pd.Series(equity[t0:], index=dates[t0:]),
-                     pd.Series(invested[t0:], index=dates[t0:]), trades, open_positions, next_orders, t0)
+    return SimResult(strategy.key, pd.Series(equity[t0:], index=idx[t0:]),
+                     pd.Series(invested[t0:], index=idx[t0:]), trades, open_positions, next_orders, t0)
 
 
 # ------------------------------------------------------------------------------------- metrics
@@ -308,8 +319,44 @@ def _trade_stats(trades: list[Trade]) -> dict:
     }
 
 
+def after_tax_equity(res: SimResult, tax: TaxModel) -> pd.Series:
+    """Equity curve after paying capital-gains tax on each financial year's realised gains
+    (paid on the first trading day of the next April; the current year's accrued tax is deducted at
+    the last date). Short-term losses offset short- and long-term gains, long-term losses only
+    long-term gains, and unused losses carry forward. Paying tax shrinks the portfolio, so later
+    gains - and taxes - are scaled down with it."""
+    eq = res.equity.dropna()
+    if eq.empty:
+        return eq
+    by_fy: dict[int, list[float]] = {}
+    for t in res.trades:
+        fy = t.exit_date.year if t.exit_date.month >= 4 else t.exit_date.year - 1
+        is_long = (t.exit_date - t.entry_date).days > 365
+        by_fy.setdefault(fy, [0.0, 0.0])[1 if is_long else 0] += t.pnl
+    factor = pd.Series(1.0, index=eq.index)
+    scale, st_pool, lt_pool = 1.0, 0.0, 0.0
+    for fy in sorted(by_fy):
+        st, lt = (g * scale for g in by_fy[fy])
+        if st < 0:
+            st_pool, st = st_pool - st, 0.0
+        if lt < 0:
+            lt_pool, lt = lt_pool - lt, 0.0
+        used = min(st, st_pool); st -= used; st_pool -= used
+        used = min(lt, lt_pool); lt -= used; lt_pool -= used
+        used = min(lt, st_pool); lt -= used; st_pool -= used
+        due = st * tax.stcg_pct / 100 + max(0.0, lt - tax.ltcg_exempt) * tax.ltcg_pct / 100
+        if due <= 0:
+            continue
+        later = eq.index[eq.index >= pd.Timestamp(fy + 1, 4, 1)]
+        pay = later[0] if len(later) else eq.index[-1]
+        value = float(eq.loc[pay]) * scale
+        scale *= max(0.0, 1 - due / value)
+        factor.loc[pay:] = scale
+    return eq * factor
+
+
 def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | None = None,
-             windows: dict[str, int] | None = None) -> dict:
+             windows: dict[str, int] | None = None, tax: TaxModel | None = None) -> dict:
     """Metrics for the full period and for recent windows (by trading days)."""
     windows = windows or {"12m": 252, "6m": 126, "3m": 63}
     eq = res.equity.dropna()
@@ -325,6 +372,16 @@ def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | Non
 
     out["full"]["benchmark"] = bench(benchmark, eq.index)
     out["full"]["ew_benchmark"] = bench(ew_benchmark, eq.index)
+    if tax is not None:
+        at = _curve_stats(after_tax_equity(res, tax))
+        out["full"]["after_tax_cagr_pct"] = at["cagr_pct"]
+        out["full"]["after_tax_return_pct"] = at["return_pct"]
+        for key in ("benchmark", "ew_benchmark"):   # buy & hold: long-term tax once, at the end
+            b = out["full"][key]
+            if b.get("return_pct") is not None:
+                years = len(eq) / TRADING_DAYS
+                net = b["return_pct"] / 100 * (1 - tax.ltcg_pct / 100) if b["return_pct"] > 0 else b["return_pct"] / 100
+                b["after_tax_cagr_pct"] = ((1 + net) ** (1 / years) - 1) * 100 if years >= 0.5 else None
     for name, n in windows.items():
         if len(eq) <= n:
             continue
