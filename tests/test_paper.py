@@ -181,5 +181,24 @@ def test_summary_compares_with_indices_and_backtest(jpath):
     assert line.startswith("📒 Paper since 29 Jan (9 days): +0.0%") and "Nifty 500 +10.0%" in line
 
 
+def test_paper_report_is_plain_json_for_the_api(jpath):
+    import json
+    fr = make_store(opens={("A", 25): 110.0}, closes={("A", 25): 110.0})
+    d = fr["close"].index
+    paper.record_scan(scan(d[20], actions=[("BUY", "A", "enters top ranks")], positions=[("B", d[5], 90.0)]), jpath)
+    paper.record_scan(scan(d[24], actions=[("SELL", "A", "dropped from ranking")],
+                           positions=[("A", d[21], None), ("B", d[5], 90.0)]), jpath)
+    out = paper.paper_report(fr, COSTS, jpath)
+    assert json.loads(json.dumps(out, allow_nan=False)) == out     # no NaN, numpy or pandas types anywhere
+    s = out["strategies"]["mom"]
+    assert s["equity"][0] == ["2026-01-29", 100_000.0] and len(s["equity"]) == len(s["nifty500"]) == N - 20
+    assert s["nifty50"][-1] == ["2026-02-11", 100_000.0]          # flat index, scaled to the capital
+    assert [t["symbol"] for t in s["trades"]] == ["A"] and [o["symbol"] for o in s["open"]] == ["B"]
+    assert s["open"][0]["stop"] == pytest.approx(90.0)             # model stop, as a fraction of that day's close
+    assert s["summary"]["comparison"].startswith("Since 29 Jan 2026 (9 trading days)")
+    assert s["summary"] == paper.summaries(fr, COSTS, jpath)["mom"]
+
+
 def test_no_journal_gives_empty_report(jpath):
     assert paper.build_report(make_store(), COSTS, jpath) == {}
+    assert paper.paper_report(make_store(), COSTS, jpath)["strategies"] == {}

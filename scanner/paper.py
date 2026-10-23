@@ -67,6 +67,10 @@ def _ok(x) -> bool:
     return x is not None and not (isinstance(x, float) and math.isnan(x))
 
 
+def _pct(x, nd: int = 2) -> str:
+    return f"{x:+.{nd}f}%" if _ok(x) else "-"
+
+
 # ----------------------------------------------------------------------------- journal
 def record_scan(result: dict, path=None) -> int:
     """Journal a completed-day scan: every strategy's next-open orders, model positions, rules and
@@ -372,6 +376,21 @@ def summarize(rep: dict) -> dict:
     else:
         verdict, level = (f"Within normal noise of the backtest after {days} trading days. It takes about a year "
                           "before the gap means much."), "neutral"
+    comparison = None
+    if days and live_excess is not None:
+        index = "Nifty 500" if n500 is not None else "Nifty 50"
+        comparison = (
+            f"Since {start} ({days} trading days) the paper portfolio is {_pct(live_excess)} against the {index}. "
+            f"The backtest ({_pct(cagr, 1)}/yr vs the index's {_pct(exp.get('n500_cagr_pct'), 1)}/yr) implied "
+            f"{_pct(exp_excess)} for that many days - {_pct(excess(haircut))} after removing the "
+            f"~{SURVIVORSHIP_HAIRCUT_PCT:g}%/yr survivorship bias.")
+        if band:
+            comparison += (f" Luck alone typically moves the gap by up to ±{band:.1f}% over this period, so only a "
+                           "bigger gap is real evidence.")
+        lo, hi = (expected(x) for x in rng) if rng and len(rng) == 2 else (None, None)
+        if lo is not None and hi is not None:
+            comparison += (f" Allowing for the backtest's timing luck, the expected paper return for these days was "
+                           f"{_pct(lo)} to {_pct(hi)}.")
     return {
         "name": rep["name"], "start": rep["start"], "days": days, "last_date": rep["last_date"],
         "equity": float(eq.iloc[-1]), "return_pct": live, "pnl": float(eq.iloc[-1] - capital),
@@ -384,7 +403,7 @@ def summarize(rep: dict) -> dict:
         "trades": rep["trade_stats"]["trades"], "win_rate": rep["trade_stats"]["win_rate"],
         "open": len(rep["open"]), "pending": len(rep["pending"]),
         "fees": rep["fees"], "slippage": rep["slippage"],
-        "verdict": verdict, "level": level,
+        "verdict": verdict, "level": level, "comparison": comparison,
     }
 
 
@@ -400,13 +419,56 @@ def build_report(frames: dict[str, pd.DataFrame], costs: CostModel, path=None) -
     return out
 
 
+def _json(v):
+    """Plain JSON values: rounded floats, None for NaN/inf, no numpy or pandas types."""
+    if isinstance(v, dict):
+        return {str(k): _json(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_json(x) for x in v]
+    if isinstance(v, (float, np.floating)):
+        return None if math.isnan(v) or math.isinf(v) else round(float(v), 2)
+    if isinstance(v, np.integer):
+        return int(v)
+    if isinstance(v, (pd.Timestamp, np.datetime64)):
+        return pd.Timestamp(v).date().isoformat()
+    return v
+
+
+def _points(s: pd.Series | None) -> list:
+    return [] if s is None else [[d.date().isoformat(), v] for d, v in s.dropna().items()]
+
+
+def paper_report(frames: dict[str, pd.DataFrame] | None = None, costs: CostModel | None = None,
+                 path=None) -> dict:
+    """All paper-trading results as one JSON-serialisable dict (dashboard, GET /api/paper, Telegram).
+
+    Defaults: the price store and the `costs:` from config.yaml. Per strategy key:
+      summary          headline numbers, live-vs-backtest comparison, verdict (see summarize)
+      equity           [[date, value]] paper portfolio value; nifty50 / nifty500: same, scaled to the capital
+      trades / open / pending   closed paper trades, current paper holdings, orders waiting for the next open
+      trade_stats, expect       paper trade statistics; backtest expectation recorded on the first journal day
+    """
+    if frames is None:
+        from .store import load_store
+        frames = load_store()
+    if costs is None:
+        from .settings import load_config
+        costs = CostModel.from_config(load_config().get("costs"))
+    out = {}
+    for key, rep in build_report(frames, costs, path).items():
+        curves = rep["equity"]
+        out[key] = _json({
+            **{k: rep[k] for k in ("key", "name", "kind", "capital", "start", "last_date", "days", "journal_days",
+                                   "last_journal", "cash", "fees", "slippage", "open", "trades", "pending",
+                                   "trade_stats", "expect", "summary")},
+            "equity": _points(curves["Paper"]),
+            "nifty50": _points(curves.get("NIFTY 50")),
+            "nifty500": _points(curves.get("NIFTY 500")),
+        })
+    return {"journal_file": str(Path(path or JOURNAL_FILE)), "survivorship_haircut_pct": SURVIVORSHIP_HAIRCUT_PCT,
+            "strategies": out}
+
+
 def summaries(frames: dict[str, pd.DataFrame], costs: CostModel, path=None) -> dict[str, dict]:
-    """Rounded, JSON-ready summaries (saved with each scan for Telegram and the dashboard)."""
-    def clean(v):
-        if isinstance(v, list):
-            return [clean(x) for x in v]
-        if isinstance(v, (float, np.floating)):
-            return None if math.isnan(v) or math.isinf(v) else round(float(v), 2)
-        return v
-    return {k: {kk: clean(vv) for kk, vv in rep["summary"].items()}
-            for k, rep in build_report(frames, costs, path).items()}
+    """Per-strategy summaries only (saved with each scan for Telegram)."""
+    return {k: v["summary"] for k, v in paper_report(frames, costs, path)["strategies"].items()}

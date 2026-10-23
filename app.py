@@ -88,9 +88,9 @@ def cached_store(version: str):
 
 
 @st.cache_data(show_spinner=False)
-def cached_paper(version: str, journal_mtime: float, costs_json: str):
-    """Paper portfolios replayed from the journal on stored prices (recomputed when either changes)."""
-    return paper.build_report(cached_store(version), CostModel.from_config(json.loads(costs_json)))
+def cached_paper(version: str, journal_mtime: float, costs_json: str) -> dict:
+    """paper.paper_report() for the current store, journal and charges (recomputed when any changes)."""
+    return paper.paper_report(cached_store(version), CostModel.from_config(json.loads(costs_json)))["strategies"]
 
 
 def file_mtime(p) -> float:
@@ -358,24 +358,18 @@ with tabs[2]:
         k[3].metric("Worst drop", pct(sm["max_dd_pct"], signed=False))
         k[4].metric("Charges + slippage", rupees(sm["fees"] + sm["slippage"]))
         {"good": st.success, "bad": st.error}.get(sm["level"], st.info)(f"**{sm['verdict']}**")
-        if sm["days"]:
-            rng = sm.get("expected_range_pct")
-            st.write(
-                f"Since {sm['start']} ({sm['days']} trading days) the paper portfolio is {pct(sm['excess_pct'], nd=2)} "
-                f"against the Nifty 500. The backtest ({pct(sm['backtest_cagr_pct'])}/yr vs the index's "
-                f"{pct(sm['backtest_n500_cagr_pct'])}/yr) implied {pct(sm['expected_excess_pct'], nd=2)} for that many "
-                f"days - {pct(sm['haircut_excess_pct'], nd=2)} after removing the ~{paper.SURVIVORSHIP_HAIRCUT_PCT:g}%/yr "
-                f"survivorship bias. Luck alone typically moves the gap by up to ±{sm['noise_pct'] or 0:.1f}% over this "
-                "period, so only a bigger gap is real evidence."
-                + (f" Backtest timing range for these days: {pct(rng[0], nd=2)} to {pct(rng[1], nd=2)}."
-                   if rng and None not in rng else ""))
-        eqc = rep["equity"]
-        if len(eqc) > 1:
+        if sm.get("comparison"):
+            st.write(sm["comparison"])
+        if len(rep["equity"]) > 1:
             fig = go.Figure()
-            for col_ in eqc.columns:
-                fig.add_trace(go.Scatter(x=eqc.index, y=eqc[col_], name="Paper portfolio" if col_ == "Paper" else col_,
-                                         mode="lines", line=dict(width=2.4 if col_ == "Paper" else 1.4,
-                                                                 dash=None if col_ == "Paper" else "dot")))
+            for name_, pts in (("Paper portfolio", rep["equity"]), ("NIFTY 50", rep["nifty50"]),
+                               ("NIFTY 500", rep["nifty500"])):
+                if pts:
+                    xs, ys = zip(*pts)
+                    paper_line_ = name_ == "Paper portfolio"
+                    fig.add_trace(go.Scatter(x=list(xs), y=list(ys), name=name_, mode="lines",
+                                             line=dict(width=2.4 if paper_line_ else 1.4,
+                                                       dash=None if paper_line_ else "dot")))
             fig.update_layout(height=380, yaxis_title=f"Value of {rupees(rep['capital'])}",
                               margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=1.02, yanchor="bottom"))
             st.plotly_chart(fig)
@@ -383,9 +377,10 @@ with tabs[2]:
             st.subheader("Paper orders for the next open")
             table(rep["pending"], {"action": "Action", "symbol": "Stock", "reason": "Why"})
         st.subheader("Paper holdings")
-        table(rep["open"], {"symbol": "Stock", "entry_date": "Bought", "entry_price": "Fill ₹", "qty": "Qty",
-                            "last_price": "Now ₹", "value": "Value ₹", "pnl": "P&L ₹", "ret_pct": "Return %",
-                            "stop": "Stop ₹", "days": "Days"},
+        table([{**o, "stop": o["stop"] if o["stop"] is not None else np.nan} for o in rep["open"]],
+              {"symbol": "Stock", "entry_date": "Bought", "entry_price": "Fill ₹", "qty": "Qty",
+               "last_price": "Now ₹", "value": "Value ₹", "pnl": "P&L ₹", "ret_pct": "Return %",
+               "stop": "Stop ₹", "days": "Days"},
               signed=("pnl", "ret_pct"),
               fmt={"entry_price": "₹{:,.2f}", "last_price": "₹{:,.2f}", "value": "₹{:,.0f}", "pnl": "₹{:+,.0f}",
                    "ret_pct": "{:+.1f}", "stop": "₹{:,.2f}"},
