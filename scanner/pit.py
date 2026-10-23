@@ -674,6 +674,49 @@ def backtest_frames(data: PitData, store_frames: dict[str, pd.DataFrame]) -> dic
     return out
 
 
+# --------------------------------------------------------------------------- daily-scan hook
+def backtest_setup(cfg: dict, frames: dict, info: dict, current: list[str], live: dict, log=print) -> dict:
+    """What a scan re-tests the strategies on. `backtest_universe: point_in_time` (config.yaml) = on
+    each past day only that day's 500 most-traded NSE stocks, including companies that later collapsed
+    or were delisted (no survivorship bias); `current` = today's list, i.e. `live` (the scan's own
+    {"f", "trad", "ew", "n500"}), which is also the fallback while the cache is not built. Today's
+    orders always come from today's list. Returns {"universe", "note", "f", "trad", "ew", "n500", ...}."""
+    from .engine import equal_weight_index
+    from .panel import Factors, panel_from_wide
+    from .providers import INDEX_N500
+    from .strategies import tradable_mask
+
+    out = {"universe": "current", **live,
+           "note": "Today's index list: companies that collapsed or were delisted are missing, so results are flattered."}
+    if str(cfg.get("backtest_universe", "current")).strip().lower() != "point_in_time":
+        return out
+    try:
+        upto = date.fromisoformat(info["complete_upto"]) if info.get("complete_upto") else None
+        data = update(store_days(frames, upto), current, log=log, reference=frames["close"])
+    except Exception as e:   # never let it break a scan: fall back to today's list
+        data = None
+        log(f"Point-in-time universe problem ({type(e).__name__}: {e}) - backtesting on today's list instead.")
+    if data is None:
+        out["note"] = ("Point-in-time universe not available (build it with 4_build_universe.bat) - backtests use "
+                       "today's list, so they are flattered.")
+        log(out["note"])
+        return out
+    flt = cfg.get("filters") or {}
+    bp = panel_from_wide(backtest_frames(data, frames), data.members, universe=data.universe)
+    bf = Factors(bp)
+    btrad = tradable_mask(bf, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)))
+    out.update({
+        "universe": "point_in_time", "f": bf, "trad": btrad, "ew": equal_weight_index(bf, btrad),
+        "n500": (frames["close"][INDEX_N500].reindex(bp.dates) if INDEX_N500 in frames["close"].columns else None),
+        "note": (f"On each past day, only that day's {data.info['rule']['size']} most-traded NSE stocks "
+                 f"({len(data.members):,} different companies over the test, "
+                 f"{data.info['members_no_longer_trading']} of which no longer trade)."),
+        "members": len(data.members), "gone": data.info["members_no_longer_trading"],
+        "last_day": data.info["last_day"],
+    })
+    return out
+
+
 # --------------------------------------------------------------------------- comparison
 def compare(cfg: dict | None = None, keys=("momentum", "trend_breakout", "low_vol"), log=print) -> pd.DataFrame:
     """Each strategy on (a) today's list with the store's data - what the dashboard used to show,
@@ -744,6 +787,52 @@ def compare(cfg: dict | None = None, keys=("momentum", "trend_breakout", "low_vo
     return pd.DataFrame(rows)
 
 
+COMPARISON_FILE = PIT_DIR / "comparison.csv"
+UNIVERSE_LABELS = {
+    "current list, store data": "Today's Nifty 500 list (main price store) - flattered by survivorship bias",
+    "current list, NSE data": "Today's Nifty 500 list on the NSE-rebuilt prices - checks the rebuild",
+    "point-in-time top 500": "Point-in-time top 500 (survivorship-free)",
+}
+
+
+def comparison_report(recompute: bool = False, cfg: dict | None = None, log=print) -> dict:
+    """JSON-serialisable comparison of the strategies on today's list vs the point-in-time universe
+    (what the README table shows), plus facts about the universe. Uses the saved comparison unless
+    `recompute` (a few minutes) or none was saved yet. For the web API: plain dicts, lists, numbers,
+    strings and None only."""
+    data = load()
+    if data is None:
+        return {"built": False, "note": "Point-in-time universe not built yet: run 4_build_universe.bat."}
+    if recompute or not COMPARISON_FILE.exists():
+        compare(cfg, log=log).to_csv(COMPARISON_FILE, index=False)
+    df = pd.read_csv(COMPARISON_FILE)
+
+    def clean(v):
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        if isinstance(v, (float, np.floating)):
+            return None if not np.isfinite(v) else round(float(v), 3)
+        return v
+
+    rows = [{k: clean(v) for k, v in r.items()} for r in df.to_dict("records")]
+    i = data.info
+    return {
+        "built": True,
+        "period": {"start": rows[0].get("start") if rows else None, "end": rows[0].get("end") if rows else None},
+        "universes": [{"key": k, "label": v} for k, v in UNIVERSE_LABELS.items()],
+        "rows": rows,
+        "universe": {
+            "rule": i["rule"], "first_day": i["first_day"], "last_day": i["last_day"], "sessions": i["days"],
+            "built_at": i["built_at"], "members": i["ever_members"], "no_longer_trading": i["members_no_longer_trading"],
+            "no_longer_trading_sample": i["no_longer_trading_sample"], "etfs_excluded": i.get("etfs_excluded"),
+            "corporate_actions": len(i["adjustments"]),
+            "corporate_actions_without_notice": sum(a["reason"].startswith("no NSE notice") for a in i["adjustments"]),
+            "sessions_not_in_store": i.get("sessions_not_in_store", []),
+        },
+        "computed_at": pd.Timestamp(COMPARISON_FILE.stat().st_mtime, unit="s", tz="Asia/Kolkata").isoformat(timespec="seconds"),
+    }
+
+
 def markdown_table(df: pd.DataFrame) -> str:
     def pct(x, signed=True):
         return "-" if x is None or pd.isna(x) else (f"{x:+.1f}%" if signed else f"{x:.1f}%")
@@ -770,10 +859,9 @@ def main(argv: list[str]) -> int:
         build(store_days(sfr), current, reference=sfr["close"])
     elif cmd == "compare":
         df = compare()
-        out = PIT_DIR / "comparison.csv"
-        df.to_csv(out, index=False)
+        df.to_csv(COMPARISON_FILE, index=False)
         print(markdown_table(df))
-        print(f"\nSaved to {out}")
+        print(f"\nSaved to {COMPARISON_FILE}")
     else:
         print("usage: python -m scanner.pit [build|compare]")
         return 2

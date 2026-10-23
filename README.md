@@ -227,6 +227,7 @@ tests/           pytest suite: costs, tax, corporate actions, factors (no look-a
 
 Run the tests with `.venv\Scripts\python.exe -m pytest -q`. Rebuild the point-in-time universe from scratch with
 `.venv\Scripts\python.exe -m scanner.pit build`; print the comparison table with `... -m scanner.pit compare`.
+For the web API, `scanner.pit.comparison_report()` returns the same comparison (plus facts about the universe) as plain JSON.
 
 ### Roadmap
 | Next | Why |

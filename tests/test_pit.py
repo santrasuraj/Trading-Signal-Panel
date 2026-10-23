@@ -261,17 +261,16 @@ def test_parse_old_cm_bhavcopy():
 
 # ------------------------------------------------------------------ daily scan / paper journal wiring
 def test_daily_backtest_falls_back_to_current_list_when_not_built(monkeypatch):
-    from scanner import daily
     monkeypatch.setattr(pit, "update", lambda days, keep, **k: None)
     fr = {"close": pd.DataFrame({"A": [1.0]}, index=pd.DatetimeIndex(["2026-01-01"], name="date"))}
-    out = daily._backtest_setup({"backtest_universe": "point_in_time"}, fr, {}, ["A"], {}, log=lambda *_: None)
-    assert out["universe"] == "current" and out["f"] is None and "not available" in out["note"]
-    out = daily._backtest_setup({"backtest_universe": "current"}, fr, {}, ["A"], {}, log=lambda *_: None)
-    assert out["universe"] == "current" and out["f"] is None
+    live = {"f": "LIVE", "trad": None, "ew": None, "n500": None}
+    out = pit.backtest_setup({"backtest_universe": "point_in_time"}, fr, {}, ["A"], live, log=lambda *_: None)
+    assert out["universe"] == "current" and out["f"] == "LIVE" and "not available" in out["note"]
+    out = pit.backtest_setup({"backtest_universe": "current"}, fr, {}, ["A"], live, log=lambda *_: None)
+    assert out["universe"] == "current" and out["f"] == "LIVE"
 
 
 def test_daily_backtest_uses_point_in_time_universe(monkeypatch, frames_factory):
-    from scanner import daily
     n = 300
     fr = frames_factory({"A": np.linspace(100, 200, n), "B": np.linspace(100, 150, n), "GONE": [100.0] * n})
     uni = pd.DataFrame(True, index=fr["close"].index, columns=["A", "B", "GONE"])
@@ -281,8 +280,8 @@ def test_daily_backtest_uses_point_in_time_universe(monkeypatch, frames_factory)
     monkeypatch.setattr(pit, "update", lambda days, keep, **k: data)
     store_fr = {f: pd.DataFrame({"NIFTY50": 1000.0, "NIFTY500": 100.0}, index=fr["close"].index)
                 for f in ("open", "high", "low", "close", "volume", "deliv_pct")}
-    out = daily._backtest_setup({"backtest_universe": "point_in_time"}, store_fr, {}, ["A"], {"min_price": 0,
-                                "min_turnover_cr": 0}, log=lambda *_: None)
+    cfg = {"backtest_universe": "point_in_time", "filters": {"min_price": 0, "min_turnover_cr": 0}}
+    out = pit.backtest_setup(cfg, store_fr, {}, ["A"], {}, log=lambda *_: None)
     assert out["universe"] == "point_in_time" and out["members"] == 3 and out["gone"] == 1
     assert out["trad"]["GONE"].iloc[150] and not out["trad"]["GONE"].iloc[250]
     assert out["n500"].iloc[-1] == 100.0 and out["f"].p.index_close.iloc[-1] == 1000.0
@@ -358,3 +357,26 @@ def test_rescheduled_or_corrected_notices_count_once(monkeypatch, tmp_path):
     listed = pit._listed_actions(close, idx)
     assert sorted((d.date().isoformat(), s) for d, s in listed) == [("2024-05-24", "INOX"), ("2024-05-28", "HALX")]
     assert listed[(pd.Timestamp("2024-05-24"), "INOX")] == [date(2024, 5, 14), date(2024, 5, 23)]
+
+
+def test_comparison_report_is_plain_json(monkeypatch, tmp_path):
+    import json
+    info = {"rule": {"size": 500}, "first_day": "2018-08-06", "last_day": "2026-10-22", "days": 2033,
+            "built_at": "2026-10-23T14:00:00+05:30", "ever_members": 1170, "members_no_longer_trading": 73,
+            "no_longer_trading_sample": ["DHFL"], "etfs_excluded": 380, "sessions_not_in_store": [],
+            "adjustments": [{"symbol": "X", "date": "2025-01-10", "factor": 0.2, "reason": "no NSE notice: x"}]}
+    monkeypatch.setattr(pit, "load", lambda: pit.PitData({}, pd.DataFrame(), info))
+    monkeypatch.setattr(pit, "COMPARISON_FILE", tmp_path / "comparison.csv")
+    pd.DataFrame([{"universe": "point-in-time top 500", "strategy": "Momentum leaders", "cagr_pct": np.float64(27.1),
+                   "max_dd_pct": -34.1, "sharpe": 1.11, "after_tax_cagr_pct": 24.5, "cagr_low": 27.0,
+                   "cagr_high": 31.0, "trades": 260, "start": "2019-08-21", "end": "2026-10-22"},
+                  {"universe": "point-in-time top 500", "strategy": "Nifty 500 index", "cagr_pct": 13.5,
+                   "max_dd_pct": -38.3, "sharpe": 0.81, "after_tax_cagr_pct": 12.2, "cagr_low": np.nan,
+                   "cagr_high": np.nan, "trades": np.nan, "start": "2019-08-21", "end": "2026-10-22"}]
+                 ).to_csv(pit.COMPARISON_FILE, index=False)
+    rep = pit.comparison_report()
+    json.dumps(rep, allow_nan=False)                                    # no NaN / numpy types
+    assert rep["built"] and rep["period"] == {"start": "2019-08-21", "end": "2026-10-22"}
+    assert rep["rows"][1]["cagr_low"] is None and rep["universe"]["corporate_actions_without_notice"] == 1
+    monkeypatch.setattr(pit, "load", lambda: None)
+    assert pit.comparison_report()["built"] is False
