@@ -3,7 +3,8 @@
 sec_bhavdata_full_DDMMYYYY.csv : every stock's official OHLC, volume, previous close and delivery %
                                  (NSE's archive has it from 30 Sep 2019)
 cmDDMONYYYYbhav.csv.zip        : the older bhavcopy (same prices, no delivery %), used for days
-                                 before that
+                                 before that, and to complete a few full files that lack stocks
+                                 (the archive ends in July 2024)
 ind_close_all_DDMMYYYY.csv     : every NSE index (Nifty 50, India VIX, sector indices) OHLC
 
 Files appear ~6-7 PM IST on trading days. Parsed days are cached under data/nse/ so each file is
@@ -139,6 +140,21 @@ def _parse_indices(text: str, day: date) -> pd.DataFrame:
     return out[out["close"] > 0]
 
 
+def _add_cm_rows(stocks: pd.DataFrame, day: date) -> pd.DataFrame:
+    """NSE's full file lacks ~10% of the stocks on a few days (13 Apr 2020, 28 Sep 2020, 7 Mar 2022);
+    the older bhavcopy of the same day has them (without delivery %)."""
+    mon = day.strftime("%b").upper()
+    code, body = _get_bytes(CM_URL.format(y=day.year, mon=mon, dd=day.strftime("%d")))
+    if code != 200:
+        return stocks
+    try:
+        cm = _parse_cm(body, day)
+    except Exception:
+        return stocks
+    extra = cm[~cm.index.isin(stocks.index)]
+    return pd.concat([stocks, extra]) if len(extra) else stocks
+
+
 def _old(day: date) -> bool:
     return (date.today() - day).days > 2
 
@@ -156,7 +172,7 @@ def fetch_day(day: date, use_cache: bool = True) -> DayFile:
         mon = day.strftime("%b").upper()
         sources.append((lambda: _get_bytes(CM_URL.format(y=day.year, mon=mon, dd=day.strftime("%d"))), _parse_cm))
     status, stocks = "missing", None
-    for get, parse in sources:
+    for n, (get, parse) in enumerate(sources):
         code, body = get()
         if code == 404:
             continue
@@ -174,6 +190,8 @@ def fetch_day(day: date, use_cache: bool = True) -> DayFile:
         status = "error" if status == "missing" else status
     if stocks is None:
         return DayFile(day, status)
+    if n == 0 and len(sources) > 1:
+        stocks = _add_cm_rows(stocks, day)
     ix_code, ix_text = _get(INDEX_URL.format(d=d))
     try:
         indices = _parse_indices(ix_text, day) if ix_code == 200 else None

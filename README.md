@@ -53,38 +53,41 @@ companies that later crashed, merged or were delisted: 1,170 different companies
 point, and 73 of them no longer trade (DHFL, Jet Airways, Future Retail, Lakshmi Vilas Bank, the state banks
 merged in 2019–20, HDFC Ltd ...). The old way, testing on *today's* Nifty 500 list, left all of those out.
 
-Same rules, same costs and tax, 2019-08-21 to 2026-10-22:
+Same rules, same costs and tax, 2019-08-19 to 2026-10-22:
 
 | Strategy | Tested on | Yearly return | Timing range | Worst drop | Sharpe | After tax |
 |---|---|---|---|---|---|---|
-| Momentum leaders | today's Nifty 500 list | +41.3% | 40–50% | −33% | 1.59 | +37.7% |
-|  | **point-in-time top 500** | **+27.1%** | 27–31% | −34% | 1.11 | +24.5% |
-| Trend breakout (experimental) | today's Nifty 500 list | +44.1% | 44–45% | −30% | 1.75 | +36.7% |
-|  | **point-in-time top 500** | **+21.0%** | 19–21% | −36% | 0.97 | +17.4% |
-| Low volatility | today's Nifty 500 list | +9.5% | 9–11% | −28% | 0.70 | +9.2% |
-|  | **point-in-time top 500** | **+10.8%** | 9–11% | −28% | 0.79 | +10.6% |
-| Average stock (equal weight) | today's Nifty 500 list | +27.5% | – | −40% | 1.38 | +25.4% |
-|  | **point-in-time top 500** | **+19.9%** | – | −41% | 1.01 | +18.3% |
-| Nifty 500 index (the real one) | – | +13.5% | – | −38% | 0.81 | +12.2% |
+| Momentum leaders | today's Nifty 500 list | +41.1% | 41–46% | −33% | 1.58 | +37.5% |
+|  | **point-in-time top 500** | **+28.3%** | 28–30% | −33% | 1.16 | +25.6% |
+| Trend breakout (experimental) | today's Nifty 500 list | +39.8% | 40–41% | −30% | 1.64 | +33.4% |
+|  | **point-in-time top 500** | **+19.6%** | 18–20% | −32% | 0.93 | +16.3% |
+| Low volatility | today's Nifty 500 list | +9.0% | 9–11% | −28% | 0.67 | +8.8% |
+|  | **point-in-time top 500** | **+10.7%** | 9–11% | −28% | 0.78 | +10.5% |
+| Average stock (equal weight) | today's Nifty 500 list | +27.0% | – | −40% | 1.36 | +25.0% |
+|  | **point-in-time top 500** | **+19.5%** | – | −41% | 0.99 | +17.9% |
+| Nifty 500 index (the real one) | – | +13.3% | – | −38% | 0.80 | +12.0% |
 
 *Timing range* = the same rules rebalanced a few days earlier, or started a few weeks later.
 *After tax* = short-term gains taxed at 20.8% every April (buy & hold pays 13% once, at the end).
+*Updated 23 Oct 2026* after fixing price-data errors in both data sets (missing NSE sessions, wrong "data
+corrections", three incomplete NSE files). Momentum point-in-time went 27.1% → 28.3% (inside its timing range),
+trend breakout 44.1% → 39.8% on today's list and 21.0% → 19.6% point-in-time.
 
 What this shows:
-- **Survivorship bias was large.** It added 7.5% a year to the average stock, and 14% (momentum) to
-  23% (trend breakout) a year to the active strategies.
+- **Survivorship bias was large.** It added 7.5% a year to the average stock, and 13% (momentum) to
+  20% (trend breakout) a year to the active strategies.
   They buy exactly the stocks that were flying, and some of those later collapsed.
-- **Momentum still has an edge, but a much smaller one:** +7.1% a year over the average stock and
-  +13.5% over the Nifty 500 index, with a smaller worst drop (−34% vs −41%). NSE's own momentum indices beat their parent
-  index by about 3–6% a year over 20 years. Expect live results nearer that, not 27%.
-- **Trend breakout is about the average stock** (+1.1% a year, lower Sharpe): no real edge.
-- **Low volatility barely moves** (+9.5% → +10.8%): it holds big, steady companies, which rarely
+- **Momentum still has an edge, but a much smaller one:** +8.8% a year over the average stock and
+  +15.0% over the Nifty 500 index, with a smaller worst drop (−33% vs −41%). NSE's own momentum indices beat their parent
+  index by about 3–6% a year over 20 years. Expect live results nearer that, not 28%.
+- **Trend breakout is about the average stock** (+0.1% a year, lower Sharpe): no real edge.
+- **Low volatility barely moves** (+9.0% → +10.7%): it holds big, steady companies, which rarely
   vanish, so survivorship never flattered it. It lagged because small and mid caps boomed in 2019–2026.
   It is insurance, not a return engine.
-- The average stock beat the Nifty 500 index by 6.4% a year. That is the small/mid-cap boom of these
+- The average stock beat the Nifty 500 index by 6.2% a year. That is the small/mid-cap boom of these
   years (equal weight vs company size), not skill. Don't count on it repeating.
 - **Check of the data:** today's list tested on the NSE-rebuilt prices gives the same picture as the main
-  store (momentum +39.6% vs +41.3%, average stock +27.5% vs +27.5%). So the gap comes from the missing
+  store (momentum +39.4% vs +41.1%, average stock +27.1% vs +27.0%). So the gap comes from the missing
   companies, not from different prices.
 
 What is still not perfect:
@@ -141,11 +144,21 @@ On a new PC: install Python 3.12, then double-click `setup.bat`, fill in `.env`,
 | Today's live prices | Fyers quotes (real-time) when logged in; otherwise Yahoo (~15 minutes delayed) |
 | Holidays | Detected from NSE's own files, including Diwali Muhurat and Budget-day sessions |
 
-The first build repaired Yahoo's history automatically:
-- removed 1,290 fake "flat" bars;
-- filled missing days from NSE;
-- fixed 125 split, bonus and demerger errors (VEDL, TMPV, HEGAM, TRENT and others);
-- kept genuine crashes untouched (YES Bank 2020, POLICYBZR 2026).
+The first build repairs Yahoo's history automatically with NSE's files:
+- removes fake "flat" bars (1,290; e.g. on 18 Mar 2025 Yahoo repeated the day before's price for 469 stocks) and
+  dates with no prices at all (15 Jan 2026, an NSE holiday);
+- adds the NSE sessions Yahoo lacks entirely: 13 Feb and 29 Mar 2019, Budget days 1 Feb 2020 and 2026, Muhurat
+  2023, and the Saturday sessions of 20 Jan, 2 Mar and 18 May 2024 (every calendar day is checked with NSE once);
+- fills missing prices from NSE (about 4,000), converted to the same split-adjusted units as Yahoo's history;
+- fixes splits, bonuses, demergers and wrong Yahoo prices (18: VEDL, TMPV, HEGAM, TRENT, CGCL and others);
+- keeps real moves untouched (YES Bank 2020, POLICYBZR 2026), also across a gap: a price jump is compared with NSE's move over exactly the same
+  days. Before Oct 2026 it compared across missing sessions and gaps, and "corrected" real moves by 5–32%
+  (IFCI, IRCON, HINDZINC, PNB Housing, Force Motors, CONCOR, Karur Vysya). Updating from that version downloads
+  the history again once (about 4 minutes).
+
+Corporate-action notices are looked up in NSE's files around each ex-date (the day itself, the days before and
+the day after; a moved ex-date counts on its new date), and the last stored day is checked again once the next
+day's notices are out.
 
 If NSE is unreachable for more than a day, Yahoo fills in temporarily. Those days are replaced with official data as soon as it is available.
 
@@ -159,12 +172,21 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
   last 5 days. REITs, InvITs and ETFs are left out: they are funds, not companies (about 40 gold, silver, liquid
   and index ETFs trade enough to have ranked in the top 500).
 - **Renames** are stitched into one history (old symbol before the change date → today's symbol).
-- **Splits, bonuses and demergers:** 474 adjustments from NSE's corporate-action notices, using the same factor
+- **Splits, bonuses and demergers:** 385 adjustments from NSE's corporate-action notices, using the same factor
   rule as the main store (bonus a:b → b/(a+b), split by the face-value ratio, demerger by the special-session
   price). NSE's notice files are incomplete, so 8 jumps with no notice were fixed by checks: Yahoo's
   adjusted history, a clean split ratio, or a special dividend (360 ONE, Shriram Finance, Majesco's ₹974 payout ...).
-- Checked against the main store: for 9 in 10 shared stocks the two price histories agree within 2% on every day.
-  Where they differ, the cause was mostly the store (gaps in Yahoo's history, sessions it lacks) or rights issues.
+- NSE's newer day file lacks about 10% of the stocks on 13 Apr 2020, 28 Sep 2020 and 7 Mar 2022; the older
+  bhavcopy of the same day fills them in.
+- A stock that didn't trade for a while (suspension) keeps its real move when it resumes. NSE's "previous close"
+  is then often a placeholder (BCG 2025: ₹2, opened at ₹21.80), so it is only trusted for a clean split ratio
+  the market agrees with (CCAVENUE Oct 2026: 10:1 consolidation).
+- Checked against the main store (Oct 2026): 469 of 500 shared stocks agree within 2% on every day. The other 31:
+  12 rights issues (Yahoo adjusts them, NSE's prices here don't), 6 demergers where Yahoo used a different
+  factor (SIEMENS 2025, NMDC 2022 ...), 2 small demergers without a price gap that only Yahoo adjusts (Aarti
+  Industries and TTML, July 2019), and Yahoo prices 2–4% off NSE on 18 Mar 2019 and 2 May 2025 (7 stocks, one day)
+  and for about a week each between Apr 2024 and Nov 2025 (IIFL, Sobha, UPL, Thangamayil, M&M Finance, Adani
+  Enterprises). Those Yahoo errors remain in the main store: they are too small for its >20% gap check.
 - Cached under `data/history/pit/`. Scans add each new NSE day (about 30 s, once a day).
 
 ---

@@ -78,20 +78,30 @@ def fetch_bc(day: date) -> pd.DataFrame | None:
     return out
 
 
+NON_EQUITY_BONUS = re.compile(r"NCRPS|DEBT|PREF")       # bonus preference shares / debentures
+BONUS_RATIO = re.compile(r"BON(?:US)?\W*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)")
+SPLIT_WORDS = re.compile(r"SPLT|SPLIT|SUB-DIV|CONSOLIDAT")
+SPLIT_RATIO = re.compile(r"(\d+(?:\.\d+)?)\D{0,25}?TO\D{0,8}?(\d+(?:\.\d+)?)")   # face value x ... TO ... y
+
+
 def purpose_factor(purposes: list[str]) -> float | None:
     """Price adjustment factor implied by the purpose text, or None if it must be read from the
-    market (demergers etc.). BONUS a:b -> b/(a+b); split/consolidation FROM Rs x TO Rs y -> y/x."""
+    market (demergers, bonus preference shares etc.). BONUS a:b -> b/(a+b); split/consolidation
+    of face value x TO y -> y/x. NSE writes these many ways: "BONUS- 1:2", "BON 2:1/FVSPLIT RS2TORE1",
+    "FV SPLT FRM RS 10 TO 1", "FVSPLTFRM10TO1", "CONSOLIDATION-RE1 TO RS10"."""
     factor, known = 1.0, False
     for p in purposes:
-        if "DEMERGER" in p or "ARRANGEMENT" in p or "CAPITAL REDUCTION" in p:
+        if "DEMERGER" in p or "ARRANGEMENT" in p or "CAPITAL REDUCTION" in p or NON_EQUITY_BONUS.search(p):
             return None
-        m = re.search(r"BONUS\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)", p)
+        rest = p
+        m = BONUS_RATIO.search(p)
         if m:
             a, b = float(m.group(1)), float(m.group(2))
-            factor *= b / (a + b)
-            known = True
-            continue
-        m = re.search(r"(?:FRM|FROM)\s*R[SE]\.?\s*([\d.]+)\D*?(?:TO)\s*R[SE]\.?\s*([\d.]+)", p)
+            if a > 0 and b > 0:
+                factor *= b / (a + b)
+                known = True
+            rest = p[m.end():]                    # a split may follow in the same text
+        m = SPLIT_RATIO.search(rest) if SPLIT_WORDS.search(rest) else None
         if m:
             x, y = float(m.group(1)), float(m.group(2))
             if x > 0 and y > 0:
@@ -109,6 +119,29 @@ def actions_on(symbol: str, ex_day: date, prior_days: list[date]) -> list[str]:
         if hit:
             return hit
     return []
+
+
+RESCHEDULE_DAYS = 15     # the same action listed with ex-dates this close together = one action
+
+
+def listed_on(ex_day: date, days: list[date]) -> dict[str, list[str]]:
+    """Symbols with a price-affecting action listed for ex-date `ex_day` in the notice files of
+    `days` -> its purposes. NSE sometimes moves an ex-date (HAL 2023: 29 -> 28 Sep; Inox Wind 2024:
+    17 -> 24 May): the newest of these files that lists the same action decides its date, so a moved
+    action counts only on its new date."""
+    latest: dict[tuple[str, str], tuple[date, str]] = {}   # (symbol, purpose) -> (file day, ex-date)
+    for day in sorted(set(days)):
+        for (sym, ex), purposes in _notice_index(day).items():
+            ex_d = _parse_date(ex)
+            if ex_d is None or abs((ex_d - ex_day).days) > RESCHEDULE_DAYS:
+                continue
+            for p in purposes:
+                latest[(sym, p)] = max(latest.get((sym, p), (day, ex)), (day, ex))
+    out: dict[str, list[str]] = {}
+    for (sym, p), (_, ex) in latest.items():
+        if ex == ex_day.isoformat():
+            out.setdefault(sym, []).append(p)
+    return {s: sorted(v) for s, v in out.items()}
 
 
 _bc_index: dict[date, dict[tuple[str, str], list[str]]] = {}

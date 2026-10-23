@@ -6,9 +6,9 @@ Where the data comes from
                                           delivery %, and the official previous close.
   Today's forming candle                : Fyers real-time quotes when logged in, else Yahoo (delayed).
 
-Splits / bonus issues: NSE's file states each stock's official *adjusted* previous close. If it
-differs from the close we stored, a corporate action happened and the stock's whole history is
-rescaled by that exact factor - so a 1:2 split never shows up as a fake 50% crash.
+Splits / bonus issues: NSE's corporate-action notices give the ratio (corporate.py). On the ex-date
+the stock's whole earlier history is rescaled by that exact factor - so a 1:2 split never shows up
+as a fake 50% crash. NSE's day file states the raw (unadjusted) previous close.
 Only completed days are saved; the live candle is kept in memory only.
 """
 from __future__ import annotations
@@ -34,6 +34,10 @@ NSE_MAX_DAYS = 60           # beyond this gap, catch up with Yahoo first
 CA_TOLERANCE = 0.015        # ignore adjustment factors within 1.5% of 1 (rounding / source noise)
 RETRY_FAILED_AFTER_DAYS = 3
 NSE_PUBLISH_HOUR = 18       # don't look for today's NSE file before ~6 PM IST
+# 2: missing NSE sessions added, NSE fills converted to our price units, gaps compared like for like.
+# A store repaired by an older version is downloaded again once (its history may hold wrong
+# "data corrections" that can't be undone in place).
+REPAIR_VERSION = 2
 
 
 class PanelStore:
@@ -182,68 +186,186 @@ def _apply_corporate_action(frames: dict, sym: str, before: pd.Timestamp, factor
 
 
 GAP_SUSPECT = 0.20          # overnight move >20% => check NSE for a split/bonus/demerger
+FILL_MAX_GAP = 0.05         # a stock that opened 5%+ away from its previous close is not filled from NSE:
+                            # it may be a split/bonus ex-date, and a gap beats a price in the wrong units
 
 
-def _repair_history(frames: dict, syms: list[str], log=print) -> dict:
+def _repair_history(frames: dict, syms: list[str], log=print, holidays: set[str] | None = None) -> dict:
     """Fix known defects in downloaded (Yahoo) history using NSE's official day files:
-      1. fake flat bars (O=H=L=C, zero volume) are removed;
-      2. trading days missing for many stocks are filled from NSE;
-      3. overnight gaps >20% are checked against NSE's adjusted previous close and, where a split /
-         bonus / demerger explains them, the earlier history is rescaled by the exact factor."""
+      1. fake flat bars (O=H=L=C, zero volume) are removed, and dates without a single stock price
+         (Yahoo lists 15 Jan 2026, an NSE holiday);
+      2. NSE sessions our source lacks entirely (Budget-day, Saturday and Muhurat sessions, a few
+         regular days) are added: every calendar day in the stored range that isn't known either way
+         is checked against NSE once (needs `holidays`, which collects the definite non-trading days);
+      3. days a stock traded on NSE but has no price here are filled from NSE's files, converted to
+         our price units (see _fill_from_nse);
+      4. overnight gaps >20% are checked against NSE and, where a split / bonus / demerger (or a wrong
+         price in our source) explains them, the earlier history is rescaled by the exact factor."""
     eq = [s for s in syms if s in frames["close"].columns and s not in INDEX_SYMBOLS]
-    report = {"flat_bars": 0, "filled_days": 0, "adjusted": []}
+    report = {"flat_bars": 0, "empty_rows": 0, "sessions_added": [], "filled_days": 0, "filled_prices": 0,
+              "adjusted": []}
     if not eq:
         return report
-    close, vol = frames["close"][eq], frames["volume"][eq]
-    flat = (vol == 0) & (frames["high"][eq] == frames["low"][eq])
+    flat = (frames["volume"][eq] == 0) & (frames["high"][eq] == frames["low"][eq])
     report["flat_bars"] = int(flat.to_numpy().sum())
     if report["flat_bars"]:
         for f in COLS:
             frames[f][eq] = frames[f][eq].mask(flat)
-        close = frames["close"][eq]
+    report["empty_rows"] = _drop_empty_rows(frames)
+    if holidays is not None:
+        report["sessions_added"] = _add_missing_sessions(frames, holidays, log)
+    report["filled_days"], report["filled_prices"] = _fill_from_nse(frames, eq)
 
-    present = close.notna()
-    listed = present.cummax() & present.iloc[::-1].cummax().iloc[::-1]
-    missing = (listed & ~present).sum(axis=1)
-    fill_dates = list(missing[missing >= max(5, 0.02 * len(eq))].index)
-    if fill_dates:
-        files = nse.fetch_days([d.date() for d in fill_dates])
-        upd = {f: [] for f in FIELDS}
-        idx = []
-        for d, fl in sorted(files.items()):
-            if fl.status != "ok":
-                continue
-            st = fl.stocks.reindex(eq)
-            idx.append(pd.Timestamp(d))
-            for f in FIELDS:
-                upd[f].append(st[f].to_numpy(dtype=float))
-        if idx:
-            new = {f: pd.DataFrame(np.vstack(upd[f]), index=pd.DatetimeIndex(idx, name="date"), columns=eq)
-                   for f in FIELDS}
-            for f in FIELDS:  # only fill holes, never overwrite existing values here
-                base = frames[f].reindex(columns=frames[f].columns.union(eq))
-                cur = base.reindex(index=new[f].index)[eq]
-                new[f] = new[f].where(cur.isna())
-            _merge(frames, new)
-            report["filled_days"] = len(idx)
-        close = frames["close"][eq]
-
+    close = frames["close"][eq]
     prev = close.ffill().shift(1)
     gaps = (((frames["open"][eq] / prev - 1).abs() > GAP_SUSPECT)
             | ((close / prev - 1).abs() > GAP_SUSPECT)) & close.notna()
     events = sorted((close.index[i], eq[j]) for i, j in zip(*np.nonzero(gaps.to_numpy())))
     if events:
         files = nse.fetch_days(sorted({d.date() for d, _ in events}))
-        prior_day = {d: _prior_days(frames, d) for d, _ in events}
+        look = {d: _notice_days(close.index, d) for d, _ in events}
         with ThreadPoolExecutor(max_workers=4) as ex:   # warm the corporate-action notice cache
-            list(ex.map(corporate.fetch_bc, sorted({p[0] for p in prior_day.values() if p})))
+            list(ex.map(corporate.fetch_bc, sorted({x for days in look.values() for x in days})))
         # Oldest first, so each factor is computed in the units of the not-yet-adjusted history.
         for d, s in events:
-            adj = _event_factor(frames, s, d, files.get(d.date()), prior_day[d])
+            adj = _event_factor(frames, s, d, files.get(d.date()), look[d])
             if adj:
                 _apply_corporate_action(frames, s, d, adj["factor"])
                 report["adjusted"].append(adj)
     return report
+
+
+def _drop_empty_rows(frames: dict) -> int:
+    """Remove dates without a single stock price (not a trading day, e.g. a holiday Yahoo lists)."""
+    stocks = [c for c in frames["close"].columns if c not in INDEX_SYMBOLS]
+    empty = frames["close"][stocks].isna().all(axis=1)
+    if not empty.any():
+        return 0
+    for f in FIELDS:
+        frames[f] = frames[f][~empty.reindex(frames[f].index, fill_value=False)]
+    return int(empty.sum())
+
+
+SESSION_CHECKS_PER_RUN = 150   # NSE blocks bursts of requests: unknown days are checked a batch per run
+
+
+def _session_priority(d: date) -> tuple:
+    """Likeliest missing sessions first: weekdays, Budget day (1 Feb), weekends in the Diwali
+    (Muhurat) season; then other weekends, newest first."""
+    likely = d.weekday() < 5 or (d.month, d.day) == (2, 1) or (10, 15) <= (d.month, d.day) <= (11, 20)
+    return (not likely, -d.toordinal())
+
+
+def _add_missing_sessions(frames: dict, holidays: set[str], log=print) -> list[str]:
+    """Add NSE sessions inside the stored date range that our dates lack. Every calendar day not in
+    the store and not a known non-trading day is checked against NSE's archive once (the answers are
+    remembered in `holidays`): days whose NSE file is already cached (e.g. by the point-in-time
+    build) at once, the others SESSION_CHECKS_PER_RUN per run. New sessions get NSE's index values
+    and empty stock rows, which _fill_from_nse fills. Returns the added days."""
+    idx = frames["close"].index
+    if not len(idx):
+        return []
+    have = {d.date() for d in idx}
+    todo = [d for d in _days(idx[0].date(), idx[-1].date()) if d not in have and d.isoformat() not in holidays]
+    if not todo:
+        return []
+    cached = [d for d in todo if (nse.NSE_DIR / f"stocks_{d:%Y%m%d}.parquet").exists()]
+    rest = sorted(set(todo) - set(cached), key=_session_priority)
+    todo = cached + rest[:SESSION_CHECKS_PER_RUN]
+    if len(rest) > 20:
+        log(f"Checking {min(len(rest), SESSION_CHECKS_PER_RUN)} of {len(rest)} unchecked calendar days against "
+            "NSE's archive for sessions missing from the price history...")
+    files = nse.fetch_days(todo, workers=2)
+    today, new = ist_today(), []
+    for d, fl in sorted(files.items()):
+        if fl.status == "ok":
+            new.append(d)
+        elif fl.status == "holiday" or (fl.status == "missing" and (today - d).days > 3):
+            holidays.add(d.isoformat())       # NSE has no file for it: not a trading day
+    if new:
+        rows = pd.DatetimeIndex([pd.Timestamp(d) for d in new], name="date")
+        add = {f: pd.DataFrame(np.nan, index=rows, columns=frames[f].columns) for f in FIELDS}
+        for d, ts in zip(new, rows):
+            for s in INDEX_SYMBOLS:
+                r = nse.index_row(files[d], s)
+                if r is not None:
+                    for f in COLS:
+                        if s in add[f].columns:
+                            add[f].at[ts, s] = float(r[f])
+        _merge(frames, add)
+        log(f"Added {len(new)} NSE trading session(s) missing from the downloaded history: "
+            f"{', '.join(d.isoformat() for d in new)}")
+    return [d.isoformat() for d in new]
+
+
+def _fill_from_nse(frames: dict, eq: list[str]) -> tuple[int, int]:
+    """Fill days a stock traded on NSE but has no price here (a session our source lacks, a fake bar
+    that was removed, a gap in one stock's download) from NSE's day files. NSE's prices are raw while
+    ours are back-adjusted for later splits/bonuses, so each fill is converted to our units with the
+    ratio of our previous price to NSE's close on that same day. A stretch of holes is filled oldest
+    first and stops where a split/bonus may have changed the units: an opening gap of 5%+ (a possible
+    ex-date) or a day without an NSE file. Returns (days with fills, prices filled)."""
+    if not len(frames["close"]):
+        return 0, 0
+    close = frames["close"].reindex(columns=eq)
+    idx = close.index
+    present = close.notna().to_numpy()
+    listed = np.logical_or.accumulate(present, axis=0) & np.logical_or.accumulate(present[::-1], axis=0)[::-1]
+    holes = listed & ~present
+    rows = np.flatnonzero(holes.any(axis=1))
+    if not len(rows):
+        return 0, 0
+    pos = np.arange(len(idx), dtype=float)[:, None]
+    prev_row = pd.DataFrame(np.where(present, pos, np.nan)).ffill().shift(1).to_numpy()  # last price before
+    before = {int(x) for x in np.unique(prev_row[holes]) if x >= 0}
+    files = nse.fetch_days(sorted({idx[i].date() for i in rows} | {idx[i].date() for i in before}))
+
+    def nse_close(i: int, s: str) -> float | None:
+        fl = files.get(idx[i].date())
+        sym = corporate.symbol_on(s, idx[i].date())
+        if fl is None or fl.status != "ok" or sym not in fl.stocks.index:
+            return None
+        c = float(fl.stocks.at[sym, "close"])
+        return c if c > 0 else None
+
+    arr = {f: frames[f].reindex(index=idx, columns=eq).to_numpy(dtype=float, copy=True) for f in FIELDS}
+    out = {f: np.full(holes.shape, np.nan) for f in FIELDS}
+    last_fill = np.full(len(eq), -1)
+    blocked = np.full(len(eq), -1)       # last hole where the units may have changed
+    n_days = n_prices = 0
+    for i in rows:
+        d = idx[i].date()
+        js = np.flatnonzero(holes[i])
+        fl = files.get(d)
+        if fl is None or fl.status != "ok":
+            blocked[js] = i
+            continue
+        got = 0
+        for j in js:
+            p = int(max(prev_row[i, j], last_fill[j]))
+            if blocked[j] > p:
+                continue
+            sym = corporate.symbol_on(eq[j], d)
+            if sym not in fl.stocks.index:
+                continue                 # didn't trade on NSE that day
+            r = fl.stocks.loc[sym]
+            pc, o, c = float(r["prev_close"]), float(r["open"]), float(r["close"])
+            if not (pc > 0 and c > 0) or (o > 0 and abs(o / pc - 1) > FILL_MAX_GAP) or abs(c / pc - 1) > GAP_SUSPECT:
+                blocked[j] = i
+                continue
+            k = arr["close"][p, j] / (nse_close(p, eq[j]) or pc)
+            for f in ("open", "high", "low", "close"):
+                v = float(r[f])
+                out[f][i, j] = arr[f][i, j] = (v if v > 0 else c) * k
+            out["volume"][i, j] = arr["volume"][i, j] = float(r["volume"]) / k
+            out["deliv_pct"][i, j] = float(r["deliv_pct"])
+            last_fill[j] = i
+            got += 1
+        n_days += got > 0
+        n_prices += got
+    if n_prices:
+        _merge(frames, {f: pd.DataFrame(v, index=idx, columns=eq) for f, v in out.items()})
+    return n_days, n_prices
 
 
 def _prior_days(frames: dict, ts: pd.Timestamp, n: int = 3) -> list[date]:
@@ -251,15 +373,56 @@ def _prior_days(frames: dict, ts: pd.Timestamp, n: int = 3) -> list[date]:
     return [x.date() for x in idx[idx < ts][-n:][::-1]]
 
 
+def _notice_days(idx: pd.DatetimeIndex, ts: pd.Timestamp, before: int = 3, after: int = 2) -> list[date]:
+    """NSE notice files to look in for actions with ex-date `ts`, most telling first (as pit._adjust
+    does): the ex-date's own file, the trading day before, the day after, then further out. NSE lists
+    most actions a few days ahead, some first on the ex-date itself or only the day after."""
+    b = [x.date() for x in idx[idx < ts][-before:][::-1]]
+    a = [x.date() for x in idx[idx > ts][:after]]
+    return [ts.date(), *b[:1], *a[:1], *b[1:], *a[1:]]
+
+
+def _nse_close(s: str, day: date) -> float | None:
+    """NSE's official (raw) close of `s` on `day`, or None if unknown."""
+    fl = nse.fetch_day(day)
+    sym = corporate.symbol_on(s, day)
+    if fl.status != "ok" or fl.stocks is None or sym not in fl.stocks.index:
+        return None
+    c = float(fl.stocks.at[sym, "close"])
+    return c if c > 0 else None
+
+
+CLEAN_RATIOS = sorted({1 / k for k in (2, 3, 4, 5, 6, 8, 10, 20, 25, 50, 100)}
+                      | {2 / 5, 3 / 10, 2 / 7, 3 / 7, 2.0, 4.0, 5.0, 10.0})   # splits, bonuses, consolidations
+
+
+def _rebased(ratio: float, open_gap: float) -> bool:
+    """NSE re-based the price for a corporate action while the stock wasn't trading (CCAVENUE Oct
+    2026: 13.83 -> base 138.30, a 10:1 consolidation with no notice): its previous close differs from
+    the last close by a clean ratio (within 1%) and the stock opened near that base (within 20%).
+    A base far from the opening price is a placeholder for price discovery after a long suspension
+    (BCG 2025: base Rs 2, opened at Rs 21.80), not an adjustment."""
+    near = min(CLEAN_RATIOS, key=lambda f: abs(ratio / f - 1))
+    return abs(ratio / near - 1) <= 0.01 and abs(open_gap - 1) <= GAP_SUSPECT
+
+
 def _event_factor(frames: dict, s: str, d: pd.Timestamp, fl, prior: list[date]) -> dict | None:
     """Factor to rescale `s`'s history before day `d` so that its move on `d` matches NSE's
     official move net of any corporate action. Works whether or not our source already adjusted:
         factor = our_move * ca_factor / official_move
       our_move      = our close(d) / our previous close
-      official_move = NSE close(d) / NSE previous close (raw)
+      official_move = NSE close(d) / NSE's close on the same previous day (raw)
       ca_factor     = from the NSE notice (bonus a:b -> b/(a+b), split Rs x->y -> y/x), or for a
-                      demerger the special-session price: NSE open(d) / NSE previous close; 1 if none.
-    A genuine crash (no corporate action, our data = NSE) gives factor 1 and is left untouched."""
+                      demerger the special-session price: NSE open(d) / the same previous close; 1 if none.
+    A genuine crash (no corporate action, our data = NSE) gives factor 1 and is left untouched.
+    Both moves must span the same days. NSE's file gives the close of the stock's previous session,
+    which may be later than our previous price (a session or a stretch our source lacks), so NSE's
+    close on the day of our previous price is used. If that is unknown, only an action NSE lists is
+    applied - a "data correction" is never made from moves over different periods (a real move on
+    the missing day would look like a corporate action). Exceptions, where NSE's previous close is
+    a base price it set for a corporate action: across a symbol change (it includes any share swap),
+    and when it differs from the older close by a clean split/bonus ratio and the stock opened near
+    it (see _rebased)."""
     if fl is None or fl.status != "ok":
         return None
     s_then = corporate.symbol_on(s, d.date())
@@ -270,18 +433,49 @@ def _event_factor(frames: dict, s: str, d: pd.Timestamp, fl, prior: list[date]) 
     our_now = frames["close"].at[d, s]
     if ours.empty or not our_now > 0 or not row["close"] > 0 or not row["prev_close"] > 0:
         return None
+    base = float(row["prev_close"])
+    prev_day = ours.index[-1].date()
+    if abs(float(ours.iloc[-1]) / base - 1) > 1e-3 and corporate.symbol_on(s, prev_day) == s_then:
+        then = _nse_close(s, prev_day)    # our prices are not NSE's raw ones: check the same day
+        if then is None or not _rebased(base / then, float(row["open"]) / base):
+            base = then
     purposes = corporate.actions_on(s_then, d.date(), prior)
+    if base is None:
+        if not purposes:
+            return None
+        base = float(row["prev_close"])
     ca = 1.0
     if purposes:
         pf = corporate.purpose_factor(purposes)
-        ca = pf if pf is not None else (float(row["open"]) / float(row["prev_close"]) if row["open"] > 0 else 1.0)
+        ca = pf if pf is not None else (float(row["open"]) / base if row["open"] > 0 else 1.0)
     our_move = float(our_now) / float(ours.iloc[-1])
-    official_move = float(row["close"]) / float(row["prev_close"])
+    official_move = float(row["close"]) / base
     factor = our_move * ca / official_move
     if not (np.isfinite(factor) and factor > 0 and abs(factor - 1) > CA_TOLERANCE):
         return None
     return {"symbol": s, "date": d.date().isoformat(), "factor": round(factor, 6),
             "reason": " + ".join(purposes) if purposes else "data correction (matched to NSE)"}
+
+
+def _check_listed_actions(frames: dict, d: date, fl, look: list[date] | None = None) -> list[dict]:
+    """Adjust stored history for the splits / bonuses / demergers NSE lists with ex-date `d` (a day
+    already in the store, `fl` its NSE file). Notices are looked up in several files around the
+    ex-date (see _notice_days) and a moved ex-date counts only on its new date. Safe to repeat: an
+    action that was already applied gives factor 1."""
+    if fl is None or fl.status != "ok":
+        return []
+    ts = pd.Timestamp(d)
+    look = look or _notice_days(frames["close"].index, ts)
+    listed = corporate.listed_on(d, look)
+    done = []
+    for s in frames["close"].columns:
+        if s in INDEX_SYMBOLS or corporate.symbol_on(s, d) not in listed or pd.isna(frames["close"].at[ts, s]):
+            continue
+        adj = _event_factor(frames, s, ts, fl, look)
+        if adj:
+            _apply_corporate_action(frames, s, ts, adj["factor"])
+            done.append(adj)
+    return done
 
 
 def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=None, log=print):
@@ -309,24 +503,31 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
         i = frames["close"][s].last_valid_index()
         return i.date() if i is not None else None
 
-    # 1) Deep history from Yahoo for new symbols, and catch-up for very stale ones.
+    # 1) Deep history from Yahoo for new symbols, and catch-up for very stale ones. A store repaired
+    #    by an older version is downloaded again once (see REPAIR_VERSION).
+    old_repair = meta.get("repair_version", 0) < REPAIR_VERSION
+    rebuild = old_repair and bool(len(frames["close"]))
+    if rebuild:
+        log("Rebuilding the price history once with the improved NSE repair (~3-6 min)...")
     starts: dict[str, date] = {}
     for s in all_syms:
         if recently_failed(s):
             continue
         m, last = meta["symbols"].get(s), last_date(s)
-        if not m or last is None or date.fromisoformat(m["full_from"]) > start_full + timedelta(days=FULL_SLACK_DAYS):
+        if rebuild or not m or last is None or \
+                date.fromisoformat(m["full_from"]) > start_full + timedelta(days=FULL_SLACK_DAYS):
             starts[s] = start_full
         elif (today - last).days > NSE_MAX_DAYS:
             starts[s] = last - timedelta(days=7)
+    replace: set[str] = set()
     if starts:
         n_full = sum(1 for d in starts.values() if d == start_full)
         log(f"Downloading history for {len(starts)} symbols"
-            f"{f' ({n_full} new - first run takes ~2-4 min)' if n_full > 20 else ''}...")
+            f"{f' ({n_full} new - first run takes ~2-4 min)' if n_full > 20 and not rebuild else ''}...")
         fetched = yahoo.history(list(starts), starts, today, progress=progress)
         if yahoo.outage:
             log("Yahoo looks throttled/unavailable for part of the download - those symbols will be retried.")
-        good, replace = {}, set()
+        good = {}
         for s, df in fetched.items():
             df = df[df.index < pd.Timestamp(today)]  # today's row comes from NSE / live quotes
             if df.empty:
@@ -348,14 +549,20 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
     else:
         touched = []
 
-    # 1b) Repair downloaded history (fake bars, missing days, unadjusted splits) with NSE data.
-    to_repair = touched if meta.get("repaired_v1") else all_syms
+    # 1b) Repair downloaded history (fake bars, missing sessions and days, unadjusted splits) with NSE data.
+    to_repair = all_syms if old_repair else touched
     if to_repair and len(frames["close"]):
-        rep = _repair_history(frames, to_repair, log)
-        meta["repaired_v1"] = True
-        if rep["flat_bars"] or rep["filled_days"] or rep["adjusted"]:
-            log(f"History repaired: {rep['flat_bars']} fake bars removed, {rep['filled_days']} days filled "
-                f"from NSE, {len(rep['adjusted'])} splits/bonuses/demergers adjusted")
+        rep = _repair_history(frames, to_repair, log, holidays)
+        if old_repair and not yahoo.outage:
+            meta["repair_version"] = REPAIR_VERSION
+            meta["repaired_v1"] = True        # read by older versions of this module
+            # The old log described adjustments to the history that was just replaced.
+            meta["corporate_actions"] = [c for c in meta.get("corporate_actions", []) if c["symbol"] not in replace]
+        if rep["flat_bars"] or rep["empty_rows"] or rep["sessions_added"] or rep["filled_prices"] or rep["adjusted"]:
+            log(f"History repaired: {rep['flat_bars']} fake bars removed, {rep['empty_rows']} empty dates dropped, "
+                f"{len(rep['sessions_added'])} missing sessions added, {rep['filled_prices']} prices on "
+                f"{rep['filled_days']} days filled from NSE, {len(rep['adjusted'])} splits/bonuses/demergers/"
+                "data errors adjusted")
             corp_actions.extend(rep["adjusted"])
             changed = True
 
@@ -364,6 +571,8 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
     lasts = [d for d in (last_date(s) for s in touched) if d and (today - d).days <= NSE_MAX_DAYS]
     if len(frames["close"]):
         lasts.append(frames["close"].index[-1].date())
+    if rebuild:   # Yahoo's copy replaced the official prices of recent days: put NSE's back
+        lasts.append(today - timedelta(days=NSE_MAX_DAYS))
     nse_status = "up to date"
     provisional = set(meta.get("provisional", []))   # days filled from Yahoo while NSE was unavailable
     if lasts:
@@ -402,20 +611,23 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
                              for f in FIELDS}
                 _merge(frames, {f: v.dropna(axis=1, how="all") for f, v in day_frame.items()})
                 changed = True
-                # Corporate actions with ex-date d (split, bonus, demerger) for our symbols.
-                prior = _prior_days(frames, ts)
-                notices = corporate.fetch_bc(prior[0]) if prior else None
-                if notices is not None:
-                    todays = notices[notices["ex_date"] == d.isoformat()]
-                    for s in sorted(set(todays["symbol"]) & set(frames["close"].columns)):
-                        adj = _event_factor(frames, s, ts, fl, prior)
-                        if adj:
-                            _apply_corporate_action(frames, s, ts, adj["factor"])
-                            corp_actions.append(adj)
+            # Corporate actions (split, bonus, demerger) with these ex-dates. NSE lists most a few days
+            # ahead, some only on the ex-date or the day after, so the stored day before the first new
+            # one is checked again now that a later notice file exists (a no-op if already adjusted).
+            if ok_days:
+                idx = frames["close"].index
+                before = idx[idx < pd.Timestamp(ok_days[0])]
+                recheck = [before[-1].date()] if len(before) and (ok_days[0] - before[-1].date()).days <= 7 else []
+                for d in recheck + ok_days:
+                    found = _check_listed_actions(frames, d, files[d] if d in files else nse.fetch_day(d))
+                    corp_actions.extend(found)
+                    changed |= bool(found)
             if ok_days and not unavailable:
                 nse_status = f"NSE official data to {ok_days[-1].isoformat()}"
 
-    meta["holidays"] = sorted(holidays)[-600:]
+    # Non-trading days are remembered for the whole lookback, so the missing-session check in
+    # _repair_history doesn't ask NSE about them again.
+    meta["holidays"] = sorted(h for h in holidays if h >= (start_full - timedelta(days=7)).isoformat())
     meta["provisional"] = sorted(provisional)
     if corp_actions:
         log("Price history adjusted: " + ", ".join(f"{c['symbol']} {c['date']} x{c['factor']:.4g} ({c['reason']})" for c in corp_actions))

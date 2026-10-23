@@ -193,10 +193,10 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             stop = None
             if o["action"] == "BUY" and getattr(s, "stop_pct", None):
                 stop = close_last.get(sym, np.nan) * (1 - s.stop_pct / 100)
-            info = results_info(sym)
-            warn = (o["action"] == "BUY" and info.get("results_on") is not None
-                    and info["results_in_days"] <= int((cfg.get("results") or {}).get("warn_days", 7)))
-            actions.append({**o, **meta.get(sym, {}), **sized(sym, stop), **info,
+            due = results_info(sym)    # not `info`: that is refresh_store's, saved to latest.json below
+            warn = (o["action"] == "BUY" and due.get("results_on") is not None
+                    and due["results_in_days"] <= int((cfg.get("results") or {}).get("warn_days", 7)))
+            actions.append({**o, **meta.get(sym, {}), **sized(sym, stop), **due,
                             "results_warning": warn, "stop": _num(stop), "provisional": live})
         ranking = []
         if s.kind == "rank":
