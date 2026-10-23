@@ -16,7 +16,7 @@ import pandas as pd
 
 from .costs import CostModel, TaxModel
 from .engine import EventStrategy, _curve_stats, evaluate, equal_weight_index, simulate, working_status
-from .events import upcoming_results
+from .events import results_history, upcoming_results
 from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
 from .panel import Factors, panel_from_wide
@@ -27,6 +27,7 @@ from .strategies import build_strategies, tradable_mask
 from .universe import get_universe
 
 LATEST_FILE = RESULTS_DIR / "latest.json"
+TIMING_CACHE = RESULTS_DIR / "timing_cache.json"
 CURVES_FILE = RESULTS_DIR / "curves.parquet"
 KEEP_SCAN_FILES = 60
 
@@ -46,6 +47,13 @@ def expected_volume_fraction(now=None) -> float | None:
         return None
     xs, ys = zip(*_VOLUME_CURVE)
     return max(float(np.interp(mins, xs, ys)), 0.05)
+
+
+def _load_json(path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def _num(x, nd=2):
@@ -103,7 +111,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         if note:
             holdings.loc[i, "symbol"] = new
             rename_notes[new] = note
-    symbols = list(dict.fromkeys(list(uni["symbol"]) + list(holdings["symbol"])))
+    etfs = [str(e).upper() for e in (cfg.get("etfs") or [])]
+    symbols = list(dict.fromkeys(list(uni["symbol"]) + list(holdings["symbol"]) + etfs))
 
     if update:
         frames, info = refresh_store(symbols, int(cfg.get("lookback_days", 3000)), fyers=fyers,
@@ -124,10 +133,14 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
 
     log("Testing strategies and computing signals...")
     p = panel_from_wide(frames, symbols)
-    f = Factors(p)
+    industry = {s: v["industry"] for s, v in meta.items() if v.get("industry")}
+    first = p.dates[0].date()
+    f = Factors(p, etfs=set(etfs), industry=industry,
+                results_dates=results_history(first, ist_now().date(), log=log))
     flt = cfg.get("filters") or {}
     trad = tradable_mask(f, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)))
-    ew = equal_weight_index(f, trad)
+    stock_trad = trad & ~f.etf_mask          # market statistics use stocks only
+    ew = equal_weight_index(f, stock_trad)
     costs = CostModel.from_config(cfg.get("costs"))
     tax = TaxModel.from_config(cfg.get("tax"))
     acct = cfg.get("account") or {}
@@ -150,20 +163,30 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     regime_up = bool(f.regime_up.iloc[-1])
 
     n500 = frames["close"][INDEX_N500].reindex(p.dates) if INDEX_N500 in frames["close"].columns else None
+    complete_upto = info.get("complete_upto") or p.dates[-1].date().isoformat()
+    timing_cache = _load_json(TIMING_CACHE)
     strat_out, curves = [], {}
     for s in build_strategies(cfg):
         res = simulate(s, f, costs, trad, capital=capital, min_position=min_position)
         m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500)
         # Timing luck: the same rules rebalanced a few days earlier (or started a few weeks later)
         # can give quite different results - report the spread, not just one number.
-        variants = ([replace(s, rebalance_offset=k) for k in (5, 10, 15)] if s.kind == "rank" else [s, s, s])
-        spread = [m["full"].get("cagr_pct")]
-        for i, v in enumerate(variants):
-            alt = simulate(v, f, costs, trad, capital=capital, min_position=min_position,
-                           warmup=252 if s.kind == "rank" else 252 + 21 * (i + 1))
-            spread.append(_curve_stats(alt.equity)["cagr_pct"])
-        spread = [x for x in spread if x is not None]
-        m["full"]["cagr_range"] = [min(spread), max(spread)] if spread else None
+        # (cached: recomputed only when the completed data or this strategy's settings change)
+        sig = json.dumps([(cfg.get("strategies") or {}).get(s.key), cfg.get("costs"), cfg.get("filters"),
+                          capital, complete_upto], sort_keys=True, default=str)
+        hit = timing_cache.get(s.key)
+        if hit and hit.get("sig") == sig:
+            m["full"]["cagr_range"] = hit["range"]
+        else:
+            variants = ([replace(s, rebalance_offset=k) for k in (5, 10, 15)] if s.kind == "rank" else [s, s, s])
+            spread = [m["full"].get("cagr_pct")]
+            for i, v in enumerate(variants):
+                alt = simulate(v, f, costs, trad, capital=capital, min_position=min_position,
+                               warmup=252 if s.kind == "rank" else 252 + 21 * (i + 1))
+                spread.append(_curve_stats(alt.equity)["cagr_pct"])
+            spread = [x for x in spread if x is not None]
+            m["full"]["cagr_range"] = [min(spread), max(spread)] if spread else None
+            timing_cache[s.key] = {"sig": sig, "range": m["full"]["cagr_range"]}
         status, why = working_status(m)
         eq = res.equity.dropna()
         curves[s.key] = eq / eq.iloc[0]
@@ -201,6 +224,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                                 "in_portfolio": sym in held, **results_info(sym)})
         strat_out.append({
             "key": s.key, "name": s.name, "description": s.description, "kind": s.kind,
+            "horizon": s.horizon, "evidence": s.evidence, "universe": s.universe,
             "status": status, "status_reason": why, "metrics": _clean_metrics(m),
             "yearly": {str(k): _num(v, 1) for k, v in yearly.items()},
             "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"])} for pp in res.open_positions],
@@ -213,15 +237,19 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         })
     # Working now first; among those, strategies with long independent research behind them before
     # experimental ones; then recent performance.
-    tier = {"momentum": 0, "low_vol": 1, "trend_breakout": 2}
+    tier = {"STRONG": 0, "MODERATE": 1, "WEAK": 2, "EXPERIMENTAL": 3}
     order = {"working": 0, "mixed": 1, "unknown": 2, "not-working": 3}
-    strat_out.sort(key=lambda x: (order.get(x["status"], 9), tier.get(x["key"], 5),
+    strat_out.sort(key=lambda x: (order.get(x["status"], 9), tier.get(x["evidence"], 5),
                                   -((x["metrics"].get("12m") or {}).get("return_pct") or -1e9)))
+    try:
+        TIMING_CACHE.write_text(json.dumps(timing_cache), encoding="utf-8")
+    except OSError:
+        pass
 
     # Market snapshot
     fresh = observed_last & close_last.notna()
     chg = (p.close.iloc[-1] / p.close.iloc[-2] - 1) * 100
-    pool = chg[fresh & trad.iloc[-1]].dropna()
+    pool = chg[fresh & stock_trad.iloc[-1]].dropna()
     vix_close = frames["close"].get(INDEX_VIX)
     nifty_close = frames["close"].get(INDEX_NIFTY)
 
@@ -250,10 +278,10 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                 "vol_ratio": _num(f.vol_ratio[sym].iloc[-1], 1)}
 
     movers_n = int(cfg.get("movers_count", 15))
-    vr = f.vol_ratio.iloc[-1][fresh & trad.iloc[-1]].dropna()
+    vr = f.vol_ratio.iloc[-1][fresh & stock_trad.iloc[-1]].dropna()
 
     # Holdings health check
-    mom_rank = f.momentum.iloc[-1][trad.iloc[-1]].rank(ascending=False)
+    mom_rank = f.momentum.iloc[-1][stock_trad.iloc[-1]].rank(ascending=False)
     hd = cfg.get("holdings_defaults") or {}
     holding_rows = []
     for h in holdings.itertuples(index=False):

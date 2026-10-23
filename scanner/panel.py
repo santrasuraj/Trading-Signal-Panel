@@ -93,8 +93,22 @@ def rolling(df: pd.DataFrame, how: str, n: int, min_count: int) -> pd.DataFrame:
 class Factors:
     """Lazily computed, cached indicators over a Panel. Access like attributes: f.sma200, f.rsi2 ..."""
 
-    def __init__(self, panel: Panel):
+    def __init__(self, panel: Panel, etfs: set[str] | None = None, industry: dict[str, str] | None = None,
+                 results_dates: dict[str, list[str]] | None = None):
         self.p = panel
+        self.etfs = set(etfs or ()) & set(panel.symbols)              # ETFs: excluded from stock rankings
+        self.industry = industry or {}                                 # symbol -> industry (for sector rotation)
+        self.results_dates = results_dates or {}                       # symbol -> ['YYYY-MM-DD', ...]
+
+    def _stocks_only(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Blank out ETF columns before cross-sectional statistics (ranks, z-scores, breadth)."""
+        return df.drop(columns=[c for c in df.columns if c in self.etfs]).reindex(columns=df.columns) if self.etfs else df
+
+    @cached_property
+    def etf_mask(self) -> pd.DataFrame:
+        cols = self.p.close.columns
+        return pd.DataFrame(np.broadcast_to([c in self.etfs for c in cols], self.p.close.shape),
+                            index=self.p.dates, columns=cols)
 
     # ---------------------------------------------------------------- helpers
     def sma(self, n: int) -> pd.DataFrame:
@@ -227,7 +241,7 @@ class Factors:
     @cached_property
     def rs_rating(self) -> pd.DataFrame:
         """IBD-style relative strength: weighted 3/6/9/12-month return, ranked 1-99 across stocks each day."""
-        raw = 0.4 * self.ret_3m + 0.2 * self.ret_6m + 0.2 * self.ret_9m + 0.2 * self.ret_12m
+        raw = self._stocks_only(0.4 * self.ret_3m + 0.2 * self.ret_6m + 0.2 * self.ret_9m + 0.2 * self.ret_12m)
         return (raw.rank(axis=1, pct=True) * 98 + 1).round()
 
     def momentum_score(self, skip_days: int = 0) -> pd.DataFrame:
@@ -237,7 +251,7 @@ class Factors:
         vol = self.vol_ann.replace(0, np.nan)
         zs = []
         for n in (126, TRADING_DAYS):
-            ratio = (c / c.shift(n) - 1) / vol
+            ratio = self._stocks_only((c / c.shift(n) - 1) / vol)
             mu, sd = ratio.mean(axis=1), ratio.std(axis=1)
             zs.append(ratio.sub(mu, axis=0).div(sd.replace(0, np.nan), axis=0))
         z = (zs[0] + zs[1]) / 2
@@ -261,5 +275,87 @@ class Factors:
     @cached_property
     def breadth_50(self) -> pd.Series:
         """% of stocks above their 50-DMA each day."""
-        valid = self.sma50.notna()
+        valid = self.sma50.notna() & ~self.etf_mask
         return ((self.p.close > self.sma50) & valid).sum(axis=1) / valid.sum(axis=1).replace(0, np.nan) * 100
+
+    # ---------------------------------------------------------------- swing-trading patterns
+    @cached_property
+    def high_55_prev(self): return self.high_n(55)
+    @cached_property
+    def low_20_prev(self): return self.low_n(20)
+    @cached_property
+    def low_10_prev(self): return self.low_n(10)
+    @cached_property
+    def high_15_prev(self): return self.high_n(15)
+
+    @cached_property
+    def range_15_pct(self) -> pd.DataFrame:
+        """Height of the last 15 days' box (high-low) as % of its low: tight boxes precede breakouts."""
+        return (rolling(self.p.high, "max", 15, 12) / rolling(self.p.low, "min", 15, 12) - 1) * 100
+
+    @cached_property
+    def atr_contraction(self) -> pd.DataFrame:
+        """Recent volatility vs longer-term volatility (<1 = contracting, as in a VCP)."""
+        return rolling(self.atr_pct, "mean", 10, 8) / rolling(self.atr_pct, "mean", 50, 40)
+
+    @cached_property
+    def bb_width(self) -> pd.DataFrame:
+        """Bollinger Band width: 4 x 20-day std / 20-day average."""
+        return 4 * rolling(self.p.close, "std", 20, 18) / self.sma20
+
+    @cached_property
+    def bb_upper(self) -> pd.DataFrame:
+        return self.sma20 + 2 * rolling(self.p.close, "std", 20, 18)
+
+    @cached_property
+    def bb_squeeze(self) -> pd.DataFrame:
+        """Band width in the lowest 10% of its last 6 months (a volatility squeeze)."""
+        lo = rolling(self.bb_width, "min", 126, 100)
+        hi = rolling(self.bb_width, "max", 126, 100)
+        return self.bb_width <= lo + 0.1 * (hi - lo)
+
+    @cached_property
+    def nr7(self) -> pd.DataFrame:
+        """Today's high-low range is the narrowest of the last 7 days."""
+        rng = self.p.high - self.p.low
+        return rng <= rolling(rng, "min", 7, 7)
+
+    @cached_property
+    def gap_pct(self) -> pd.DataFrame:
+        return (self.p.open / self.p.close.shift(1) - 1) * 100
+
+    @cached_property
+    def golden_cross(self) -> pd.DataFrame:
+        return (self.sma50 > self.sma200) & (self.sma50.shift(1) <= self.sma200.shift(1))
+
+    @cached_property
+    def results_window(self) -> pd.DataFrame:
+        """True on a stock's results day and the next 2 trading days (from NSE's event calendar)."""
+        out = pd.DataFrame(False, index=self.p.dates, columns=self.p.close.columns)
+        arr = out.to_numpy(copy=True)
+        col = {c: j for j, c in enumerate(out.columns)}
+        for sym, days in self.results_dates.items():
+            j = col.get(sym)
+            if j is None:
+                continue
+            for d in days:
+                i = self.p.dates.searchsorted(pd.Timestamp(d))
+                if i < len(self.p.dates):
+                    arr[i:i + 3, j] = True
+        return pd.DataFrame(arr, index=out.index, columns=out.columns)
+
+    @cached_property
+    def industry_rank(self) -> pd.DataFrame:
+        """Rank (1 = strongest) of each stock's industry by its members' average 6-month return."""
+        ind = pd.Series(self.industry).reindex(self.p.close.columns)
+        ret = self._stocks_only(self.ret_6m)
+        valid = ind.dropna()
+        if valid.empty:
+            return pd.DataFrame(np.nan, index=self.p.dates, columns=self.p.close.columns)
+        grp = ret[valid.index].T.groupby(valid.values).mean().T            # dates x industries
+        counts = ret[valid.index].notna().T.groupby(valid.values).sum().T
+        grp = grp.where(counts >= 3)                                         # ignore tiny industries
+        rank = grp.rank(axis=1, ascending=False)
+        out = rank.reindex(columns=ind.values)
+        out.columns = ind.index
+        return out

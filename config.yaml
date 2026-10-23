@@ -12,6 +12,9 @@ account:
 data_source: auto
 fyers_plan: standard         # standard (free: 50 data calls/min) or prime - sets the request speed limit
 
+# Index ETFs for the long-term ETF strategies (trend timing, dual momentum)
+etfs: [NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES, MON100]
+
 # Which stocks to scan: nifty50 | nifty100 | nifty200 | nifty500
 universe: nifty500
 
@@ -90,6 +93,31 @@ strategies:
     keep_rank: 40
     rebalance: quarterly
     use_regime: false        # defensive by design: stays invested
+  sector_rotation:
+    enabled: true
+    top_industries: 3
+    top_n: 12
+  golden_cross:
+    enabled: true
+  index_trend:
+    enabled: true
+    etf: NIFTYBEES
+  dual_momentum:
+    enabled: true
+    etfs: [NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES, MON100]
+    hold: 2
+  vcp_breakout:
+    enabled: true
+  donchian:
+    enabled: true
+  pullback_leaders:
+    enabled: true
+  earnings_gap:
+    enabled: true
+  bb_squeeze:
+    enabled: true
+  nr7_breakout:
+    enabled: true
   legacy_rules:
     enabled: false           # the old v1 rules (-12%/yr); enable only to compare
 

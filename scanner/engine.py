@@ -42,6 +42,9 @@ class EventStrategy:
     sizing: str = "equal"                # "equal" or "risk"
     risk_pct: float = 1.0                # with sizing="risk": % of equity lost if the stop is hit
     use_regime: bool = True              # no new entries while Nifty is below its 200-DMA
+    horizon: str = "swing"               # intraday | swing | longterm (for grouping in the UI)
+    evidence: str = ""                   # STRONG | MODERATE | WEAK | EXPERIMENTAL - strength of published evidence
+    universe: str = "stocks"             # stocks | etfs
     kind: str = field(default="event", init=False)
 
 
@@ -59,6 +62,9 @@ class RankStrategy:
     regime_action: str = "hold"          # Nifty below 200-DMA: "hold" (no new buys) or "cash" (sell all)
     stop_pct: float | None = None        # optional per-position stop between rebalances
     rebalance_offset: int = 0            # rebalance this many trading days before the period end
+    horizon: str = "longterm"
+    evidence: str = ""
+    universe: str = "stocks"             # stocks | etfs
     kind: str = field(default="rank", init=False)
 
     @property
@@ -133,6 +139,8 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
     C_ffill = p.close.ffill().to_numpy(dtype=float)
     T, N = C.shape
     trad = tradable.reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
+    is_etf = np.array([s in f.etfs for s in symbols], dtype=bool)
+    trad = trad & (is_etf[None, :] if strategy.universe == "etfs" else ~is_etf[None, :])
     regime = f.regime_up.reindex(idx).fillna(True).to_numpy(dtype=bool)
     atr = f.atr14.to_numpy(dtype=float)
     # Slippage per stock and day: thinly traded stocks cost more to get in and out of.

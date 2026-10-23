@@ -93,6 +93,38 @@ def upcoming_results(symbols, today: date, days: int = 14) -> tuple[dict[str, st
     return out, f"Results calendar: {len(out)} of your stocks report in the next {days} days"
 
 
+def results_history(start: date, end: date, log=print) -> dict[str, list[str]]:
+    """{symbol: [results dates]} from NSE's event calendar, fetched month by month. Past months are
+    cached permanently, the current month for a day. Months NSE can't serve are skipped."""
+    out: dict[str, set[str]] = {}
+    month = date(start.year, start.month, 1)
+    first_fetch = not any(NSE_DIR.glob("results_*.json"))
+    if first_fetch:
+        log("Downloading NSE results calendar history (one-time, ~1-2 min)...")
+    while month <= end:
+        nxt = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+        last = nxt - timedelta(days=1)
+        past = last < date.today() - timedelta(days=7)
+
+        def fetch(m=month, l=last):
+            return _get_json("event-calendar", {"index": "equities", "from_date": m.strftime("%d-%m-%Y"),
+                                                "to_date": l.strftime("%d-%m-%Y")})
+        try:
+            rows = _cached(f"results_{month:%Y%m}.json", 10 ** 9 if past else 86400, fetch)
+        except Exception:
+            rows = []
+        for r in rows:
+            if "result" not in str(r.get("purpose", "")).lower():
+                continue
+            try:
+                d = pd.to_datetime(str(r.get("date", "")).strip().title(), format="%d-%b-%Y").date()
+            except (ValueError, TypeError):
+                continue
+            out.setdefault(str(r.get("symbol", "")).strip(), set()).add(d.isoformat())
+        month = nxt
+    return {s: sorted(v) for s, v in out.items()}
+
+
 def trading_holidays(year: int) -> set[str]:
     """Official NSE equity trading holidays for `year` as ISO dates (empty set if unavailable)."""
     try:
