@@ -29,6 +29,9 @@ class Panel:
     volume: pd.DataFrame
     index_close: pd.Series  # Nifty 50 close aligned to the same dates (may contain NaN)
     observed: pd.DataFrame  # True where the stock really traded/printed (False = gap-filled)
+    # Optional point-in-time universe (True = member that day). When set, cross-sectional factors
+    # (ranks, z-scores, breadth) compare a stock only with that day's members; None = all columns.
+    universe: pd.DataFrame | None = None
 
     @property
     def dates(self) -> pd.DatetimeIndex:
@@ -43,10 +46,11 @@ INDEX_COLUMNS = ("NIFTY50", "INDIAVIX", "NIFTY500")
 
 
 def panel_from_wide(frames: dict[str, pd.DataFrame], symbols: list[str] | None = None,
-                    index_symbol: str = "NIFTY50", max_gap_fill: int = 5) -> Panel:
+                    index_symbol: str = "NIFTY50", max_gap_fill: int = 5,
+                    universe: pd.DataFrame | None = None) -> Panel:
     """Build a Panel from wide per-field frames (see store.py). Short gaps inside a stock's history
     (suspended day, missing live quote) are bridged with the last close so rolling indicators don't
-    break; `observed` records where real data existed."""
+    break; `observed` records where real data existed. `universe`: see Panel.universe."""
     close_all = frames["close"]
     cols = [c for c in (symbols if symbols is not None else close_all.columns)
             if c in close_all.columns and c not in INDEX_COLUMNS]
@@ -65,7 +69,9 @@ def panel_from_wide(frames: dict[str, pd.DataFrame], symbols: list[str] | None =
     wide["volume"] = wide["volume"].where(~gap, 0.0)
     index_close = (close_all[index_symbol].reindex(dates).astype(float) if index_symbol in close_all.columns
                    else pd.Series(np.nan, index=dates))
-    return Panel(index_close=index_close, observed=observed, **wide)
+    if universe is not None:
+        universe = universe.reindex(index=dates, columns=cols).fillna(False).astype(bool)
+    return Panel(index_close=index_close, observed=observed, universe=universe, **wide)
 
 
 def build_panel(histories: dict[str, pd.DataFrame], index_symbol: str = "NIFTY50", max_gap_fill: int = 5) -> Panel:
@@ -97,6 +103,10 @@ class Factors:
         self.p = panel
 
     # ---------------------------------------------------------------- helpers
+    def members(self, df: pd.DataFrame) -> pd.DataFrame:
+        """`df` with non-members of that day's universe blanked out (before ranking across stocks)."""
+        return df if self.p.universe is None else df.where(self.p.universe)
+
     def sma(self, n: int) -> pd.DataFrame:
         return rolling(self.p.close, "mean", n, _min_periods(n))
 
@@ -193,6 +203,11 @@ class Factors:
         """Average daily traded value over the past 20 days, in Rs crore."""
         return rolling(self.p.close * self.p.volume, "mean", 20, 15) / 1e7
 
+    @cached_property
+    def turnover_rank(self):
+        """1 = most traded stock that day (by 20-day average traded value)."""
+        return self.members(self.turnover_avg20_cr).rank(axis=1, ascending=False)
+
     # ---------------------------------------------------------------- 52-week range
     @cached_property
     def high_52w_prev(self): return self.high_n(TRADING_DAYS)
@@ -228,7 +243,7 @@ class Factors:
     def rs_rating(self) -> pd.DataFrame:
         """IBD-style relative strength: weighted 3/6/9/12-month return, ranked 1-99 across stocks each day."""
         raw = 0.4 * self.ret_3m + 0.2 * self.ret_6m + 0.2 * self.ret_9m + 0.2 * self.ret_12m
-        return (raw.rank(axis=1, pct=True) * 98 + 1).round()
+        return (self.members(raw).rank(axis=1, pct=True) * 98 + 1).round()
 
     def momentum_score(self, skip_days: int = 0) -> pd.DataFrame:
         """NSE momentum-index style score: 6m and 12m returns each divided by annualised volatility,
@@ -237,7 +252,7 @@ class Factors:
         vol = self.vol_ann.replace(0, np.nan)
         zs = []
         for n in (126, TRADING_DAYS):
-            ratio = (c / c.shift(n) - 1) / vol
+            ratio = self.members((c / c.shift(n) - 1) / vol)
             mu, sd = ratio.mean(axis=1), ratio.std(axis=1)
             zs.append(ratio.sub(mu, axis=0).div(sd.replace(0, np.nan), axis=0))
         z = (zs[0] + zs[1]) / 2
@@ -261,5 +276,5 @@ class Factors:
     @cached_property
     def breadth_50(self) -> pd.Series:
         """% of stocks above their 50-DMA each day."""
-        valid = self.sma50.notna()
+        valid = self.members(self.sma50).notna()
         return ((self.p.close > self.sma50) & valid).sum(axis=1) / valid.sum(axis=1).replace(0, np.nan) * 100

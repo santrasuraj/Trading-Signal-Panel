@@ -3,7 +3,7 @@
 A personal, evidence-based tool for the Indian stock market. Every day it:
 
 1. **Updates prices** for about 500 Nifty 500 stocks, using 8 years of history, NSE's official end-of-day files, and Fyers real-time prices.
-2. **Re-tests every strategy** on that 8-year history. Each test buys at the next day's open and pays full Indian charges and tax.
+2. **Re-tests every strategy** on that 8-year history, *survivorship-free*: on each past day only that day's 500 most-traded NSE stocks, including companies that later crashed or were delisted. Each test buys at the next day's open and pays full Indian charges and tax.
 3. **Shows which strategies are working now**, meaning which beat Nifty and the average stock over the last 12 and 6 months.
 4. **Lists the orders** each strategy would place at the next open, sized for your capital, with stop-losses.
 5. **Checks your own holdings**: stop-loss, target, trend, momentum rank, and splits/bonuses since you bought.
@@ -47,11 +47,59 @@ Orders marked *provisional* are based on a candle that is still forming during m
 | Old textbook rules | The v1 rules (50-DMA / 52-week breakouts, 5% stop / 10% target). | **Lost money** in testing (−12%/year). Kept only for comparison. |
 
 ### Honest expectations
-- The tests use **today's** Nifty 500 list. Companies that collapsed or were dropped are missing, so **every result is flattered.** Even the "average stock" line shows 27%/year.
-- **Judge a strategy by how much it beats the average stock**, not Nifty.
-- NSE's own momentum indices, which don't have this bias, beat their parent index by **about 3–6% a year** over 20 years. That is a realistic edge. 40% a year is not.
-- **Momentum crashes happen.** Expect 30–40% drops (−68% in 2008) and 1–2 years of lagging. NSE's Nifty200 Momentum 30 returned −0.5% in the 12 months to Sep 2026.
-- **Tax:** momentum sells within a year, so gains are taxed at 20.8% every April. The dashboard shows after-tax returns. Frequent trading can also be treated as business income; ask a CA.
+Since October 2026 the backtests are **survivorship-free**. On each past day a strategy may only pick
+from that day's 500 most-traded NSE stocks, built from NSE's own archive. That list includes the
+companies that later crashed, merged or were delisted: 1,170 different companies were in it at some
+point, and 73 of them no longer trade (DHFL, Jet Airways, Future Retail, Lakshmi Vilas Bank, the state banks
+merged in 2019–20, HDFC Ltd ...). The old way, testing on *today's* Nifty 500 list, left all of those out.
+
+Same rules, same costs and tax, 2019-08-21 to 2026-10-22:
+
+| Strategy | Tested on | Yearly return | Timing range | Worst drop | Sharpe | After tax |
+|---|---|---|---|---|---|---|
+| Momentum leaders | today's Nifty 500 list | +41.3% | 40–50% | −33% | 1.59 | +37.7% |
+|  | **point-in-time top 500** | **+27.1%** | 27–31% | −34% | 1.11 | +24.5% |
+| Trend breakout (experimental) | today's Nifty 500 list | +44.1% | 44–45% | −30% | 1.75 | +36.7% |
+|  | **point-in-time top 500** | **+21.0%** | 19–21% | −36% | 0.97 | +17.4% |
+| Low volatility | today's Nifty 500 list | +9.5% | 9–11% | −28% | 0.70 | +9.2% |
+|  | **point-in-time top 500** | **+10.8%** | 9–11% | −28% | 0.79 | +10.6% |
+| Average stock (equal weight) | today's Nifty 500 list | +27.5% | – | −40% | 1.38 | +25.4% |
+|  | **point-in-time top 500** | **+19.9%** | – | −41% | 1.01 | +18.3% |
+| Nifty 500 index (the real one) | – | +13.5% | – | −38% | 0.81 | +12.2% |
+
+*Timing range* = the same rules rebalanced a few days earlier, or started a few weeks later.
+*After tax* = short-term gains taxed at 20.8% every April (buy & hold pays 13% once, at the end).
+
+What this shows:
+- **Survivorship bias was large.** It added 7.5% a year to the average stock, and 14% (momentum) to
+  23% (trend breakout) a year to the active strategies.
+  They buy exactly the stocks that were flying, and some of those later collapsed.
+- **Momentum still has an edge, but a much smaller one:** +7.1% a year over the average stock and
+  +13.5% over the Nifty 500 index, with a smaller worst drop (−34% vs −41%). NSE's own momentum indices beat their parent
+  index by about 3–6% a year over 20 years. Expect live results nearer that, not 27%.
+- **Trend breakout is about the average stock** (+1.1% a year, lower Sharpe): no real edge.
+- **Low volatility barely moves** (+9.5% → +10.8%): it holds big, steady companies, which rarely
+  vanish, so survivorship never flattered it. It lagged because small and mid caps boomed in 2019–2026.
+  It is insurance, not a return engine.
+- The average stock beat the Nifty 500 index by 6.4% a year. That is the small/mid-cap boom of these
+  years (equal weight vs company size), not skill. Don't count on it repeating.
+- **Check of the data:** today's list tested on the NSE-rebuilt prices gives the same picture as the main
+  store (momentum +39.6% vs +41.3%, average stock +27.5% vs +27.5%). So the gap comes from the missing
+  companies, not from different prices.
+
+What is still not perfect:
+- **Timing luck:** the same strategy rebalanced a few days apart ends up several % a year apart (see the range).
+- **Rights issues are not adjusted** in the point-in-time prices, so an ex-rights day shows as a small loss
+  (slightly pessimistic). **Dividends are left out** of every line, the Nifty 500 index included (price returns).
+- The universe ranks by traded value, re-ranked every day. NSE's Nifty 500 ranks by free-float company size and
+  is reviewed twice a year.
+- A holding that stops trading (merger, delisting) is sold at its last price after 20 days without trades.
+- The past is not the future. Momentum crashes happen: expect 30–40% drops (−68% in 2008) and 1–2 years of
+  lagging. NSE's Nifty200 Momentum 30 returned −0.5% in the 12 months to Sep 2026.
+- **Tax:** momentum sells within a year, so gains are taxed at 20.8% every April. Frequent trading can also be
+  treated as business income; ask a CA.
+
+Regenerate this table with `4_build_universe.bat compare` (saved to `data/history/pit/comparison.csv`).
 
 ### Paper trading: live proof
 Backtests can be flattered; live results can't. Every scan of a **completed** trading day (after ~6 PM, or before
@@ -65,8 +113,8 @@ A paper portfolio per strategy then follows the journal:
 - if you miss a scan, it catches up with the model portfolio at the open after your next scan.
 
 The **📒 Paper trading** tab shows each paper portfolio against Nifty 50 and the real Nifty 500 over the same days,
-every paper trade, and how the result compares with what the backtest promised (also after removing the ~8%/yr
-survivorship bias). It also shows how far luck alone could move the result. Telegram gets one paper line per strategy.
+every paper trade, and how the result compares with what the backtest promised (survivorship-free backtests need
+no correction; for old current-list backtests ~8%/yr of survivorship bias is removed). It also shows how far luck alone could move the result. Telegram gets one paper line per strategy.
 Everything is recomputed from the journal and stored prices on every view, so the same data always gives the same
 numbers. To start over, delete `data/journal.sqlite`. Expect to need **about a year** before the comparison means much.
 
@@ -78,7 +126,7 @@ numbers. To start over, delete `data/journal.sqlite`. Expect to need **about a y
 - Your Fyers App ID, Secret and Redirect URL are saved in **`.env`**. That file is private: never share it or upload it anywhere.
 - **Your capital:** edit `account: capital:` in `config.yaml`. Order quantities are sized from it.
 
-On a new PC: install Python 3.12, then double-click `setup.bat`, fill in `.env`, then run `3_dashboard.bat`. The first scan downloads and repairs 8 years of data, which takes about 4 minutes.
+On a new PC: install Python 3.12, then double-click `setup.bat`, fill in `.env`, then run `3_dashboard.bat`. The first scan downloads and repairs 8 years of data, which takes about 4 minutes. Then double-click **`4_build_universe.bat`** once: it downloads NSE's full archive (about 2,000 day files plus corporate-action notices, roughly 30 minutes) for the survivorship-free backtests. Until then backtests use today's list, and the dashboard says so.
 
 ---
 
@@ -100,6 +148,24 @@ The first build repaired Yahoo's history automatically:
 - kept genuine crashes untouched (YES Bank 2020, POLICYBZR 2026).
 
 If NSE is unreachable for more than a day, Yahoo fills in temporarily. Those days are replaced with official data as soon as it is available.
+
+### The survivorship-free backtest universe (`scanner/pit.py`)
+Built only from NSE's own archive, for **every** NSE equity since August 2018, including companies that no longer exist:
+- **Prices:** NSE's official day files. The newer format exists from 30 Sep 2019, and the older bhavcopy covers the
+  days before. Every calendar day is checked, so special sessions are included (Budget days, Saturday sessions,
+  Muhurat trading): 2,033 sessions in all.
+- **Universe:** on each day, the 500 stocks with the highest average daily traded value (close × volume) over the
+  previous 6 months, using only data up to that day. A stock needs 1 month of trading history and a trade in the
+  last 5 days. REITs, InvITs and ETFs are left out: they are funds, not companies (about 40 gold, silver, liquid
+  and index ETFs trade enough to have ranked in the top 500).
+- **Renames** are stitched into one history (old symbol before the change date → today's symbol).
+- **Splits, bonuses and demergers:** 474 adjustments from NSE's corporate-action notices, using the same factor
+  rule as the main store (bonus a:b → b/(a+b), split by the face-value ratio, demerger by the special-session
+  price). NSE's notice files are incomplete, so 8 jumps with no notice were fixed by checks: Yahoo's
+  adjusted history, a clean split ratio, or a special dividend (360 ONE, Shriram Finance, Majesco's ₹974 payout ...).
+- Checked against the main store: for 9 in 10 shared stocks the two price histories agree within 2% on every day.
+  Where they differ, the cause was mostly the store (gaps in Yahoo's history, sessions it lacks) or rights issues.
+- Cached under `data/history/pit/`. Scans add each new NSE day (about 30 s, once a day).
 
 ---
 
@@ -132,6 +198,7 @@ In the dashboard, open **💼 My holdings**:
 - `costs`: brokerage, STT, stamp duty, GST, DP charge, slippage (FYERS Standard plan rates, Oct 2026)
 - `tax`: STCG 20.8%, LTCG 13% above ₹1.25 lakh
 - `strategies`: switch any strategy on or off, or change its settings. The next scan re-tests automatically.
+- `backtest_universe`: `point_in_time` (survivorship-free, the default) or `current` (today's list, flattered). Today's orders always come from `universe`.
 
 ---
 
@@ -147,21 +214,24 @@ scanner/
   engine.py      portfolio simulator: next-open fills, stops, ranking/rebalance, costs, tax, metrics
   strategies.py  strategy definitions (parameters from config.yaml)
   daily.py       one scan = refresh + re-test + today's orders + holdings check -> latest.json
+  pit.py         survivorship-free universe: NSE archive -> renames, corporate actions, daily top 500
   paper.py       paper-trading journal (data/journal.sqlite) + deterministic replay at next-day opens
   holdings.py    holdings file, corporate-action-adjusted buy price
   lock.py        one scan at a time across processes
 app.py           Streamlit dashboard (scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 login.py         daily Fyers OAuth login
-tests/           pytest suite: costs, tax, corporate actions, factors (no look-ahead), engine, paper trading
+tests/           pytest suite: costs, tax, corporate actions, factors (no look-ahead), engine, paper trading,
+                 point-in-time universe (no look-ahead, renames, adjustments, delistings)
 ```
 
-Run the tests with `.venv\Scripts\python.exe -m pytest -q`.
+Run the tests with `.venv\Scripts\python.exe -m pytest -q`. Rebuild the point-in-time universe from scratch with
+`.venv\Scripts\python.exe -m scanner.pit build`; print the comparison table with `... -m scanner.pit compare`.
 
 ### Roadmap
 | Next | Why |
 |---|---|
 | Results calendar: flag stocks with results in the next 7 days | Avoid buying just before a results surprise |
-| Survivorship-free universe: point-in-time top 500 by turnover from NSE's full archive | Honest backtests |
+| Adjust rights issues in the point-in-time prices (needs the RIGHTS rows of NSE's notices) | A little more accuracy |
 | Sector strength from NSE sector indices | Avoid weak sectors |
 | Momentum + low-volatility combined portfolio | Smoother returns |

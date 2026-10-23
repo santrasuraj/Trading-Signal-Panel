@@ -34,13 +34,20 @@ def _parse_date(s) -> date | None:
     return None
 
 
+_bc_memo: dict[date, pd.DataFrame | None] = {}
+
+
 def fetch_bc(day: date) -> pd.DataFrame | None:
     """Corporate-action notices published in the PR archive for `day` (None if no file that day)."""
+    if day in _bc_memo:
+        return _bc_memo[day]
     cache = NSE_DIR / f"bc_{day:%Y%m%d}.parquet"
     miss = NSE_DIR / f"bc_{day:%Y%m%d}.none"
     if cache.exists():
-        return pd.read_parquet(cache)
+        _bc_memo[day] = pd.read_parquet(cache)
+        return _bc_memo[day]
     if miss.exists():
+        _bc_memo[day] = None
         return None
     try:
         r = _session().get(PR_URL.format(d=day.strftime("%d%m%y")), timeout=30)
@@ -95,15 +102,32 @@ def purpose_factor(purposes: list[str]) -> float | None:
 
 def actions_on(symbol: str, ex_day: date, prior_days: list[date]) -> list[str]:
     """Purposes of price-affecting actions for `symbol` with ex-date `ex_day`, looked up in the
-    notices of the trading days just before it (notices are listed until the ex-date)."""
-    for d in prior_days[:3]:
-        bc = fetch_bc(d)
-        if bc is None:
-            continue
-        rows = bc[(bc["symbol"] == symbol) & (bc["ex_date"] == ex_day.isoformat())]
-        if len(rows):
-            return sorted(set(rows["purpose"]))
+    notices of the given days, in order (the trading days just before it, and optionally the ex-date
+    itself: many notices first appear in the ex-date's own file)."""
+    for d in prior_days:
+        hit = _notice_index(d).get((symbol, ex_day.isoformat()))
+        if hit:
+            return hit
     return []
+
+
+_bc_index: dict[date, dict[tuple[str, str], list[str]]] = {}
+
+
+def _notice_index(day: date) -> dict[tuple[str, str], list[str]]:
+    """(symbol, ex-date) -> purposes for one day's notices (a dict lookup instead of filtering a
+    DataFrame for every price jump). Only definite answers are kept; a failed download is retried."""
+    if day in _bc_index:
+        return _bc_index[day]
+    bc = fetch_bc(day)
+    idx: dict[tuple[str, str], set[str]] = {}
+    if bc is not None:
+        for sym, ex, purpose in zip(bc["symbol"], bc["ex_date"], bc["purpose"]):
+            idx.setdefault((sym, ex), set()).add(purpose)
+    out = {k: sorted(v) for k, v in idx.items()}
+    if bc is not None or day in _bc_memo:
+        _bc_index[day] = out
+    return out
 
 
 _renames: dict[str, list[tuple[str, date]]] | None = None

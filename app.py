@@ -171,6 +171,9 @@ with st.sidebar:
         st.caption(f"**Prices as of:** {latest['data_date']}"
                    + (f" - live, {latest['live_source']}" if latest.get("live") else " - official NSE close"))
         st.caption(f"**Universe:** {latest['universe']} · {latest['stocks']} liquid stocks")
+        bt_mode = (latest.get("backtest") or {}).get("universe", "current")
+        st.caption("**Backtests:** " + ("point-in-time top 500 (survivorship-free)" if bt_mode == "point_in_time"
+                                        else "today's list (flattered by survivorship bias)"))
         st.caption(f"**Your capital:** {rupees(latest['capital'])} (change in config.yaml)")
     st.divider()
     st.caption(DISCLAIMER)
@@ -229,17 +232,27 @@ with tabs[0]:
     st.caption(f"Same period ({full0['start']} → {full0['end']}): Nifty 50 {pct(bench.get('cagr_pct'))}/yr "
                f"({pct(bench.get('after_tax_cagr_pct'))} after tax, worst drop {pct(bench.get('max_dd_pct'), signed=False)}); "
                f"**real Nifty 500 index {pct(n5.get('cagr_pct'))}/yr** (worst drop {pct(n5.get('max_dd_pct'), signed=False)}); "
-               f"average stock in this list {pct(ew.get('cagr_pct'))}/yr. *Timing range* = the same rules rebalanced "
+               f"average stock in the test universe {pct(ew.get('cagr_pct'))}/yr. *Timing range* = the same rules rebalanced "
                "a few days earlier or started a few weeks later - expect anything in that range. "
                "*After tax* = short-term gains taxed at "
                "20.8% every April, long-term at 13% above ₹1.25 lakh (buy & hold pays once, at the end).")
-    st.warning("**Reality check:** these tests use *today's* Nifty 500 list, so companies that collapsed or were "
-               f"dropped are missing - every number above is flattered. The gap between the average stock in this list "
-               f"({pct(ew.get('cagr_pct'))}/yr) and the real Nifty 500 index ({pct(n5.get('cagr_pct'))}/yr) shows how big "
-               "that bias is (about 8% a year of it is pure survivorship, by our lab's estimate). NSE's own momentum "
-               "indices, which have no such bias, made about 19-22% a year since 2005 vs 15-16% for their parent index, "
-               "beat it in 15 of 20 years and fell harder in crashes (-68% in 2008). **Expect an edge of a few % a year, "
-               "not 40%.** Judge strategies by how much they beat the **average stock** line.")
+    bt_info = latest.get("backtest") or {}
+    if bt_info.get("universe") == "point_in_time":
+        st.info(f"**Survivorship-free test.** {bt_info.get('note', '')} So the companies that later crashed, "
+                "were merged away or delisted are included, and hindsight does not flatter these numbers. Today's "
+                "orders still come from today's Nifty 500 list. Backtests still overstate real results a little (luck in the "
+                "rebalance day, and the future is never the past): NSE's own momentum indices beat their parent "
+                "index by about 3-6% a year over 20 years. **Expect an edge of a few % a year, not 40%.** Judge a "
+                "strategy by how much it beats the **average stock** and the **Nifty 500** lines.")
+    else:
+        st.warning("**Reality check:** these tests use *today's* Nifty 500 list, so companies that collapsed or were "
+                   f"dropped are missing - every number above is flattered. The gap between the average stock in this "
+                   f"list ({pct(ew.get('cagr_pct'))}/yr) and the real Nifty 500 index ({pct(n5.get('cagr_pct'))}/yr) "
+                   "shows how big that bias is (about 8% a year of it is pure survivorship, by our lab's estimate). "
+                   "Set `backtest_universe: point_in_time` in config.yaml (and run 4_build_universe.bat once) for "
+                   "survivorship-free tests. NSE's own momentum indices, which have no such bias, beat their parent "
+                   "index by about 3-6% a year over 20 years. **Expect an edge of a few % a year, not 40%.** Judge "
+                   "strategies by how much they beat the **average stock** line.")
 
     curves = cached_curves(file_mtime(CURVES_FILE))
     if curves is not None and not curves.empty:
