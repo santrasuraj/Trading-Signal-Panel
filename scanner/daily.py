@@ -15,6 +15,7 @@ import pandas as pd
 
 from .costs import CostModel, TaxModel
 from .engine import EventStrategy, evaluate, equal_weight_index, simulate, working_status
+from .events import upcoming_results
 from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
 from .panel import Factors, panel_from_wide
@@ -68,8 +69,14 @@ def _next_rebalance(dates: pd.DatetimeIndex, how: str) -> str:
         target = last + pd.offsets.Week(weekday=4)
     elif how == "biweekly":
         target = last + pd.offsets.Week(weekday=4) + pd.Timedelta(days=7 * ((last.isocalendar().week + 1) % 2))
+    elif how == "quarterly":
+        target = last + pd.offsets.BQuarterEnd(0, startingMonth=3)
+    elif how == "semiannual":
+        target = last + pd.offsets.BMonthEnd(0)
+        while target.month not in (6, 12):
+            target += pd.offsets.BMonthEnd(1)
     else:
-        target = last + pd.offsets.BMonthEnd(0) if last != last + pd.offsets.BMonthEnd(0) else last
+        target = last + pd.offsets.BMonthEnd(0)
     return target.date().isoformat()
 
 
@@ -127,6 +134,16 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     min_position = float(acct.get("min_position", 0))
 
     last = p.dates[-1]
+    results, results_note = upcoming_results(symbols, ist_now().date(), days=14)
+    today_d = ist_now().date()
+
+    def results_info(sym: str) -> dict:
+        d = results.get(sym)
+        if not d:
+            return {"results_on": None}
+        days = (pd.Timestamp(d).date() - today_d).days
+        return {"results_on": d, "results_in_days": days}
+
     observed_last = p.observed.iloc[-1]
     close_last = p.close.iloc[-1]
     regime_up = bool(f.regime_up.iloc[-1])
@@ -154,8 +171,11 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             stop = None
             if o["action"] == "BUY" and getattr(s, "stop_pct", None):
                 stop = close_last.get(sym, np.nan) * (1 - s.stop_pct / 100)
-            actions.append({**o, **meta.get(sym, {}), **sized(sym, stop),
-                            "stop": _num(stop), "provisional": live})
+            info = results_info(sym)
+            warn = (o["action"] == "BUY" and info.get("results_on") is not None
+                    and info["results_in_days"] <= int((cfg.get("results") or {}).get("warn_days", 7)))
+            actions.append({**o, **meta.get(sym, {}), **sized(sym, stop), **info,
+                            "results_warning": warn, "stop": _num(stop), "provisional": live})
         ranking = []
         if s.kind == "rank":
             score = s.score(f).iloc[-1]
@@ -166,12 +186,12 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                 ranking.append({"rank": rank, "symbol": sym, **meta.get(sym, {}), "score": _num(val, 3),
                                 "price": _num(close_last.get(sym)), "ret_6m": _num(f.ret_6m[sym].iloc[-1] * 100, 1),
                                 "ret_12m": _num(f.ret_12m[sym].iloc[-1] * 100, 1), "rs": _num(f.rs_rating[sym].iloc[-1], 0),
-                                "in_portfolio": sym in held})
+                                "in_portfolio": sym in held, **results_info(sym)})
         strat_out.append({
             "key": s.key, "name": s.name, "description": s.description, "kind": s.kind,
             "status": status, "status_reason": why, "metrics": _clean_metrics(m),
             "yearly": {str(k): _num(v, 1) for k, v in yearly.items()},
-            "positions": [{**pp, **meta.get(pp["symbol"], {})} for pp in res.open_positions],
+            "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"])} for pp in res.open_positions],
             "actions": actions, "ranking": ranking,
             "max_positions": s.max_positions, "per_position": _num(per_pos, 0),
             "next_rebalance": _next_rebalance(p.dates, s.rebalance) if s.kind == "rank" else None,
@@ -234,6 +254,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         alerts, level = [], "ok"
         if sym in rename_notes:
             alerts.append(rename_notes[sym])
+        if results.get(sym):
+            alerts.append(f"Quarterly results on {pd.Timestamp(results[sym]):%d %b} - expect a big move either way")
         # Restate the buy price in today's terms if a split/bonus/demerger happened since buying.
         factor = adjustment_factor(sym, h.buy_date, p.close[sym]) if buy and not pd.isna(h.buy_date) else None
         if factor and factor != 1.0:
@@ -267,6 +289,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             "stop_price": _num(buy * (1 - sl / 100)) if buy else None,
             "target_price": _num(buy * (1 + tg / 100)) if buy else None,
             "momentum_rank": _num(mom_rank.get(sym), 0), "rs": _num(f.rs_rating[sym].iloc[-1], 0),
+            "results_on": results.get(sym),
             "level": level, "alerts": alerts,
         })
 
@@ -289,6 +312,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         "volume_spikes": [mover(s) for s in vr[vr >= 3].sort_values(ascending=False).head(movers_n).index],
         "holdings": holding_rows,
         "symbols": sorted(c for c in p.close.columns),
+        "results_note": results_note,
     }
     _save(result, curves, p, ew, started)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")

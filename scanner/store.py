@@ -23,7 +23,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from . import corporate, nse
+from . import corporate, events, nse
 from .providers import COLS, INDEX_SYMBOLS, FyersAuthError, YahooProvider
 from .settings import HISTORY_DIR, SESSION_START, ist_now, ist_today
 
@@ -428,7 +428,8 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
     # 3) Today's live candle (memory only).
     complete_upto = frames["close"].index[-1].date() if len(frames["close"]) else None
     session_started = (now.hour, now.minute) >= SESSION_START
-    trading_today = today.weekday() < 5 and today.isoformat() not in holidays
+    trading_today = (today.weekday() < 5 and today.isoformat() not in holidays
+                     and today.isoformat() not in events.trading_holidays(today.year))
     live_rows: dict[str, dict] = {}
     live_source = None
     if trading_today and session_started and complete_upto and today > complete_upto:

@@ -274,17 +274,24 @@ with tabs[1]:
                    "This rule avoided much of the 2020 and 2022 falls in testing.")
     st.write(f"**Model portfolio:** up to {s['max_positions']} stocks, about {rupees(s['per_position'])} each "
              f"(your capital ÷ {s['max_positions']})."
-             + (f" Next monthly review: **{s['next_rebalance']}**." if s.get("next_rebalance") else ""))
+             + (f" Next review: **{s['next_rebalance']}**." if s.get("next_rebalance") else ""))
     st.subheader("Orders for the next market open")
+    for a in s["actions"]:
+        if a.get("results_warning"):
+            st.warning(f"**{a['symbol']}** reports quarterly results on {a['results_on']} "
+                       f"(in {a['results_in_days']} days). Prices often jump or fall sharply on results - "
+                       "consider waiting until after the announcement.")
     table(s["actions"], {"action": "Action", "symbol": "Stock", "company": "Company", "price": "Last price ₹",
-                         "qty": "Qty", "amount": "Amount ₹", "stop": "Stop-loss ₹", "reason": "Why"},
+                         "qty": "Qty", "amount": "Amount ₹", "stop": "Stop-loss ₹", "results_on": "Results on",
+                         "reason": "Why"},
           fmt={"price": "₹{:,.2f}", "amount": "₹{:,.0f}", "stop": "₹{:,.2f}"},
           empty="No orders: nothing to buy or sell at the next open.")
     if any(a.get("provisional") for a in s["actions"]):
         st.caption("Provisional: based on today's still-forming candle. Re-check after 3:30 PM.")
     st.subheader("Current model holdings")
     table(s["positions"], {"symbol": "Stock", "company": "Company", "entry_date": "Bought", "entry_price": "Buy ₹",
-                           "last_price": "Now ₹", "ret_pct": "Return %", "stop": "Stop ₹", "days": "Days held"},
+                           "last_price": "Now ₹", "ret_pct": "Return %", "stop": "Stop ₹", "days": "Days held",
+                           "results_on": "Results on"},
           signed=("ret_pct",), fmt={"entry_price": "₹{:,.2f}", "last_price": "₹{:,.2f}", "ret_pct": "{:+.1f}",
                                     "stop": "₹{:,.2f}"},
           empty="The model portfolio is in cash right now.")
@@ -292,7 +299,7 @@ with tabs[1]:
         st.subheader("Current ranking (strongest first)")
         table(s["ranking"], {"rank": "#", "symbol": "Stock", "company": "Company", "industry": "Sector",
                              "price": "Price ₹", "score": "Score", "ret_6m": "6m %", "ret_12m": "12m %",
-                             "rs": "RS (1-99)", "in_portfolio": "Held"},
+                             "rs": "RS (1-99)", "results_on": "Results on", "in_portfolio": "Held"},
               signed=("ret_6m", "ret_12m"), fmt={"price": "₹{:,.2f}", "score": "{:.2f}", "ret_6m": "{:+.0f}",
                                                  "ret_12m": "{:+.0f}", "rs": "{:.0f}"}, height=520)
 
@@ -305,7 +312,7 @@ with tabs[2]:
     table(latest["holdings"], {"symbol": "Stock", "qty": "Qty", "buy_price": "Buy ₹", "price": "Now ₹",
                                "change_pct": "Today %", "pnl_pct": "P&L %", "pnl_amount": "P&L ₹",
                                "stop_price": "Stop ₹", "target_price": "Target ₹",
-                               "momentum_rank": "Momentum rank", "rs": "RS"},
+                               "momentum_rank": "Momentum rank", "rs": "RS", "results_on": "Results on"},
           signed=("change_pct", "pnl_pct", "pnl_amount"),
           fmt={"buy_price": "₹{:,.2f}", "price": "₹{:,.2f}", "change_pct": "{:+.2f}", "pnl_pct": "{:+.1f}",
                "pnl_amount": "₹{:,.0f}", "stop_price": "₹{:,.2f}", "target_price": "₹{:,.2f}",
@@ -395,6 +402,7 @@ with tabs[4]:
 with tabs[5]:
     st.write(f"**Live prices:** {latest['fyers_note']}")
     st.write(f"**Official data:** {latest['nse_status']} · complete through {latest['complete_upto']}")
+    st.write(f"**{latest.get('results_note', 'Results calendar: -')}** (source: NSE event calendar)")
     st.write(f"**Trading cost assumed:** ~{latest['costs_round_trip_pct']}% per round trip on a typical position "
              "(edit the `costs:` section of config.yaml).")
     if latest["corporate_actions"]:

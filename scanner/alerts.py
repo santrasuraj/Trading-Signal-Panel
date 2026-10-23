@@ -37,14 +37,15 @@ def format_daily(r: dict, top_n: int = 10) -> str:
         sells = [a for a in s["actions"] if a["action"] == "SELL"]
         if buys:
             lines.append("  BUY at next open: " + ", ".join(
-                f"{a['symbol']} x{a['qty']} (~₹{a['price']:,.0f}{', stop ₹' + format(a['stop'], ',.0f') if a.get('stop') else ''})"
+                f"{a['symbol']} x{a['qty']} (~₹{a['price']:,.0f}{', stop ₹' + format(a['stop'], ',.0f') if a.get('stop') else ''}"
+                f"{', ⚠ results ' + a['results_on'][5:] if a.get('results_warning') else ''})"
                 for a in buys))
         if sells:
             lines.append("  SELL at next open: " + ", ".join(f"{a['symbol']} ({a['reason']})" for a in sells))
         if s["positions"]:
             lines.append("  Holding: " + ", ".join(f"{p['symbol']} {_pct(p['ret_pct'], 0)}" for p in s["positions"][:15]))
         if s.get("next_rebalance"):
-            lines.append(f"  Next monthly review: {s['next_rebalance']}")
+            lines.append(f"  Next review: {s['next_rebalance']}")
     alerts = [h for h in r.get("holdings", []) if h.get("alerts")]
     if alerts:
         lines.append("")

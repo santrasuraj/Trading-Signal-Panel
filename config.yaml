@@ -30,6 +30,10 @@ holdings_defaults:
 
 movers_count: 15
 
+# Warn before buying a stock whose quarterly results are due within this many days
+results:
+  warn_days: 7
+
 # Trading charges per order: NSE equity delivery + FYERS Standard plan, Oct 2026.
 costs:
   brokerage_pct: 0.3         # % of order value ...
