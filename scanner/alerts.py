@@ -15,6 +15,17 @@ def _pct(x, nd=1) -> str:
     return "-" if x is None else f"{x:+.{nd}f}%"
 
 
+def paper_line(p: dict) -> str:
+    """One line of live paper-trading results for a strategy (see paper.py)."""
+    since = datetime.fromisoformat(p["start"]).strftime("%d %b")
+    if not p.get("days"):
+        return f"📒 Paper: started {since} - first fills at the next open"
+    pnl = p.get("pnl")
+    money = f" (₹{pnl:+,.0f})" if pnl is not None else ""
+    return (f"📒 Paper since {since} ({p['days']} days): {_pct(p.get('return_pct'))}{money} | "
+            f"Nifty 500 {_pct(p.get('n500_pct'))} | backtest expected {_pct(p.get('expected_pct'))}")
+
+
 def format_daily(r: dict, top_n: int = 10) -> str:
     m = r["market"]
     when = datetime.fromisoformat(r["generated_at"]).strftime("%d %b %H:%M")
@@ -33,6 +44,9 @@ def format_daily(r: dict, top_n: int = 10) -> str:
         lines.append(f"{ICON.get(s['status'], '')} {s['name']}: {_pct(full.get('cagr_pct'))}/yr over "
                      f"{full['start'][:4]}-{full['end'][:4]}, last 12m {_pct(y1.get('return_pct'))} "
                      f"(Nifty {_pct((y1.get('benchmark') or {}).get('return_pct'))})")
+        pp = (r.get("paper") or {}).get(s["key"])
+        if pp:
+            lines.append("  " + paper_line(pp))
         buys = [a for a in s["actions"] if a["action"] == "BUY"][:top_n]
         sells = [a for a in s["actions"] if a["action"] == "SELL"]
         if buys:

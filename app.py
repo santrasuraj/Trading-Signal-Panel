@@ -14,6 +14,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
+from scanner import paper
+from scanner.costs import CostModel
 from scanner.daily import CURVES_FILE, load_curves, load_latest
 from scanner.holdings import load_holdings, save_holdings
 from scanner.indicators import add_indicators
@@ -83,6 +85,12 @@ def cached_curves(mtime: float):
 @st.cache_data(show_spinner=False)
 def cached_store(version: str):
     return load_store()
+
+
+@st.cache_data(show_spinner=False)
+def cached_paper(version: str, journal_mtime: float, costs_json: str) -> dict:
+    """paper.paper_report() for the current store, journal and charges (recomputed when any changes)."""
+    return paper.paper_report(cached_store(version), CostModel.from_config(json.loads(costs_json)))["strategies"]
 
 
 def file_mtime(p) -> float:
@@ -187,7 +195,8 @@ c[4].metric("Nifty trend", "Up ▲" if m["regime_up"] else "Down ▼",
             help="Up = Nifty above its 200-day average. Strategies only open new positions in an up trend.")
 
 strats = latest["strategies"]
-tabs = st.tabs(["🏆 Strategies", "✅ Today's actions", "💼 My holdings", "📊 Market", "📈 Chart", "ℹ️ Data & settings"])
+tabs = st.tabs(["🏆 Strategies", "✅ Today's actions", "📒 Paper trading", "💼 My holdings", "📊 Market", "📈 Chart",
+                "ℹ️ Data & settings"])
 
 # ----------------------------------------------------------------------------- strategies
 with tabs[0]:
@@ -311,8 +320,85 @@ with tabs[1]:
               signed=("ret_6m", "ret_12m"), fmt={"price": "₹{:,.2f}", "score": "{:.2f}", "ret_6m": "{:+.0f}",
                                                  "ret_12m": "{:+.0f}", "rs": "{:.0f}"}, height=520)
 
-# ----------------------------------------------------------------------------- holdings
+# ----------------------------------------------------------------------------- paper trading
 with tabs[2]:
+    st.caption("**Live proof instead of backtests.** Every scan of a completed day (after ~6 PM, or before 9:15 AM) "
+               "writes each strategy's orders and model portfolio to a journal. A paper portfolio per strategy follows "
+               "them: filled at the next day's official NSE open, with full charges and slippage, stop-losses applied, "
+               "starting from your capital on the first journal day (on day one it buys the model's current holdings). "
+               "Unlike the backtest, nothing here can be fitted to the past or flattered by survivorship. "
+               "Intraday scans are provisional and never journaled.")
+    reports = cached_paper(PanelStore().version(), file_mtime(paper.JOURNAL_FILE),
+                           json.dumps(cfg.get("costs") or {}, sort_keys=True))
+    if not reports:
+        st.info("No paper trades yet. The journal starts automatically with the next scan of a completed trading day.")
+    else:
+        keys = [s_["key"] for s_ in strats]
+        order = [k_ for k_ in keys if k_ in reports] + [k_ for k_ in reports if k_ not in keys]
+        rows = []
+        for k_ in order:
+            sm = reports[k_]["summary"]
+            rows.append({"name": sm["name"], "since": sm["start"], "days": sm["days"], "ret": sm["return_pct"],
+                         "pnl": sm["pnl"], "n50": sm["nifty_pct"], "n500": sm["n500_pct"],
+                         "exp": sm["expected_pct"], "trades": sm["trades"], "open": sm["open"]})
+        table(rows, {"name": "Strategy", "since": "Since", "days": "Days", "ret": "Paper %", "pnl": "P&L ₹",
+                     "n50": "Nifty 50 %", "n500": "Nifty 500 %", "exp": "Backtest expected %",
+                     "trades": "Closed trades", "open": "Holding"},
+              signed=("ret", "pnl", "n50", "n500", "exp"),
+              fmt={"ret": "{:+.2f}", "pnl": "₹{:+,.0f}", "n50": "{:+.2f}", "n500": "{:+.2f}", "exp": "{:+.2f}",
+                   "days": "{:.0f}", "trades": "{:.0f}", "open": "{:.0f}"})
+        st.caption("*Backtest expected* = what the Nifty 500 actually did over the same days, plus the lead over it "
+                   "that the backtest promised for that many days.")
+        pk = st.selectbox("Show details for", order, format_func=lambda k_: reports[k_]["summary"]["name"])
+        rep, sm = reports[pk], reports[pk]["summary"]
+        k = st.columns(5)
+        k[0].metric("Paper portfolio", rupees(sm["equity"]), pct(sm["return_pct"], nd=2))
+        k[1].metric("Nifty 500, same days", pct(sm["n500_pct"], nd=2))
+        k[2].metric("Backtest expected", pct(sm["expected_pct"], nd=2))
+        k[3].metric("Worst drop", pct(sm["max_dd_pct"], signed=False))
+        k[4].metric("Charges + slippage", rupees(sm["fees"] + sm["slippage"]))
+        {"good": st.success, "bad": st.error}.get(sm["level"], st.info)(f"**{sm['verdict']}**")
+        if sm.get("comparison"):
+            st.write(sm["comparison"])
+        if len(rep["equity"]) > 1:
+            fig = go.Figure()
+            for name_, pts in (("Paper portfolio", rep["equity"]), ("NIFTY 50", rep["nifty50"]),
+                               ("NIFTY 500", rep["nifty500"])):
+                if pts:
+                    xs, ys = zip(*pts)
+                    paper_line_ = name_ == "Paper portfolio"
+                    fig.add_trace(go.Scatter(x=list(xs), y=list(ys), name=name_, mode="lines",
+                                             line=dict(width=2.4 if paper_line_ else 1.4,
+                                                       dash=None if paper_line_ else "dot")))
+            fig.update_layout(height=380, yaxis_title=f"Value of {rupees(rep['capital'])}",
+                              margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=1.02, yanchor="bottom"))
+            st.plotly_chart(fig)
+        if rep["pending"]:
+            st.subheader("Paper orders for the next open")
+            table(rep["pending"], {"action": "Action", "symbol": "Stock", "reason": "Why"})
+        st.subheader("Paper holdings")
+        table([{**o, "stop": o["stop"] if o["stop"] is not None else np.nan} for o in rep["open"]],
+              {"symbol": "Stock", "entry_date": "Bought", "entry_price": "Fill ₹", "qty": "Qty",
+               "last_price": "Now ₹", "value": "Value ₹", "pnl": "P&L ₹", "ret_pct": "Return %",
+               "stop": "Stop ₹", "days": "Days"},
+              signed=("pnl", "ret_pct"),
+              fmt={"entry_price": "₹{:,.2f}", "last_price": "₹{:,.2f}", "value": "₹{:,.0f}", "pnl": "₹{:+,.0f}",
+                   "ret_pct": "{:+.1f}", "stop": "₹{:,.2f}"},
+              empty="The paper portfolio is in cash.")
+        st.caption("P&L after buying charges, before selling charges. Fill = official open plus slippage.")
+        st.subheader("Closed paper trades")
+        table(rep["trades"][::-1], {"symbol": "Stock", "entry_date": "Bought", "entry_price": "Buy ₹",
+                                    "exit_date": "Sold", "exit_price": "Sell ₹", "qty": "Qty", "pnl": "P&L ₹",
+                                    "ret_pct": "Return %", "days": "Days", "reason": "Exit reason"},
+              signed=("pnl", "ret_pct"),
+              fmt={"entry_price": "₹{:,.2f}", "exit_price": "₹{:,.2f}", "pnl": "₹{:+,.0f}", "ret_pct": "{:+.1f}"},
+              empty="No closed paper trades yet.")
+        st.caption(f"Journal: {rep['journal_days']} scan day(s), {sm['start']} → {rep['last_journal']}; prices to "
+                   f"{rep['last_date']}. Recomputed from the journal and stored prices on every view, so the same "
+                   "data always gives the same answer.")
+
+# ----------------------------------------------------------------------------- holdings
+with tabs[3]:
     for h in latest["holdings"]:
         if h.get("alerts"):
             {"danger": st.error, "good": st.success}.get(h["level"], st.warning)(
@@ -362,7 +448,7 @@ with tabs[2]:
                 st.warning("Fyers returned no holdings.")
 
 # ----------------------------------------------------------------------------- market
-with tabs[3]:
+with tabs[4]:
     cols = {"symbol": "Stock", "company": "Company", "price": "Price ₹", "change_pct": "Change %", "vol_ratio": "Volume ×"}
     f_ = {"price": "₹{:,.2f}", "change_pct": "{:+.2f}", "vol_ratio": "{:.1f}"}
     a, b = st.columns(2)
@@ -376,7 +462,7 @@ with tabs[3]:
     table(latest["volume_spikes"], cols, signed=("change_pct",), fmt=f_)
 
 # ----------------------------------------------------------------------------- chart
-with tabs[4]:
+with tabs[5]:
     frames = cached_store(PanelStore().version())
     syms = [x for x in latest["symbols"] if x in frames["close"].columns]
     default = next((s_["ranking"][0]["symbol"] for s_ in strats if s_["ranking"]), syms[0] if syms else None)
@@ -407,7 +493,7 @@ with tabs[4]:
         st.caption("Daily candles from the local store (split/bonus/demerger adjusted with NSE data).")
 
 # ----------------------------------------------------------------------------- data & settings
-with tabs[5]:
+with tabs[6]:
     st.write(f"**Live prices:** {latest['fyers_note']}")
     st.write(f"**Official data:** {latest['nse_status']} · complete through {latest['complete_upto']}")
     st.write(f"**{latest.get('results_note', 'Results calendar: -')}** (source: NSE event calendar)")

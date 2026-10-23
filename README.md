@@ -53,6 +53,23 @@ Orders marked *provisional* are based on a candle that is still forming during m
 - **Momentum crashes happen.** Expect 30–40% drops (−68% in 2008) and 1–2 years of lagging. NSE's Nifty200 Momentum 30 returned −0.5% in the 12 months to Sep 2026.
 - **Tax:** momentum sells within a year, so gains are taxed at 20.8% every April. The dashboard shows after-tax returns. Frequent trading can also be treated as business income; ask a CA.
 
+### Paper trading: live proof
+Backtests can be flattered; live results can't. Every scan of a **completed** trading day (after ~6 PM, or before
+9:15 AM) writes each strategy's orders and model portfolio to `data/journal.sqlite`. Scanning the same day twice
+replaces that day's entry. Intraday scans are provisional, so they are never written.
+
+A paper portfolio per strategy then follows the journal:
+- it starts with your `account.capital` on its first journal day, and on that day buys the model's current holdings;
+- orders fill at the **next day's official NSE open**, plus slippage and all charges (`costs:`), sized like the backtest;
+- stop-losses and targets trigger from the day's low/high, as in the backtest;
+- if you miss a scan, it catches up with the model portfolio at the open after your next scan.
+
+The **📒 Paper trading** tab shows each paper portfolio against Nifty 50 and the real Nifty 500 over the same days,
+every paper trade, and how the result compares with what the backtest promised (also after removing the ~8%/yr
+survivorship bias). It also shows how far luck alone could move the result. Telegram gets one paper line per strategy.
+Everything is recomputed from the journal and stored prices on every view, so the same data always gives the same
+numbers. To start over, delete `data/journal.sqlite`. Expect to need **about a year** before the comparison means much.
+
 ---
 
 ## 3. One-time setup (already done on this PC)
@@ -130,12 +147,13 @@ scanner/
   engine.py      portfolio simulator: next-open fills, stops, ranking/rebalance, costs, tax, metrics
   strategies.py  strategy definitions (parameters from config.yaml)
   daily.py       one scan = refresh + re-test + today's orders + holdings check -> latest.json
+  paper.py       paper-trading journal (data/journal.sqlite) + deterministic replay at next-day opens
   holdings.py    holdings file, corporate-action-adjusted buy price
   lock.py        one scan at a time across processes
 app.py           Streamlit dashboard (scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 login.py         daily Fyers OAuth login
-tests/           pytest suite: costs, tax, corporate actions, factors (no look-ahead), engine
+tests/           pytest suite: costs, tax, corporate actions, factors (no look-ahead), engine, paper trading
 ```
 
 Run the tests with `.venv\Scripts\python.exe -m pytest -q`.
@@ -145,6 +163,5 @@ Run the tests with `.venv\Scripts\python.exe -m pytest -q`.
 |---|---|
 | Results calendar: flag stocks with results in the next 7 days | Avoid buying just before a results surprise |
 | Survivorship-free universe: point-in-time top 500 by turnover from NSE's full archive | Honest backtests |
-| Paper-trading journal that records every signal and tracks real outcomes | Live proof, not just backtests |
 | Sector strength from NSE sector indices | Avoid weak sectors |
 | Momentum + low-volatility combined portfolio | Smoother returns |
