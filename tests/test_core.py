@@ -254,3 +254,10 @@ def test_quarterly_and_semiannual_rebalance():
     q = [x.date().isoformat() for x in d[rebalance_days(d, "quarterly")]]
     h = [x.date().isoformat() for x in d[rebalance_days(d, "semiannual")]]
     assert q == ["2025-03-31", "2025-06-30", "2025-09-30"] and h == ["2025-06-30"]
+
+
+def test_rebalance_offset_moves_decision_earlier():
+    d = pd.bdate_range("2025-01-01", "2025-03-31")
+    base = [x.date().isoformat() for x in d[rebalance_days(d, "monthly")]]
+    shifted = [x.date().isoformat() for x in d[rebalance_days(d, "monthly", offset=2)]]
+    assert base == ["2025-01-31", "2025-02-28"] and shifted == ["2025-01-29", "2025-02-26"]

@@ -39,7 +39,7 @@ class Panel:
         return list(self.close.columns)
 
 
-INDEX_COLUMNS = ("NIFTY50", "INDIAVIX")
+INDEX_COLUMNS = ("NIFTY50", "INDIAVIX", "NIFTY500")
 
 
 def panel_from_wide(frames: dict[str, pd.DataFrame], symbols: list[str] | None = None,

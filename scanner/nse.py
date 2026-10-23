@@ -29,7 +29,7 @@ HEADERS = {
     "Accept": "text/csv,*/*", "Referer": "https://www.nseindia.com/",
 }
 SERIES_PRIORITY = ("EQ", "BE", "BZ", "RR", "IV")  # equity, trade-to-trade, REITs, InvITs - best first
-INDEX_NAMES = {"NIFTY 50": "NIFTY50", "INDIA VIX": "INDIAVIX"}
+INDEX_NAMES = {"NIFTY 50": "NIFTY50", "INDIA VIX": "INDIAVIX", "NIFTY 500": "NIFTY500"}
 
 _local = threading.local()
 

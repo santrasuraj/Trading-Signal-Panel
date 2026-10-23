@@ -19,7 +19,7 @@ class CostModel:
     gst_pct: float = 18.0             # GST on brokerage + exchange + SEBI fees
     dp_per_sell: float = 14.75        # FYERS depository charge per scrip per sell day (Rs 12.5 + GST)
     slippage_pct: float = 0.10        # assumed execution slippage per side, liquid stocks
-    slippage_illiquid_pct: float = 0.20   # ... and for stocks trading under `illiquid_below_cr`
+    slippage_illiquid_pct: float = 0.25   # ... and for stocks trading under `illiquid_below_cr`
     illiquid_below_cr: float = 25.0       # average daily traded value, Rs crore
 
     @classmethod

@@ -200,11 +200,13 @@ with tabs[0]:
         rows.append({
             "name": s["name"], "status": STATUS.get(s["status"], (s["status"],))[0],
             "cagr": full.get("cagr_pct"), "at": full.get("after_tax_cagr_pct"),
+            "range": "{:.0f}-{:.0f}%".format(*full["cagr_range"]) if full.get("cagr_range") else "-",
             "dd": full.get("max_dd_pct"), "sharpe": full.get("sharpe"),
             "y1": y1.get("return_pct"), "y1n": (y1.get("benchmark") or {}).get("return_pct"),
             "m6": m6.get("return_pct"), "win": full.get("win_rate"), "trades": full.get("trades"),
         })
-    table(rows, {"name": "Strategy", "status": "Status", "cagr": "Yearly return %", "at": "After tax %",
+    table(rows, {"name": "Strategy", "status": "Status", "cagr": "Yearly return %", "range": "Timing range",
+                 "at": "After tax %",
                  "dd": "Worst drop %",
                  "sharpe": "Sharpe", "y1": "Last 12m %", "y1n": "Nifty 12m %", "m6": "Last 6m %",
                  "win": "Win rate %", "trades": "Trades"},
@@ -214,21 +216,27 @@ with tabs[0]:
     full0 = strats[0]["metrics"]["full"]
     bench = full0.get("benchmark", {})
     ew = full0.get("ew_benchmark", {})
+    n5 = full0.get("n500_benchmark", {})
     st.caption(f"Same period ({full0['start']} → {full0['end']}): Nifty 50 {pct(bench.get('cagr_pct'))}/yr "
                f"({pct(bench.get('after_tax_cagr_pct'))} after tax, worst drop {pct(bench.get('max_dd_pct'), signed=False)}); "
-               f"average stock in this universe {pct(ew.get('cagr_pct'))}/yr. *After tax* = short-term gains taxed at "
+               f"**real Nifty 500 index {pct(n5.get('cagr_pct'))}/yr** (worst drop {pct(n5.get('max_dd_pct'), signed=False)}); "
+               f"average stock in this list {pct(ew.get('cagr_pct'))}/yr. *Timing range* = the same rules rebalanced "
+               "a few days earlier or started a few weeks later - expect anything in that range. "
+               "*After tax* = short-term gains taxed at "
                "20.8% every April, long-term at 13% above ₹1.25 lakh (buy & hold pays once, at the end).")
     st.warning("**Reality check:** these tests use *today's* Nifty 500 list, so companies that collapsed or were "
-               "dropped are missing - every number above is flattered. NSE's own momentum indices (no such bias) "
-               "made about 19-22% a year since 2005 vs 15-16% for their parent index, beat it in 15 of 20 years, "
-               "and fell harder in crashes (-68% in 2008). Expect an edge of a few % a year, not 40%. "
-               "Judge strategies by how much they beat the **average stock** line.")
+               f"dropped are missing - every number above is flattered. The gap between the average stock in this list "
+               f"({pct(ew.get('cagr_pct'))}/yr) and the real Nifty 500 index ({pct(n5.get('cagr_pct'))}/yr) shows how big "
+               "that bias is (about 8% a year of it is pure survivorship, by our lab's estimate). NSE's own momentum "
+               "indices, which have no such bias, made about 19-22% a year since 2005 vs 15-16% for their parent index, "
+               "beat it in 15 of 20 years and fell harder in crashes (-68% in 2008). **Expect an edge of a few % a year, "
+               "not 40%.** Judge strategies by how much they beat the **average stock** line.")
 
     curves = cached_curves(file_mtime(CURVES_FILE))
     if curves is not None and not curves.empty:
         names = {s["key"]: s["name"] for s in strats}
         show = st.multiselect("Compare growth of ₹1", list(curves.columns),
-                              default=[c for c in curves.columns if c in (strats[0]["key"], "NIFTY 50", "Average stock")],
+                              default=[c for c in curves.columns if c in (strats[0]["key"], "NIFTY 500", "Average stock")],
                               format_func=lambda k: names.get(k, k))
         fig = go.Figure()
         for col in show:

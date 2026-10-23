@@ -25,7 +25,8 @@ from .settings import IST, LOG_DIR, TOKEN_FILE
 COLS = ["open", "high", "low", "close", "volume"]
 INDEX_NIFTY = "NIFTY50"
 INDEX_VIX = "INDIAVIX"
-INDEX_SYMBOLS = (INDEX_NIFTY, INDEX_VIX)
+INDEX_N500 = "NIFTY500"    # the real Nifty 500 index: an unbiased benchmark (no survivorship bias)
+INDEX_SYMBOLS = (INDEX_NIFTY, INDEX_VIX, INDEX_N500)
 
 
 def empty_frame() -> pd.DataFrame:
@@ -38,7 +39,7 @@ class FyersAuthError(RuntimeError):
 
 class FyersProvider:
     name = "fyers"
-    INDEX_MAP = {INDEX_NIFTY: "NSE:NIFTY50-INDEX", INDEX_VIX: "NSE:INDIAVIX-INDEX"}
+    INDEX_MAP = {INDEX_NIFTY: "NSE:NIFTY50-INDEX", INDEX_VIX: "NSE:INDIAVIX-INDEX", INDEX_N500: "NSE:NIFTY500-INDEX"}
     MIN_INTERVAL = {"standard": 1.25, "prime": 0.13}   # seconds between data calls (50/min, 500/min)
     MAX_DAYS_PER_CALL = 365
     AUTH_CODES = {-8, -15, -16, -17, 401}
@@ -169,7 +170,7 @@ class FyersProvider:
 
 class YahooProvider:
     name = "yahoo"
-    INDEX_MAP = {INDEX_NIFTY: "^NSEI", INDEX_VIX: "^INDIAVIX"}
+    INDEX_MAP = {INDEX_NIFTY: "^NSEI", INDEX_VIX: "^INDIAVIX", INDEX_N500: "^CRSLDX"}
     BATCH = 80
     OUTAGE_SHARE = 0.2   # if more than this share of a batch comes back empty, treat it as an outage
 

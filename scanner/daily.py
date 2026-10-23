@@ -8,18 +8,19 @@ from __future__ import annotations
 import json
 import math
 import time
+from dataclasses import replace
 from datetime import timedelta
 
 import numpy as np
 import pandas as pd
 
 from .costs import CostModel, TaxModel
-from .engine import EventStrategy, evaluate, equal_weight_index, simulate, working_status
+from .engine import EventStrategy, _curve_stats, evaluate, equal_weight_index, simulate, working_status
 from .events import upcoming_results
 from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
 from .panel import Factors, panel_from_wide
-from .providers import INDEX_NIFTY, INDEX_VIX, get_fyers
+from .providers import INDEX_N500, INDEX_NIFTY, INDEX_VIX, get_fyers
 from .settings import RESULTS_DIR, SESSION_END, SESSION_START, ist_now, load_config
 from .store import load_store, refresh_store
 from .strategies import build_strategies, tradable_mask
@@ -148,10 +149,21 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     close_last = p.close.iloc[-1]
     regime_up = bool(f.regime_up.iloc[-1])
 
+    n500 = frames["close"][INDEX_N500].reindex(p.dates) if INDEX_N500 in frames["close"].columns else None
     strat_out, curves = [], {}
     for s in build_strategies(cfg):
         res = simulate(s, f, costs, trad, capital=capital, min_position=min_position)
-        m = evaluate(res, p.index_close, ew, tax=tax)
+        m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500)
+        # Timing luck: the same rules rebalanced a few days earlier (or started a few weeks later)
+        # can give quite different results - report the spread, not just one number.
+        variants = ([replace(s, rebalance_offset=k) for k in (5, 10, 15)] if s.kind == "rank" else [s, s, s])
+        spread = [m["full"].get("cagr_pct")]
+        for i, v in enumerate(variants):
+            alt = simulate(v, f, costs, trad, capital=capital, min_position=min_position,
+                           warmup=252 if s.kind == "rank" else 252 + 21 * (i + 1))
+            spread.append(_curve_stats(alt.equity)["cagr_pct"])
+        spread = [x for x in spread if x is not None]
+        m["full"]["cagr_range"] = [min(spread), max(spread)] if spread else None
         status, why = working_status(m)
         eq = res.equity.dropna()
         curves[s.key] = eq / eq.iloc[0]
@@ -199,8 +211,12 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                                "exit": t.exit_date.date().isoformat(), "ret_pct": _num(t.ret_pct, 1),
                                "days": t.days, "reason": t.reason} for t in res.trades[-25:]][::-1],
         })
+    # Working now first; among those, strategies with long independent research behind them before
+    # experimental ones; then recent performance.
+    tier = {"momentum": 0, "low_vol": 1, "trend_breakout": 2}
     order = {"working": 0, "mixed": 1, "unknown": 2, "not-working": 3}
-    strat_out.sort(key=lambda x: (order.get(x["status"], 9), -((x["metrics"].get("12m") or {}).get("return_pct") or -1e9)))
+    strat_out.sort(key=lambda x: (order.get(x["status"], 9), tier.get(x["key"], 5),
+                                  -((x["metrics"].get("12m") or {}).get("return_pct") or -1e9)))
 
     # Market snapshot
     fresh = observed_last & close_last.notna()
@@ -314,12 +330,12 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         "symbols": sorted(c for c in p.close.columns),
         "results_note": results_note,
     }
-    _save(result, curves, p, ew, started)
+    _save(result, curves, p, ew, n500, started)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
     return result
 
 
-def _save(result: dict, curves: dict, p, ew: pd.Series, started) -> None:
+def _save(result: dict, curves: dict, p, ew: pd.Series, n500: pd.Series | None, started) -> None:
     text = json.dumps(result, indent=1, default=str)
     tmp = LATEST_FILE.with_suffix(".tmp")
     tmp.write_text(text, encoding="utf-8")
@@ -331,6 +347,9 @@ def _save(result: dict, curves: dict, p, ew: pd.Series, started) -> None:
     df = pd.DataFrame(curves)
     df["NIFTY 50"] = p.index_close.reindex(df.index).ffill() / p.index_close.reindex(df.index).ffill().iloc[0]
     df["Average stock"] = ew.reindex(df.index) / ew.reindex(df.index).iloc[0]
+    if n500 is not None and n500.notna().any():
+        n5 = n500.reindex(df.index).ffill()
+        df["NIFTY 500"] = n5 / n5.dropna().iloc[0]
     df.to_parquet(CURVES_FILE)
 
 

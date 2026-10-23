@@ -58,6 +58,7 @@ class RankStrategy:
     use_regime: bool = True
     regime_action: str = "hold"          # Nifty below 200-DMA: "hold" (no new buys) or "cash" (sell all)
     stop_pct: float | None = None        # optional per-position stop between rebalances
+    rebalance_offset: int = 0            # rebalance this many trading days before the period end
     kind: str = field(default="rank", init=False)
 
     @property
@@ -90,9 +91,20 @@ class SimResult:
     start_index: int
 
 
-def rebalance_days(dates: pd.DatetimeIndex, how: str) -> np.ndarray:
-    """True on the last trading day of each period (decide at close, trade next open).
-    The final row is never a rebalance day because the period may not be over yet."""
+def rebalance_days(dates: pd.DatetimeIndex, how: str, offset: int = 0) -> np.ndarray:
+    """True on the last trading day of each period (decide at close, trade next open), or `offset`
+    trading days before it. Results swing a lot with the rebalance day ("timing luck"), so the
+    dashboard reports a range over several offsets. The final row is never a rebalance day."""
+    base = _period_ends(dates, how)
+    if offset <= 0:
+        return base
+    out = np.zeros(len(dates), dtype=bool)
+    idx = np.flatnonzero(base) - offset
+    out[idx[idx >= 0]] = True
+    return out
+
+
+def _period_ends(dates: pd.DatetimeIndex, how: str) -> np.ndarray:
     year = dates.year.to_numpy() * 100
     if how == "weekly":
         key = dates.isocalendar().week.to_numpy() + year
@@ -139,7 +151,7 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
         elig = (strategy.eligible(f).reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
                 if strategy.eligible else np.ones((T, N), dtype=bool))
         score_np = np.where(elig & trad, score.to_numpy(dtype=float), np.nan)
-        rebal = rebalance_days(idx, strategy.rebalance)
+        rebal = rebalance_days(idx, strategy.rebalance, strategy.rebalance_offset)
         prio_src = None
     prio = (prio_src.reindex(index=idx, columns=symbols).to_numpy(dtype=float)
             if prio_src is not None else np.zeros((T, N)))
@@ -356,7 +368,8 @@ def after_tax_equity(res: SimResult, tax: TaxModel) -> pd.Series:
 
 
 def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | None = None,
-             windows: dict[str, int] | None = None, tax: TaxModel | None = None) -> dict:
+             windows: dict[str, int] | None = None, tax: TaxModel | None = None,
+             n500_benchmark: pd.Series | None = None) -> dict:
     """Metrics for the full period and for recent windows (by trading days)."""
     windows = windows or {"12m": 252, "6m": 126, "3m": 63}
     eq = res.equity.dropna()
@@ -372,11 +385,12 @@ def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | Non
 
     out["full"]["benchmark"] = bench(benchmark, eq.index)
     out["full"]["ew_benchmark"] = bench(ew_benchmark, eq.index)
+    out["full"]["n500_benchmark"] = bench(n500_benchmark, eq.index)
     if tax is not None:
         at = _curve_stats(after_tax_equity(res, tax))
         out["full"]["after_tax_cagr_pct"] = at["cagr_pct"]
         out["full"]["after_tax_return_pct"] = at["return_pct"]
-        for key in ("benchmark", "ew_benchmark"):   # buy & hold: long-term tax once, at the end
+        for key in ("benchmark", "ew_benchmark", "n500_benchmark"):   # buy & hold: taxed once, at the end
             b = out["full"][key]
             if b.get("return_pct") is not None:
                 years = len(eq) / TRADING_DAYS
@@ -389,7 +403,8 @@ def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | Non
         start = w.index[0]
         tw = [t for t in res.trades if t.exit_date > start]
         out[name] = {**_curve_stats(w), **_trade_stats(tw),
-                     "benchmark": bench(benchmark, w.index), "ew_benchmark": bench(ew_benchmark, w.index)}
+                     "benchmark": bench(benchmark, w.index), "ew_benchmark": bench(ew_benchmark, w.index),
+                     "n500_benchmark": bench(n500_benchmark, w.index)}
     return out
 
 

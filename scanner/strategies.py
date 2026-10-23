@@ -56,7 +56,7 @@ def build_strategies(cfg: dict) -> list:
 
     # 2. Near the 52-week high (George & Hwang)
     k = "near_high"
-    if enabled(k):
+    if enabled(k, default=False):
         out.append(RankStrategy(
             key=k, name="Near 52-week high",
             description=("Holds uptrending stocks trading closest to their 52-week high. Stocks near their highs "
@@ -71,17 +71,18 @@ def build_strategies(cfg: dict) -> list:
     # 3. Trend template + breakout (stage-2 breakouts)
     k = "trend_breakout"
     if enabled(k):
-        rs_min = float(opt(k, "rs_min", 70))
-        vol_min = float(opt(k, "min_vol_ratio", 1.5))
+        rs_min = float(opt(k, "rs_min", 90))
+        vol_min = float(opt(k, "min_vol_ratio", 2.0))
         out.append(EventStrategy(
-            key=k, name="Trend-template breakout",
+            key=k, name="Trend breakout (experimental)",
             description=("Buys a stock in a strong uptrend (price above rising 50/150/200-day averages, near its "
-                         "high, top relative strength) when it breaks above its 20-day high on heavy volume. "
-                         "Exits on stop-loss, trailing stop, or a close below the 50-day average."),
+                         "high, relative strength in the top 10%) when it breaks above its 20-day high on at least "
+                         "twice normal volume. Exits on an 8% stop-loss or a close below the 50-day average. "
+                         "Experimental: out of sample it only matched the average stock."),
             entries=lambda f: _trend_template(f, rs_min) & (f.p.close > f.high_20_prev) & (f.vol_ratio >= vol_min),
             priority=lambda f: f.rs_rating,
             exit_signal=lambda f: f.p.close < f.sma50,
-            stop_pct=float(opt(k, "stop_pct", 8)), trail_pct=opt(k, "trail_pct", 15),
+            stop_pct=float(opt(k, "stop_pct", 8)), trail_pct=opt(k, "trail_pct", None) or None,
             max_positions=int(opt(k, "max_positions", 10)),
             sizing=opt(k, "sizing", "equal"), risk_pct=float(opt(k, "risk_pct", 1.0)),
             use_regime=opt(k, "use_regime", True),
@@ -89,7 +90,7 @@ def build_strategies(cfg: dict) -> list:
 
     # 4. RSI(2) pullback in uptrend (short-term mean reversion)
     k = "rsi2_pullback"
-    if enabled(k):
+    if enabled(k, default=False):
         level = float(opt(k, "rsi2_below", 10))
         out.append(EventStrategy(
             key=k, name="RSI-2 pullback",
@@ -121,7 +122,7 @@ def build_strategies(cfg: dict) -> list:
 
     # 6. Old v1 rules, kept only as a comparison baseline
     k = "legacy_rules"
-    if enabled(k, default=True):
+    if enabled(k, default=False):
         out.append(EventStrategy(
             key=k, name="Old textbook rules (baseline)",
             description=("The v1 rules (50-DMA volume breakout, 52-week-high breakout) with 5% stop / 10% target / "

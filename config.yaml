@@ -45,7 +45,7 @@ costs:
   gst_pct: 18
   dp_per_sell: 14.75         # FYERS DP charge per stock per sell day (Rs 12.5 + GST)
   slippage_pct: 0.10         # assumed price slippage per side, liquid stocks
-  slippage_illiquid_pct: 0.20
+  slippage_illiquid_pct: 0.25
   illiquid_below_cr: 25      # stocks trading under Rs 25 crore/day get the higher slippage
 
 # Capital-gains tax used for the "after tax" returns (individual, listed shares, incl. 4% cess).
@@ -64,21 +64,21 @@ strategies:
     rebalance: monthly       # monthly | biweekly | weekly
     require_uptrend: true    # only stocks above their 200-day average
     use_regime: true         # no new buys while Nifty is below its 200-day average
-    regime_action: hold      # hold = keep holdings, cash = sell everything in a downtrend
+    regime_action: hold      # hold = keep holdings, no new buys (insurance); cash tested worst - avoid
   near_high:
-    enabled: true
+    enabled: false           # never beat the average stock in testing
     top_n: 15
     keep_rank: 30
     rebalance: monthly
   trend_breakout:
-    enabled: true
-    rs_min: 70
-    min_vol_ratio: 1.5
-    stop_pct: 8
-    trail_pct: 15
+    enabled: true            # experimental: out of sample it only matched the average stock
+    rs_min: 90               # relative strength in the top 10%
+    min_vol_ratio: 2.0       # breakout volume at least 2x normal
+    stop_pct: 8              # 8% beat 10% both in and out of sample
+    trail_pct: 0             # 0 = no trailing stop (the one robust improvement); exit on close below 50-DMA
     max_positions: 10
   rsi2_pullback:
-    enabled: true
+    enabled: false           # short-term dips: lost money after realistic costs
     rsi2_below: 10
     stop_pct: 10
     max_hold: 10
@@ -91,7 +91,7 @@ strategies:
     rebalance: quarterly
     use_regime: false        # defensive by design: stays invested
   legacy_rules:
-    enabled: true            # the old v1 rules, kept only as a comparison
+    enabled: false           # the old v1 rules (-12%/yr); enable only to compare
 
 telegram:
   top_n: 10
