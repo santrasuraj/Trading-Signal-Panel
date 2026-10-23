@@ -116,8 +116,11 @@ def scan_monitor():
     if not st.session_state.get("scan_started"):
         return
     s = read_status()
-    if running_scan() or (s.get("state") == "running" and time.time() - s.get("started", 0) < 15):
-        st.progress(float(s.get("progress") or 0.0), text=s.get("message") or "Working...")
+    finished = s.get("state") in ("done", "failed", "busy")
+    # Right after launching, the background process may not have taken the lock / written status yet.
+    launching = time.time() - st.session_state.get("scan_launched_at", 0) < 30 and not finished
+    if running_scan() or launching:
+        st.progress(float(s.get("progress") or 0.0), text=s.get("message") or "Starting...")
         st.caption("You can keep using the dashboard; it refreshes when the scan finishes.")
         return
     st.session_state.scan_started = False
@@ -146,6 +149,7 @@ with st.sidebar:
         STATUS_FILE.unlink(missing_ok=True)
         start_background("run_scan.py", "--status", str(STATUS_FILE), "--by", "dashboard")
         st.session_state.scan_started = True
+        st.session_state.scan_launched_at = time.time()
         st.session_state.scan_error = None
         st.rerun()
     if running_scan() and not st.session_state.get("scan_started"):
