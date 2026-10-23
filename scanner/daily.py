@@ -14,6 +14,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
+from . import paper
 from .costs import CostModel, TaxModel
 from .engine import EventStrategy, _curve_stats, evaluate, equal_weight_index, simulate, working_status
 from .events import upcoming_results
@@ -154,6 +155,9 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     for s in build_strategies(cfg):
         res = simulate(s, f, costs, trad, capital=capital, min_position=min_position)
         m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500)
+        if n500 is not None:   # tracking error vs the real Nifty 500: how far luck alone moves the gap
+            gap = (res.equity.pct_change() - n500.reindex(res.equity.index).ffill().pct_change()).dropna()
+            m["full"]["te_n500_pct"] = float(gap.std() * np.sqrt(252) * 100) if len(gap) > 20 else None
         # Timing luck: the same rules rebalanced a few days earlier (or started a few weeks later)
         # can give quite different results - report the spread, not just one number.
         variants = ([replace(s, rebalance_offset=k) for k in (5, 10, 15)] if s.kind == "rank" else [s, s, s])
@@ -206,6 +210,9 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"])} for pp in res.open_positions],
             "actions": actions, "ranking": ranking,
             "max_positions": s.max_positions, "per_position": _num(per_pos, 0),
+            "rules": {"stop_pct": s.stop_pct, "target_pct": getattr(s, "target_pct", None),
+                      "trail_pct": getattr(s, "trail_pct", None), "sizing": getattr(s, "sizing", "equal"),
+                      "risk_pct": getattr(s, "risk_pct", None)},
             "next_rebalance": _next_rebalance(p.dates, s.rebalance) if s.kind == "rank" else None,
             "recent_trades": [{"symbol": t.symbol, "entry": t.entry_date.date().isoformat(),
                                "exit": t.exit_date.date().isoformat(), "ret_pct": _num(t.ret_pct, 1),
@@ -318,7 +325,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         "complete_upto": info.get("complete_upto"), "fyers_note": fyers_note, "nse_status": info.get("nse_status"),
         "universe": uni_note, "stocks": int(trad.iloc[-1].sum()), "stale_symbols": stale[:50],
         "errors": info.get("errors", {}), "corporate_actions": info.get("corporate_actions", []),
-        "capital": capital, "costs_round_trip_pct": _num(costs.round_trip_pct(capital / 15), 3),
+        "capital": capital, "min_position": min_position,
+        "costs_round_trip_pct": _num(costs.round_trip_pct(capital / 15), 3),
         "market": {"label": mood, "level": level, "advice": advice, "regime_up": regime_up,
                    "nifty": nifty, "nifty_change_pct": nifty_chg, "vix": vix, "vix_change_pct": vix_chg,
                    "breadth_50": breadth, "advances": int((pool > 0).sum()), "declines": int((pool < 0).sum())},
@@ -330,6 +338,15 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         "symbols": sorted(c for c in p.close.columns),
         "results_note": results_note,
     }
+    try:
+        # Paper trading: journal completed days only, then replay the journal on stored (completed) prices.
+        if not live:
+            paper.record_scan(result)
+        done = {k: v.iloc[:-1] for k, v in frames.items()} if live else frames
+        result["paper"] = paper.summaries(done, costs)
+    except Exception as e:   # the journal must never break a scan
+        log(f"Paper-trading journal problem: {type(e).__name__}: {e}")
+        result["paper"] = {}
     _save(result, curves, p, ew, n500, started)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
     return result
