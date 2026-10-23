@@ -141,6 +141,50 @@ def fetch_day(day: date, use_cache: bool = True) -> DayFile:
     return DayFile(day, "ok", stocks, indices)
 
 
+INDEX_HISTORY = NSE_DIR / "index_history.parquet"
+
+
+def _index_closes(day: date) -> pd.Series | None:
+    """Closing values of every NSE index on `day` (None if no file / holiday)."""
+    cached = NSE_DIR / f"indices_{day:%Y%m%d}.parquet"
+    if cached.exists():
+        return pd.read_parquet(cached)["close"]
+    code, text = _get(INDEX_URL.format(d=day.strftime("%d%m%Y")))
+    if code != 200:
+        return None
+    try:
+        df = _parse_indices(text, day)
+    except Exception:
+        return None
+    if (date.today() - day).days > 2:
+        df.to_parquet(cached)
+    return df["close"]
+
+
+def index_history(days: list[date], workers: int = 4, log=print) -> pd.DataFrame:
+    """Wide table (dates x index names) of closing values for all NSE indices - sector indices,
+    factor indices (Nifty200 Momentum 30, Low Volatility 30, Quality 30, ...) and the Nifty 1D Rate.
+    Kept up to date incrementally in data/nse/index_history.parquet."""
+    have = pd.read_parquet(INDEX_HISTORY) if INDEX_HISTORY.exists() else pd.DataFrame()
+    known = set(have.index.date) if len(have) else set()
+    missing = [d for d in days if d not in known]
+    if missing:
+        if len(missing) > 30:
+            log(f"Downloading NSE index history for {len(missing)} days (one-time, a few minutes)...")
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            rows = {d: s for d, s in zip(missing, ex.map(_index_closes, missing)) if s is not None}
+        if rows:
+            new = pd.DataFrame(rows).T
+            new.index = pd.DatetimeIndex([pd.Timestamp(d) for d in new.index], name="date")
+            have = pd.concat([have, new]) if len(have) else new
+            have = have[~have.index.duplicated(keep="last")].sort_index()
+            have.columns = [str(c) for c in have.columns]
+            tmp = INDEX_HISTORY.with_suffix(".tmp")
+            have.to_parquet(tmp)
+            tmp.replace(INDEX_HISTORY)
+    return have
+
+
 def fetch_days(days: list[date], workers: int = 4) -> dict[date, DayFile]:
     """Fetch several days in parallel (politely: a few connections at a time)."""
     if not days:

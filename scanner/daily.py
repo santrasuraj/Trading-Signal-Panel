@@ -17,6 +17,7 @@ import pandas as pd
 from .costs import CostModel, TaxModel
 from .engine import EventStrategy, _curve_stats, evaluate, equal_weight_index, simulate, working_status
 from .events import results_history, upcoming_results
+from .nse import index_history
 from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
 from .panel import Factors, panel_from_wide
@@ -28,6 +29,7 @@ from .universe import get_universe
 
 LATEST_FILE = RESULTS_DIR / "latest.json"
 TIMING_CACHE = RESULTS_DIR / "timing_cache.json"
+ENGINE_VERSION = 3   # bump when simulation logic changes, so cached timing ranges are recomputed
 CURVES_FILE = RESULTS_DIR / "curves.parquet"
 KEEP_SCAN_FILES = 60
 
@@ -163,17 +165,22 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     regime_up = bool(f.regime_up.iloc[-1])
 
     n500 = frames["close"][INDEX_N500].reindex(p.dates) if INDEX_N500 in frames["close"].columns else None
+    done_upto = pd.Timestamp(info.get("complete_upto") or p.dates[-1])
+    idx_hist = index_history([d.date() for d in p.dates if d <= done_upto], log=log).reindex(p.dates).ffill()
+    cash_rate = idx_hist.get("Nifty 1D Rate Index")
     complete_upto = info.get("complete_upto") or p.dates[-1].date().isoformat()
     timing_cache = _load_json(TIMING_CACHE)
     strat_out, curves = [], {}
     for s in build_strategies(cfg):
-        res = simulate(s, f, costs, trad, capital=capital, min_position=min_position)
-        m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500)
+        res = simulate(s, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate)
+        factor = idx_hist.get(s.benchmark) if s.benchmark else None
+        m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500, factor_benchmark=factor)
+        m["full"]["factor_benchmark_name"] = s.benchmark or None
         # Timing luck: the same rules rebalanced a few days earlier (or started a few weeks later)
         # can give quite different results - report the spread, not just one number.
         # (cached: recomputed only when the completed data or this strategy's settings change)
-        sig = json.dumps([(cfg.get("strategies") or {}).get(s.key), cfg.get("costs"), cfg.get("filters"),
-                          capital, complete_upto], sort_keys=True, default=str)
+        sig = json.dumps([ENGINE_VERSION, (cfg.get("strategies") or {}).get(s.key), cfg.get("costs"),
+                          cfg.get("filters"), capital, complete_upto], sort_keys=True, default=str)
         hit = timing_cache.get(s.key)
         if hit and hit.get("sig") == sig:
             m["full"]["cagr_range"] = hit["range"]
@@ -181,7 +188,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             variants = ([replace(s, rebalance_offset=k) for k in (5, 10, 15)] if s.kind == "rank" else [s, s, s])
             spread = [m["full"].get("cagr_pct")]
             for i, v in enumerate(variants):
-                alt = simulate(v, f, costs, trad, capital=capital, min_position=min_position,
+                alt = simulate(v, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate,
                                warmup=252 if s.kind == "rank" else 252 + 21 * (i + 1))
                 spread.append(_curve_stats(alt.equity)["cagr_pct"])
             spread = [x for x in spread if x is not None]
@@ -224,7 +231,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                                 "in_portfolio": sym in held, **results_info(sym)})
         strat_out.append({
             "key": s.key, "name": s.name, "description": s.description, "kind": s.kind,
-            "horizon": s.horizon, "evidence": s.evidence, "universe": s.universe,
+            "horizon": s.horizon, "evidence": s.evidence, "universe": s.universe, "benchmark": s.benchmark,
             "status": status, "status_reason": why, "metrics": _clean_metrics(m),
             "yearly": {str(k): _num(v, 1) for k, v in yearly.items()},
             "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"])} for pp in res.open_positions],
@@ -357,10 +364,41 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         "holdings": holding_rows,
         "symbols": sorted(c for c in p.close.columns),
         "results_note": results_note,
+        "indices": _index_tables(idx_hist, p.dates),
     }
     _save(result, curves, p, ew, n500, started)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
     return result
+
+
+FACTOR_INDICES = ["Nifty 50", "Nifty 500", "Nifty200 Momentum 30", "Nifty500 Momentum 50", "Nifty Alpha 50",
+                  "Nifty100 Low Volatility 30", "NIFTY200 Quality 30", "Nifty200 Value 30", "NIFTY50 Equal Weight",
+                  "Nifty500 Equal Weight", "Nifty Midcap 150", "Nifty Smallcap 250", "Nifty 1D Rate Index"]
+SECTOR_INDICES = ["Nifty Bank", "Nifty Financial Services", "Nifty IT", "Nifty Pharma", "Nifty Healthcare Index",
+                  "Nifty Auto", "Nifty FMCG", "Nifty Metal", "Nifty Realty", "Nifty Energy", "Nifty Oil & Gas",
+                  "Nifty PSU Bank", "Nifty Private Bank", "Nifty Media", "Nifty Infrastructure", "Nifty India Consumption",
+                  "Nifty Consumer Durables", "Nifty Commodities", "Nifty CPSE", "Nifty MNC", "Nifty Services Sector"]
+
+
+def _index_tables(h: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
+    """Factor-index gallery (real NSE indices) and sector strength, from NSE's index history."""
+    def stats(s: pd.Series) -> dict | None:
+        s = s.dropna()
+        if len(s) < 30:
+            return None
+        def ret(n):
+            return _num((s.iloc[-1] / s.iloc[-n - 1] - 1) * 100, 1) if len(s) > n else None
+        cs = _curve_stats(s)
+        return {"last": _num(s.iloc[-1]), "chg_1d": ret(1), "ret_1m": ret(21), "ret_3m": ret(63), "ret_6m": ret(126),
+                "ret_1y": ret(252), "cagr": _num(cs.get("cagr_pct"), 1), "max_dd": _num(cs.get("max_dd_pct"), 1),
+                "since": s.index[0].date().isoformat(),
+                "above_50dma": bool(s.iloc[-1] > s.iloc[-50:].mean()) if len(s) >= 50 else None}
+    factors = [{"name": n, **st} for n in FACTOR_INDICES if n in h and (st := stats(h[n]))]
+    sectors = [{"name": n, **st} for n in SECTOR_INDICES if n in h and (st := stats(h[n]))]
+    sectors.sort(key=lambda r: -(r.get("ret_3m") or -1e9))
+    for i, r in enumerate(sectors, 1):
+        r["rank"] = i
+    return {"factors": factors, "sectors": sectors}
 
 
 def _save(result: dict, curves: dict, p, ew: pd.Series, n500: pd.Series | None, started) -> None:

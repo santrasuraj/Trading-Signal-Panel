@@ -63,7 +63,7 @@ def build_strategies(cfg: dict) -> list:
     if enabled(k):
         need_trend = opt(k, "require_uptrend", True)
         out.append(RankStrategy(
-            key=k, name="Momentum leaders", horizon="longterm", evidence="STRONG",
+            key=k, name="Momentum leaders", horizon="longterm", evidence="STRONG", benchmark="Nifty200 Momentum 30",
             description=("Holds the 15 strongest stocks by risk-adjusted 6- and 12-month return (the method behind "
                          "NSE's Nifty200 Momentum 30 index), reviewed monthly; a holding is kept while it stays in "
                          "the top 30. Momentum is the most consistently documented stock-selection effect worldwide "
@@ -81,6 +81,7 @@ def build_strategies(cfg: dict) -> list:
         big = int(opt(k, "universe_size", 150))
         out.append(RankStrategy(
             key=k, name="Low volatility", horizon="longterm", evidence="STRONG",
+            benchmark="Nifty100 Low Volatility 30",
             description=("Holds the 20 steadiest large, liquid stocks (lowest 1-year volatility), reviewed quarterly "
                          "- the method behind NSE's Nifty100 Low Vol 30 index (17.7% vs 13.7%/yr for Nifty 100, "
                          "2005-18, and much smaller crash losses). Defensive: lags in strong rallies."),
@@ -94,7 +95,7 @@ def build_strategies(cfg: dict) -> list:
     if enabled(k):
         top_ind = int(opt(k, "top_industries", 3))
         out.append(RankStrategy(
-            key=k, name="Sector rotation", horizon="longterm", evidence="MODERATE",
+            key=k, name="Sector rotation", horizon="longterm", evidence="MODERATE", benchmark="Nifty Alpha 50",
             description=(f"Each month finds the {top_ind} strongest industries (average 6-month return of their "
                          "stocks) and holds the strongest stocks inside them. Industry momentum is documented "
                          "(Moskowitz & Grinblatt 1999) and partly explains stock momentum."),
@@ -122,7 +123,7 @@ def build_strategies(cfg: dict) -> list:
     if enabled(k):
         etf = str(opt(k, "etf", "NIFTYBEES"))
         out.append(RankStrategy(
-            key=k, name="Nifty trend timing (ETF)", horizon="longterm", evidence="MODERATE",
+            key=k, name="Nifty trend timing (ETF)", horizon="longterm", evidence="MODERATE", benchmark="Nifty 50",
             description=(f"Holds the {etf} index ETF while Nifty is above its 200-day average and moves to cash "
                          "when it falls below (checked monthly). Faber's market-timing rule: similar long-run return "
                          "to buy-and-hold with much smaller crashes; whipsaws in sideways markets."),
@@ -137,7 +138,7 @@ def build_strategies(cfg: dict) -> list:
         assets = list(opt(k, "etfs", ["NIFTYBEES", "JUNIORBEES", "BANKBEES", "GOLDBEES", "MON100"]))
         hold = int(opt(k, "hold", 2))
         out.append(RankStrategy(
-            key=k, name="Dual momentum (ETF rotation)", horizon="longterm", evidence="MODERATE",
+            key=k, name="Dual momentum (ETF rotation)", horizon="longterm", evidence="MODERATE", benchmark="Nifty 50",
             description=(f"Each month holds the {hold} ETFs with the best 12-month return among Nifty, Nifty Next 50, "
                          "Bank, Gold and Nasdaq-100 - but only if that return is positive, otherwise cash "
                          "(Antonacci's dual momentum: relative + absolute momentum across asset classes)."),

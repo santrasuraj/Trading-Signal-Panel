@@ -45,6 +45,7 @@ class EventStrategy:
     horizon: str = "swing"               # intraday | swing | longterm (for grouping in the UI)
     evidence: str = ""                   # STRONG | MODERATE | WEAK | EXPERIMENTAL - strength of published evidence
     universe: str = "stocks"             # stocks | etfs
+    benchmark: str = ""                  # matching real NSE index (survivorship-free comparison)
     kind: str = field(default="event", init=False)
 
 
@@ -65,6 +66,7 @@ class RankStrategy:
     horizon: str = "longterm"
     evidence: str = ""
     universe: str = "stocks"             # stocks | etfs
+    benchmark: str = ""                  # matching real NSE index (survivorship-free comparison)
     kind: str = field(default="rank", init=False)
 
     @property
@@ -129,9 +131,10 @@ def _period_ends(dates: pd.DatetimeIndex, how: str) -> np.ndarray:
 
 def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostModel,
              tradable: pd.DataFrame, capital: float = 1_000_000.0, warmup: int = TRADING_DAYS,
-             min_position: float = 0.0) -> SimResult:
+             min_position: float = 0.0, cash_rate: pd.Series | None = None) -> SimResult:
     """Run the strategy over the whole panel. `min_position` skips buys smaller than that many
-    rupees (fixed charges make tiny positions expensive)."""
+    rupees (fixed charges make tiny positions expensive). `cash_rate` is a cash-return index (e.g. the
+    Nifty 1D Rate): idle cash grows with it, as it would parked in a liquid fund."""
     p = f.p
     idx, symbols = p.dates, p.symbols
     dates = list(idx)   # plain list: fast element access inside the loop
@@ -166,6 +169,8 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
     prio = np.nan_to_num(prio, nan=-np.inf)
 
     cash = capital
+    cash_growth = (cash_rate.reindex(idx).ffill().pct_change().fillna(0.0).clip(-0.01, 0.01).to_numpy()
+                   if cash_rate is not None else np.zeros(len(idx)))
     pos: dict[int, dict] = {}            # col -> position
     pending_sell: dict[int, str] = {}    # col -> reason
     pending_buy: list[int] = []
@@ -192,6 +197,8 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                             pnl / ps["cost"] * 100, t - ps["t"], reason))
 
     for t in range(t0, T):
+        if cash > 0 and t > t0:
+            cash *= 1 + cash_growth[t]
         # 1) Orders at today's open: sells first to free cash, then buys.
         for c, reason in list(pending_sell.items()):
             if c in pos and not math.isnan(O[t, c]):
@@ -377,7 +384,7 @@ def after_tax_equity(res: SimResult, tax: TaxModel) -> pd.Series:
 
 def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | None = None,
              windows: dict[str, int] | None = None, tax: TaxModel | None = None,
-             n500_benchmark: pd.Series | None = None) -> dict:
+             n500_benchmark: pd.Series | None = None, factor_benchmark: pd.Series | None = None) -> dict:
     """Metrics for the full period and for recent windows (by trading days)."""
     windows = windows or {"12m": 252, "6m": 126, "3m": 63}
     eq = res.equity.dropna()
@@ -394,11 +401,12 @@ def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | Non
     out["full"]["benchmark"] = bench(benchmark, eq.index)
     out["full"]["ew_benchmark"] = bench(ew_benchmark, eq.index)
     out["full"]["n500_benchmark"] = bench(n500_benchmark, eq.index)
+    out["full"]["factor_benchmark"] = bench(factor_benchmark, eq.index)
     if tax is not None:
         at = _curve_stats(after_tax_equity(res, tax))
         out["full"]["after_tax_cagr_pct"] = at["cagr_pct"]
         out["full"]["after_tax_return_pct"] = at["return_pct"]
-        for key in ("benchmark", "ew_benchmark", "n500_benchmark"):   # buy & hold: taxed once, at the end
+        for key in ("benchmark", "ew_benchmark", "n500_benchmark", "factor_benchmark"):  # buy & hold: taxed at the end
             b = out["full"][key]
             if b.get("return_pct") is not None:
                 years = len(eq) / TRADING_DAYS
@@ -412,7 +420,8 @@ def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | Non
         tw = [t for t in res.trades if t.exit_date > start]
         out[name] = {**_curve_stats(w), **_trade_stats(tw),
                      "benchmark": bench(benchmark, w.index), "ew_benchmark": bench(ew_benchmark, w.index),
-                     "n500_benchmark": bench(n500_benchmark, w.index)}
+                     "n500_benchmark": bench(n500_benchmark, w.index),
+                     "factor_benchmark": bench(factor_benchmark, w.index)}
     return out
 
 
