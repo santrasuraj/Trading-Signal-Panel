@@ -5,7 +5,25 @@
 # Remove later:  Unregister-ScheduledTask -TaskName "NSE Scanner*" -Confirm:$false
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+# The task names below are fixed and registered with -Force. From a git worktree (.worktrees\<branch>) they would
+# silently replace the main checkout's tasks and run THIS branch's scanner on the shared data folder every weekday.
+if ($root -match '\\\.worktrees\\') {
+    Write-Host "This copy is a git worktree ($root)."
+    Write-Host "Scheduled tasks would replace the main checkout's tasks (same names) and run this branch on the shared data."
+    $answer = Read-Host "Type YES to register the tasks from this worktree anyway"
+    if ($answer -ne "YES") {
+        Write-Host "Nothing was changed. Run setup_schedule.ps1 from the main checkout instead."
+        exit 1
+    }
+}
 $pythonw = Join-Path $root ".venv\Scripts\pythonw.exe"   # pythonw = no console window popping up
+# This checkout's own venv, else the main checkout's (this folder may be a git worktree in .worktrees\)
+if (-not (Test-Path $pythonw)) { $pythonw = Join-Path $root "..\..\.venv\Scripts\pythonw.exe" }
+if (-not (Test-Path $pythonw)) {
+    Write-Host "Python was not found in .venv - run setup.bat first, then this file again."
+    exit 1
+}
+$pythonw = (Resolve-Path $pythonw).Path
 $days = "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"
 
 # Laptop friendly: run on battery, catch up after sleep, never hang for more than 20 minutes.
@@ -21,6 +39,25 @@ foreach ($t in @("15:40", "19:15")) {
         -Description "NSE stock scanner - scan and Telegram summary" | Out-Null
     Write-Host "Created task: $name (weekdays at $t)"
 }
-Write-Host "`nDone. Log in to Fyers (1_login.bat) each trading day for real-time prices at 15:40."
+
+# Intraday (FYERS first, inside the shared rate limiter):
+#   09:14  live 5-minute bars from the FYERS WebSocket until 15:31 (no REST calls; if today's login is
+#          missing it waits for it - log in with 1_login.bat - and on weekends/NSE holidays it just exits)
+#   15:45  archive today's bars from FYERS (~150 calls) and re-test the intraday strategies
+#   Their output goes to data\logs\intraday.log.
+$liveSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 7) -MultipleInstances IgnoreNew
+$jobs = @(
+    @{ Time = "09:14"; Args = "intraday_sync.py --live"; Name = "NSE Scanner intraday live"; Settings = $liveSettings },
+    @{ Time = "15:45"; Args = "intraday_sync.py --archive --run"; Name = "NSE Scanner intraday archive"; Settings = $settings }
+)
+foreach ($j in $jobs) {
+    $action = New-ScheduledTaskAction -Execute $pythonw -Argument $j.Args -WorkingDirectory $root
+    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At $j.Time
+    Register-ScheduledTask -TaskName $j.Name -Action $action -Trigger $trigger -Settings $j.Settings -Force `
+        -Description "NSE stock scanner - intraday data (FYERS)" | Out-Null
+    Write-Host "Created task: $($j.Name) (weekdays at $($j.Time))"
+}
+Write-Host "`nDone. Log in to Fyers (1_login.bat) each trading day before 09:14 for real-time prices."
 Write-Host "Without login the scans still run (Yahoo for live prices, NSE official data in the evening)."
-Write-Host "Problems are written to data\logs\scanner.log and sent to Telegram."
+Write-Host "Problems are written to data\logs\scanner.log and sent to Telegram (intraday jobs: data\logs\intraday.log)."

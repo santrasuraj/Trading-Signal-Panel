@@ -57,6 +57,18 @@ def report(fr, jpath, key="mom"):
     return paper.build_report(fr, COSTS, jpath)[key]
 
 
+def test_etf_stray_open_print_is_cleaned_like_the_backtest(jpath):
+    """An ETF's odd-lot pre-open print (85 between closes of 100) is not a real fill price: the paper replay
+    fills where the backtest does (clean_etf_prints) and never changes the shared store frames."""
+    fr = make_store(opens={("A", 21): 85.0})
+    d = fr["close"].index
+    paper.record_scan(scan(d[20], actions=[("BUY", "A", "enters top ranks")]), jpath)
+    assert paper.build_report(fr, COSTS, jpath)["mom"]["open"][0]["entry_price"] == pytest.approx(85 * (1 + SLIP))
+    rep = paper.build_report(fr, COSTS, jpath, etfs={"A"})["mom"]
+    assert rep["open"][0]["entry_price"] == pytest.approx(98 * (1 + SLIP))     # clamped to 2% below the closes
+    assert fr["open"].iloc[21, 0] == 85.0                                      # the caller's frames untouched
+
+
 def test_buy_fills_at_next_open_with_charges(jpath):
     fr = make_store(opens={("A", 21): 102.0})
     d = fr["close"].index

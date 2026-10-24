@@ -4,3 +4,7 @@ data/
 __pycache__/
 .pytest_cache/
 holdings.csv
+
+# test fixtures are copies of real result files (see tests/fixtures/make_fixtures.py)
+!tests/fixtures/root/data/
+!tests/fixtures/root/holdings.csv

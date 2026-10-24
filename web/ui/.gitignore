@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# dev-only mock fixtures generated from the local data/ folder (npm run fixtures)
+src/api/mock/fixtures/

@@ -11,3 +11,8 @@ streamlit==1.66.1
 yfinance==1.7.0
 pytest==8.4.2
 bottleneck==1.6.0
+# Quant Desk web platform (web/api) - API server and its test client
+fastapi==0.120.4
+uvicorn==0.38.0
+pydantic==2.14.1
+httpx==0.28.1

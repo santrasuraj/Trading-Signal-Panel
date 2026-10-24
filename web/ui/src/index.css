@@ -2,20 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design tokens. Dark is the default (trading terminals are used for hours); light via <html class="light">. */
-:root, .dark {
-  --bg: 11 14 20;          /* page */
-  --panel: 17 21 29;       /* cards, sidebar */
-  --raised: 24 29 39;      /* hover, inputs, table headers */
-  --line: 36 42 54;        /* borders */
-  --fg: 230 233 239;       /* primary text */
-  --muted: 148 156 171;    /* secondary text */
-  --faint: 98 106 121;     /* tertiary */
-  --accent: 59 130 246;    /* brand / focus */
-  --profit: 34 197 94;
-  --loss: 239 68 68;
-  --warn: 245 158 11;
+/* Design tokens (spec 4.1). RGB triplets so Tailwind can apply alpha: rgb(var(--x) / <alpha>).
+   Dark is the default (terminals are used for hours); light via <html class="light">;
+   colour-blind-safe gains/losses via <html data-cvd="on">; density via data-density. */
+:root,
+.dark {
+  --bg: 11 14 20;
+  --panel: 17 21 29;
+  --raised: 24 29 39;
+  --line: 38 44 56;
+  --line-strong: 52 60 75;
+  --fg: 230 233 239;
+  --muted: 154 163 178;
+  --faint: 128 137 154;   /* 5.2:1 on panel: faint carries 10-11 px content text too */
+  --accent: 76 141 246;
+  --accent-strong: 47 111 224;
+  --profit: 38 194 129;
+  --loss: 240 97 109;
+  --warn: 245 165 36;
   --info: 56 189 248;
+  --violet: 167 139 250;
+  --candle-up: 38 194 129;
+  --candle-down: 240 97 109;
+  --tint: 0.12;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(var(--line-strong));
   color-scheme: dark;
 }
 .light {
@@ -23,24 +33,142 @@
   --panel: 255 255 255;
   --raised: 241 243 246;
   --line: 226 230 236;
-  --fg: 17 24 39;
+  --line-strong: 203 209 218;
+  --fg: 15 23 42;
   --muted: 75 85 99;
-  --faint: 140 148 160;
-  --accent: 37 99 235;
-  --profit: 22 163 74;
-  --loss: 220 38 38;
-  --warn: 217 119 6;
-  --info: 2 132 199;
+  --faint: 107 114 128;   /* 4.8:1 on white */
+  --accent: 31 95 214;
+  --accent-strong: 31 95 214;
+  --profit: 15 123 74;
+  --loss: 197 40 61;
+  --warn: 161 92 0;
+  --info: 3 105 161;
+  --violet: 109 40 217;
+  --candle-up: 20 158 98;
+  --candle-down: 217 58 79;
+  --tint: 0.1;
+  --shadow-pop: 0 8px 24px rgb(15 23 42 / 0.14), 0 0 0 1px rgb(var(--line-strong));
   color-scheme: light;
 }
+.dark[data-cvd='on'] { --profit: 59 158 255; --loss: 255 159 64; --candle-up: 59 158 255; --candle-down: 255 159 64; }
+.light[data-cvd='on'] { --profit: 26 99 190; --loss: 168 78 0; --candle-up: 26 99 190; --candle-down: 168 78 0; }
+
+:root { --row-h: 32px; --pad: 16px; }
+[data-density='compact'] { --row-h: 28px; --pad: 12px; }
 
 html, body, #root { height: 100%; }
+/* The page scrollbar's gutter is always reserved, so the layout doesn't jump 15 px sideways between pages that
+   scroll and pages that don't (or when a drawer locks the body scroll). */
+html { scrollbar-gutter: stable; }
 body {
-  @apply bg-bg text-fg font-sans antialiased text-sm;
-  font-feature-settings: 'cv11', 'ss01';
+  @apply bg-bg text-fg font-sans antialiased;
+  font-size: 13px;
+  line-height: 20px;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-tap-highlight-color: transparent;
 }
-/* Prices and figures line up in columns */
-.num { font-variant-numeric: tabular-nums; }
+
+/* Prices and figures line up in columns. */
+.num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zero' 1, 'cv11' 1; }
+
+@layer components {
+  .card { @apply rounded-lg border border-line bg-panel; }
+  .card-pad { padding: var(--pad); }
+  .eyebrow { @apply text-2xs font-semibold uppercase tracking-[0.06em] text-muted; }
+  .label-xs { @apply text-2xs font-medium text-muted; }
+  .divider-x > * + * { @apply border-l border-line; }
+  .focus-ring { @apply outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-0; }
+  .link { @apply text-accent hover:underline underline-offset-2 focus-ring rounded-sm; }
+  .scroll-x { @apply overflow-x-auto overscroll-x-contain; scrollbar-width: thin; scrollbar-color: rgb(var(--faint) / 0.6) transparent; }
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .input {
+    @apply h-8 rounded-md border border-line bg-raised px-2.5 text-[13px] text-fg placeholder:text-faint focus-ring
+           focus:border-line-strong transition-colors duration-100;
+  }
+  .tint-profit { background: rgb(var(--profit) / var(--tint)); }
+  .tint-loss { background: rgb(var(--loss) / var(--tint)); }
+  .tint-warn { background: rgb(var(--warn) / var(--tint)); }
+  .tint-info { background: rgb(var(--info) / var(--tint)); }
+  .tint-accent { background: rgb(var(--accent) / var(--tint)); }
+  .tint-muted { background: rgb(var(--muted) / var(--tint)); }
+  .striped-warn {
+    background-image: repeating-linear-gradient(-45deg, rgb(var(--warn) / 0.16) 0 6px, rgb(var(--warn) / 0.06) 6px 12px);
+  }
+}
+
+/* Scrollbars: thin and quiet. */
+* { scrollbar-color: rgb(var(--line-strong)) transparent; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgb(var(--line)); border-radius: 8px; border: 2px solid rgb(var(--bg)); }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--line-strong)); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* Thin top progress bar while refetching. */
+@keyframes qd-indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+.qd-progress::after {
+  content: ''; position: absolute; inset: 0; width: 33%;
+  background: rgb(var(--accent)); animation: qd-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes qd-shimmer { 0% { opacity: 0.55; } 50% { opacity: 1; } 100% { opacity: 0.55; } }
+.skeleton { @apply rounded bg-raised; animation: qd-shimmer 1.4s ease-in-out infinite; }
+
+@keyframes qd-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.animate-in { animation: qd-in 160ms ease-out; }
+@keyframes qd-drawer { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+.animate-drawer { animation: qd-drawer 200ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+/* cmdk palette */
+[cmdk-list] { max-height: min(60vh, 420px); overflow: auto; overscroll-behavior: contain; }
+[cmdk-item][data-selected='true'] { background: rgb(var(--accent) / 0.12); }
+[cmdk-group-heading] { @apply px-3 pb-1 pt-2.5 text-2xs font-semibold uppercase tracking-[0.06em] text-faint; }
+[cmdk-empty] { @apply px-3 py-6 text-center text-muted; }
+
+/* ------------------------------------------------------------------ horizontal scroll cues
+   Where content is cut at an edge, that edge fades out, so a wide table or tab strip visibly continues.
+   Scroll-driven animations (Chrome/Edge 116+); other browsers keep just the scrollbar. Nothing shows when the
+   content fits (the scroll timeline is inactive, so the base values apply). */
+@property --qd-fl { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --qd-fr { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes qd-fade-x {
+  0% { --qd-fl: 0px; --qd-fr: 28px; }
+  6% { --qd-fl: 28px; }
+  94% { --qd-fr: 28px; }
+  100% { --qd-fl: 28px; --qd-fr: 0px; }
+}
+/* DataTable: a right-edge gradient over the cut column (not a mask: the sticky first column must stay crisp) and a
+   shadow on the sticky column once the table is scrolled. */
+.qd-edge-r { opacity: 0; }
+@keyframes qd-edge-r { 0%, 97% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes qd-sticky { 0% { box-shadow: none; } 2%, 100% { box-shadow: 6px 0 6px -6px rgb(0 0 0 / 0.35); } }
+@supports (animation-timeline: scroll()) {
+  .scroll-x:not(.qd-x) {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--qd-fl), #000 calc(100% - var(--qd-fr)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--qd-fl), #000 calc(100% - var(--qd-fr)), transparent);
+    animation: qd-fade-x linear both;
+    animation-timeline: scroll(self inline);
+  }
+  .qd-hscroll { timeline-scope: --qd-x; }
+  .qd-x { scroll-timeline: --qd-x inline; }
+  .qd-edge-r { animation: qd-edge-r linear both; animation-timeline: --qd-x; }
+  .qd-sticky { animation: qd-sticky linear both; animation-timeline: --qd-x; }
+}
+
+/* Overview index tiles: four across only when each tile gets ~176 px or more, otherwise 2 x 2. A container query,
+   so the rail width and the 12-column split are both accounted for. A tile narrower than its content hides the
+   sparkline instead of letting it spill into the next tile. */
+.qd-tiles { container-type: inline-size; }
+@container (min-width: 740px) { .qd-tiles-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.qd-tile { container-type: inline-size; }
+@container (max-width: 140px) { .qd-tile-spark { display: none; } }
+
+/* Top-bar ticker: hidden when the space left for it can't hold even the first item. */
+.qd-ticker-box { container-type: inline-size; }
+@container (max-width: 179px) { .qd-ticker { visibility: hidden; } }
+
+/* lightweight-charts attribution logo: keep (Apache-2.0 NOTICE), make it quiet. */
+.tv-lightweight-charts a[href*='tradingview'] { opacity: 0.45; }

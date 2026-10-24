@@ -341,7 +341,7 @@ export interface StrategyDetail {
   as_of: AsOf;
   strategy: StrategySummary;                 // carries timing; there is no second copy
   metrics: StrategyMetrics;                  // the windows table is built client-side from this (no separate 'windows')
-  yearly: YearlyRow[];                       // strategy = latest.yearly; benchmarks from curves.parquet, same first/last formula
+  yearly: YearlyRow[];                       // calendar years from curves.parquet for the strategy and the benchmarks: year-end / previous year-end - 1 (first year over the first value); latest.yearly only as a fallback (daily.py uses the same formula)
   monthly: MonthlyRow[];
   rules: StrategyRules;
   evidence: EvidenceCard;

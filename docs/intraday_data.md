@@ -120,14 +120,15 @@ The loader module is written and all 10 of its tests pass. Nothing under `D:\New
 - Don't use 5m or 1h opening-bar volume; use 15m bars or FYERS for that.
 
 ## 4. Module and tests
-- **Module:** `C:\Users\suraj\AppData\Local\Temp\claude\D--New-folder\8c8a39c7-06d8-4ca7-a5b2-5aeda1a9ef1f\scratchpad\intraday\intraday.py`
+- **Data module:** `scanner/intraday/data.py`
   - `fetch_yahoo_intraday(symbols, interval, days)`
-  - `fetch_fyers_intraday(provider, symbols, start, end, resolution)`, which works with the project's `FyersProvider` or a raw `FyersModel`
-  - `fyers_backfill_budget`, `clean_bars`, `validate_against_daily`, `adjust_to_store`, `resample_bars`, `daily_from_bars`
-  - `IntradayStore.save / load / load_grid`, `completed_only`, `TickBarBuilder`
-- **Tests:** `...\scratchpad\intraday\test_intraday.py`. Results are in `test_output.txt` and `test_output.json`. All 10 pass:
-  - The FYERS test uses a fake provider and checks: chunks of at most 100 days, recovery after a 429, the unfinished-bar clamp (last bar 10:55 at 11:02:30), and epoch-to-IST conversion.
-  - The others cover: the round trip and idempotent merge, source priority, the 5m-to-15m resample, comparison with the store, split adjustment on 1h, the live Yahoo paths (HYUNDAI retry, chunked 1m), and building bars from ticks.
-- **Measurement scripts and raw outputs:** `probe_limits.py` / `out_limits.json`, `probe_bulk.py` / `out_bulk.json`, `probe_quality.py` / `out_quality.json`, `probe_live.py` / `out_live.jsonl`, the raw downloads in `raw\*.parquet`, and the Nifty 100 list in `dl\ind_nifty100list.csv`.
+  - `fetch_fyers_intraday(provider, symbols, start, end, resolution)`. It works with the project's `FyersProvider` or a raw `FyersModel` (wrapped by `FyersProvider.from_model`), so every call goes through the shared rate limiter `scanner/fyers_limits.py`.
+  - `clean_bars`, `daily_from_bars`, `merge_by_priority`, `IntradayStore.save / load`, `TickBarBuilder`, `FileLock`
+  - Research helpers the pipeline doesn't use: `fyers_backfill_budget`, `validate_against_daily`, `adjust_to_store`, `resample_bars`, `load_grid`, `completed_only`
+- **FYERS sync:** `scanner/intraday/fyers_sync.py` handles the resumable 1-year backfill and the daily archive. It saves its progress in `data/intraday/fyers_sync.json` and holds `data/intraday/.sync.lock` while it runs. `IntradayStore.save` holds `<interval>/.save.lock`.
+- **Live feed:** `scanner/intraday/live.py` builds bars from the FYERS WebSocket. It writes `data/intraday/live/YYYYMMDD.parquet` and `forming.json`, whose `last_tick` field `feed_fresh()` uses to detect a dead feed. One instance runs at a time, held by `live/.live.lock`.
+- **Entry point:** `intraday_sync.py` (`--backfill`, `--archive`, `--live`, `--run`, `--usage`). Its `--run` and the web app's re-run share `data/results/.intraday.lock`.
+- **Tests:** `tests/test_intraday.py` and `tests/test_fyers_limits.py`. They use fake providers and `tmp_path`, so they make no network calls and don't touch the real data folder.
+- The first measurement scripts and raw outputs were kept in this session's scratchpad. They're not part of the project.
 
 Sources: [FYERS historical data](https://fyers.in/api-docs/v3/api/market-data/historical-data/), [FYERS plans and limits](https://fyers.in/api-docs/v3/getting-started/plans-and-limits/), [FYERS data socket](https://fyers.in/api-docs/v3/api/websockets/data-socket/data-socket-symbol-update/), [FYERS History API delay](https://support.fyers.in/portal/en/kb/articles/is-there-any-delay-in-the-data-provided-by-the-history-api), [FYERS community: adjusted history](https://fyers.in/community/t/how-can-we-retrieve-historical-stock-data-from-fyers-api-with-all-corporate-actions-adjusted-splits-bonus-merger-demerger-etc/22650)

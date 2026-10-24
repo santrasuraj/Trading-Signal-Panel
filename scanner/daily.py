@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import subprocess
 import time
 from dataclasses import replace
 from datetime import timedelta
@@ -23,16 +25,21 @@ from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
 from .panel import Factors, panel_from_wide
 from .providers import INDEX_N500, INDEX_NIFTY, INDEX_VIX, get_fyers
-from .settings import RESULTS_DIR, SESSION_END, SESSION_START, ist_now, load_config
-from .store import load_store, refresh_store
-from .strategies import build_strategies, tradable_mask
+from .settings import RESULTS_DIR, ROOT, SESSION_END, SESSION_START, ist_now, load_config
+from .store import _replace, load_store, refresh_store
+from .strategies import build_strategies, strategy_lifecycle, tradable_mask
 from .universe import get_universe
 
 LATEST_FILE = RESULTS_DIR / "latest.json"
 TIMING_CACHE = RESULTS_DIR / "timing_cache.json"
-ENGINE_VERSION = 3   # bump when simulation logic changes, so cached timing ranges are recomputed
+REJECTED_CACHE = RESULTS_DIR / "rejected_cache.json"   # B4: re-test results of strategies that never trade
+ENGINE_VERSION = 4   # bump when simulation logic changes, so cached timing ranges are recomputed
+# (4: ETF stray open prints cleaned, low-vol "most traded" among stocks only)
 CURVES_FILE = RESULTS_DIR / "curves.parquet"
+TRADES_FILE = RESULTS_DIR / "trades.parquet"       # B1: every closed trade of every strategy's backtest
+SCREENER_FILE = RESULTS_DIR / "screener.parquet"   # B2: one row per tradable stock at scan time
 KEEP_SCAN_FILES = 60
+SCHEMA = 3            # latest.json content version (the file format itself stays `version: 2`)
 
 # Typical NSE cumulative volume by minutes since 09:15 (U-shaped day: heavy open and close).
 _VOLUME_CURVE = [(0, 0.0), (15, 0.12), (30, 0.20), (60, 0.32), (120, 0.48), (180, 0.60),
@@ -59,6 +66,18 @@ def _load_json(path) -> dict:
         return {}
 
 
+def _calendar_yearly(eq: pd.Series) -> pd.Series:
+    """Calendar-year returns in %: year-end over the PREVIOUS year-end (the first year over the first value), so
+    each year includes its first trading day and matches the monthly table (the API computes the same)."""
+    eq = eq.dropna()
+    if eq.empty:
+        return pd.Series(dtype=float)
+    year_end = eq.groupby(eq.index.year).last()
+    base = year_end.shift(1)
+    base.iloc[0] = eq.iloc[0]
+    return (year_end / base - 1) * 100
+
+
 def _num(x, nd=2):
     try:
         x = float(x)
@@ -70,8 +89,25 @@ def _num(x, nd=2):
 def _clean_metrics(m: dict) -> dict:
     out = {}
     for k, v in m.items():
-        out[k] = _clean_metrics(v) if isinstance(v, dict) else (_num(v, 3) if isinstance(v, float) else v)
+        if isinstance(v, dict):
+            out[k] = _clean_metrics(v)
+        elif isinstance(v, list):   # e.g. cagr_range: same rounding as cagr_pct, and never NaN in the JSON
+            out[k] = [_num(x, 3) if isinstance(x, float) else x for x in v]
+        else:
+            out[k] = _num(v, 3) if isinstance(v, float) else v
     return out
+
+
+def _rank_candidates(s, f: Factors, trad: pd.DataFrame) -> pd.Series:
+    """Today's scores of what the simulation may buy (the same masks as engine.simulate): eligible, tradable,
+    and stocks or ETFs by the strategy's universe - so the shown ranking matches the backtest's ranks."""
+    score = s.score(f).iloc[-1]
+    elig = s.eligible(f).iloc[-1] if s.eligible else pd.Series(True, index=score.index)
+    is_etf = score.index.isin(list(f.etfs))
+    ok = (elig.reindex(score.index).fillna(False).astype(bool)
+          & trad.iloc[-1].reindex(score.index).fillna(False).astype(bool)
+          & (is_etf if s.universe == "etfs" else ~is_etf))
+    return score[ok]
 
 
 def _next_rebalance(dates: pd.DatetimeIndex, how: str) -> str:
@@ -90,6 +126,35 @@ def _next_rebalance(dates: pd.DatetimeIndex, how: str) -> str:
     else:
         target = last + pd.offsets.BMonthEnd(0)
     return target.date().isoformat()
+
+
+def _rules(s, conf: dict | None) -> dict:
+    """Every rule the simulation used for this strategy (B5), plus the raw config.yaml values, so the
+    platform never has to re-read a config that may have been edited after the scan."""
+    rank = s.kind == "rank"
+    return {
+        "kind": s.kind, "rebalance": s.rebalance if rank else None,
+        "top_n": s.top_n if rank else None, "keep_rank": (s.keep_rank or s.top_n) if rank else None,
+        "max_positions": s.max_positions, "stop_pct": s.stop_pct,
+        "stop_atr": None if rank else s.stop_atr, "target_pct": None if rank else s.target_pct,
+        "trail_pct": None if rank else s.trail_pct, "max_hold": None if rank else s.max_hold,
+        "sizing": "equal" if rank else s.sizing, "risk_pct": None if rank else s.risk_pct,
+        "use_regime": bool(s.use_regime), "regime_action": s.regime_action if rank else None,
+        "params": json.loads(json.dumps(conf or {}, default=str)),
+    }
+
+
+def _producer() -> dict:
+    """Which code wrote this result (B10): lets the platform spot scans from other checkouts."""
+    def git(*args):
+        try:
+            out = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, timeout=5,
+                                 creationflags=0x08000000 if os.name == "nt" else 0)
+            return out.stdout.strip() or None if out.returncode == 0 else None
+        except Exception:
+            return None
+    return {"app": "quant-desk", "schema": SCHEMA, "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+            "commit": git("rev-parse", "--short", "HEAD")}
 
 
 def run_daily(cfg: dict | None = None, update: bool = True, progress=None, log=print, by: str = "manual") -> dict:
@@ -135,11 +200,11 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         frames["volume"] = v
 
     log("Testing strategies and computing signals...")
-    p = panel_from_wide(frames, symbols)
+    p = panel_from_wide(frames, symbols, etfs=set(etfs))   # ETF stray open prints cleaned (fills at the open)
     industry = {s: v["industry"] for s, v in meta.items() if v.get("industry")}
     first = p.dates[0].date()
-    f = Factors(p, etfs=set(etfs), industry=industry,
-                results_dates=results_history(first, ist_now().date(), log=log))
+    results_hist = results_history(first, ist_now().date(), log=log)
+    f = Factors(p, etfs=set(etfs), industry=industry, results_dates=results_hist)
     flt = cfg.get("filters") or {}
     trad = tradable_mask(f, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)))
     stock_trad = trad & ~f.etf_mask          # market statistics use stocks only
@@ -171,8 +236,52 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     cash_rate = idx_hist.get("Nifty 1D Rate Index")
     complete_upto = info.get("complete_upto") or p.dates[-1].date().isoformat()
     timing_cache = _load_json(TIMING_CACHE)
-    strat_out, curves = [], {}
-    for s in build_strategies(cfg):
+    rejected_cache = _load_json(REJECTED_CACHE)
+    # Inputs that change results without changing the config (part of every cache signature).
+    data_sig = [sorted(etfs), sum(len(v) for v in results_hist.values()),
+                _num(cash_rate.dropna().iloc[-1], 6) if cash_rate is not None and cash_rate.notna().any() else None]
+    strat_out, rejected_out, curves, trade_rows = [], [], {}, []
+    all_strats = build_strategies(cfg, include_disabled=True)
+    for n_done, s in enumerate(all_strats, 1):
+        log(f"Testing strategy {n_done}/{len(all_strats)}: {s.name}")   # run_scan.py turns this into progress
+        conf_s = (cfg.get("strategies") or {}).get(s.key)
+        lifecycle, rejected_reason = strategy_lifecycle(cfg, s.key)
+        if lifecycle != "active":
+            # B4: strategies that never trade are still re-tested (once per completed day, cached) so the
+            # "Tested & rejected" list shows real numbers. No timing range, no orders, no positions.
+            sig = json.dumps([ENGINE_VERSION, conf_s, cfg.get("costs"), cfg.get("filters"), capital, min_position,
+                              complete_upto, data_sig], sort_keys=True, default=str)
+            hit = rejected_cache.get(s.key)
+            if not (hit and hit.get("sig") == sig):
+                res = simulate(s, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate)
+                factor = idx_hist.get(s.benchmark) if s.benchmark else None
+                m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500, factor_benchmark=factor)
+                m["full"]["factor_benchmark_name"] = s.benchmark or None
+                m["full"]["cagr_range"] = None
+                status, why = working_status(m)
+                eq = res.equity.dropna()
+                yearly = _calendar_yearly(eq)
+                hit = {"sig": sig, "entry": {
+                    "key": s.key, "name": s.name, "description": s.description, "kind": s.kind,
+                    "horizon": s.horizon, "evidence": s.evidence, "universe": s.universe, "benchmark": s.benchmark,
+                    "status": status, "status_reason": why, "metrics": _clean_metrics(m),
+                    "yearly": {str(k): _num(v, 1) for k, v in yearly.items()},
+                    "positions": [], "actions": [], "ranking": [],
+                    "max_positions": s.max_positions, "per_position": _num(capital / s.max_positions, 0),
+                    "next_rebalance": None,
+                    "recent_trades": [{"symbol": t.symbol, "entry": t.entry_date.date().isoformat(),
+                                       "exit": t.exit_date.date().isoformat(), "ret_pct": _num(t.ret_pct, 1),
+                                       "days": t.days, "reason": t.reason} for t in res.trades[-25:]][::-1]},
+                    "curve": [[d.date().isoformat(), float(v)] for d, v in (eq / eq.iloc[0]).items()],
+                    "trades": [_trade_row(s.key, t) for t in res.trades]}
+                rejected_cache[s.key] = hit
+            rejected_out.append({**hit["entry"], "lifecycle": lifecycle, "rejected_reason": rejected_reason,
+                                 "rules": _rules(s, conf_s)})
+            if hit.get("curve"):
+                curves[s.key] = pd.Series([v for _, v in hit["curve"]],
+                                          index=pd.DatetimeIndex([d for d, _ in hit["curve"]], name="date"))
+            trade_rows.extend(hit.get("trades") or [])
+            continue
         res = simulate(s, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate)
         factor = idx_hist.get(s.benchmark) if s.benchmark else None
         m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500, factor_benchmark=factor)
@@ -183,8 +292,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         # Timing luck: the same rules rebalanced a few days earlier (or started a few weeks later)
         # can give quite different results - report the spread, not just one number.
         # (cached: recomputed only when the completed data or this strategy's settings change)
-        sig = json.dumps([ENGINE_VERSION, (cfg.get("strategies") or {}).get(s.key), cfg.get("costs"),
-                          cfg.get("filters"), capital, complete_upto], sort_keys=True, default=str)
+        sig = json.dumps([ENGINE_VERSION, conf_s, cfg.get("costs"),
+                          cfg.get("filters"), capital, complete_upto, data_sig], sort_keys=True, default=str)
         hit = timing_cache.get(s.key)
         if hit and hit.get("sig") == sig:
             m["full"]["cagr_range"] = hit["range"]
@@ -198,10 +307,14 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             spread = [x for x in spread if x is not None]
             m["full"]["cagr_range"] = [min(spread), max(spread)] if spread else None
             timing_cache[s.key] = {"sig": sig, "range": m["full"]["cagr_range"]}
+        base_cagr, rng = m["full"].get("cagr_pct"), m["full"].get("cagr_range")
+        if rng and base_cagr is not None:   # the base run is one of the timings: always inside the range
+            m["full"]["cagr_range"] = [min(rng[0], base_cagr), max(rng[1], base_cagr)]
+        trade_rows.extend(_trade_row(s.key, t) for t in res.trades)
         status, why = working_status(m)
         eq = res.equity.dropna()
         curves[s.key] = eq / eq.iloc[0]
-        yearly = (eq.groupby(eq.index.year).last() / eq.groupby(eq.index.year).first() - 1) * 100
+        yearly = _calendar_yearly(eq)
         per_pos = capital / s.max_positions
 
         def sized(sym: str, stop: float | None = None) -> dict:
@@ -217,16 +330,14 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             stop = None
             if o["action"] == "BUY" and getattr(s, "stop_pct", None):
                 stop = close_last.get(sym, np.nan) * (1 - s.stop_pct / 100)
-            info = results_info(sym)
-            warn = (o["action"] == "BUY" and info.get("results_on") is not None
-                    and info["results_in_days"] <= int((cfg.get("results") or {}).get("warn_days", 7)))
-            actions.append({**o, **meta.get(sym, {}), **sized(sym, stop), **info,
+            rinfo = results_info(sym)   # (not `info`: that name holds the store refresh info used below)
+            warn = (o["action"] == "BUY" and rinfo.get("results_on") is not None
+                    and rinfo["results_in_days"] <= int((cfg.get("results") or {}).get("warn_days", 7)))
+            actions.append({**o, **meta.get(sym, {}), **sized(sym, stop), **rinfo,
                             "results_warning": warn, "stop": _num(stop), "provisional": live})
         ranking = []
         if s.kind == "rank":
-            score = s.score(f).iloc[-1]
-            elig = s.eligible(f).iloc[-1] if s.eligible else pd.Series(True, index=score.index)
-            ok = score[elig.reindex(score.index).fillna(False).astype(bool) & trad.iloc[-1].reindex(score.index).fillna(False)]
+            ok = _rank_candidates(s, f, trad)
             held = {pp["symbol"] for pp in res.open_positions}
             for rank, (sym, val) in enumerate(ok.dropna().sort_values(ascending=False).head(40).items(), 1):
                 ranking.append({"rank": rank, "symbol": sym, **meta.get(sym, {}), "score": _num(val, 3),
@@ -241,9 +352,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"])} for pp in res.open_positions],
             "actions": actions, "ranking": ranking,
             "max_positions": s.max_positions, "per_position": _num(per_pos, 0),
-            "rules": {"stop_pct": s.stop_pct, "target_pct": getattr(s, "target_pct", None),
-                      "trail_pct": getattr(s, "trail_pct", None), "sizing": getattr(s, "sizing", "equal"),
-                      "risk_pct": getattr(s, "risk_pct", None)},
+            "lifecycle": "active", "rejected_reason": None,
+            "rules": _rules(s, conf_s),
             "next_rebalance": _next_rebalance(p.dates, s.rebalance) if s.kind == "rank" else None,
             "recent_trades": [{"symbol": t.symbol, "entry": t.entry_date.date().isoformat(),
                                "exit": t.exit_date.date().isoformat(), "ret_pct": _num(t.ret_pct, 1),
@@ -255,10 +365,11 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     order = {"working": 0, "mixed": 1, "unknown": 2, "not-working": 3}
     strat_out.sort(key=lambda x: (order.get(x["status"], 9), tier.get(x["evidence"], 5),
                                   -((x["metrics"].get("12m") or {}).get("return_pct") or -1e9)))
-    try:
-        TIMING_CACHE.write_text(json.dumps(timing_cache), encoding="utf-8")
-    except OSError:
-        pass
+    for path, data in ((TIMING_CACHE, timing_cache), (REJECTED_CACHE, rejected_cache)):
+        try:
+            path.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            pass
 
     # Market snapshot
     fresh = observed_last & close_last.notna()
@@ -279,8 +390,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         advice = "Nifty is above its 200-day average and most stocks are in uptrends. Strategies may open new positions."
     elif not regime_up:
         mood, level = "Bearish", "bad"
-        advice = ("Nifty is below its 200-day average. Strategies make no new buys in this regime (protects capital) "
-                  "and only manage existing positions.")
+        advice = ("Nifty is below its 200-day average. Strategies with the regime filter make no new buys in this "
+                  "regime (protects capital) and only manage existing positions.")
     else:
         mood, level = "Mixed", "neutral"
         advice = "Nifty is in an uptrend but fewer than half of stocks are. Be selective."
@@ -352,8 +463,10 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         })
 
     stale = [s for s in symbols if s in p.close.columns and not bool(observed_last.get(s, False))]
+    screener = _screener_frame(f, frames, p, stock_trad.iloc[-1], chg, fresh, mom_rank, meta)
     result = {
-        "version": 2,
+        "version": 2, "schema": SCHEMA, "producer": _producer(),
+        "backtest_universe": "current_list",   # B7: flips to point_in_time only when a PIT universe drives the scan
         "generated_at": started.isoformat(timespec="seconds"),
         "elapsed_s": round(time.perf_counter() - t_start, 1),
         "data_date": last.date().isoformat(), "live": live, "live_source": info.get("live_source"),
@@ -363,9 +476,13 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         "capital": capital, "min_position": min_position,
         "costs_round_trip_pct": _num(costs.round_trip_pct(capital / 15), 3),
         "market": {"label": mood, "level": level, "advice": advice, "regime_up": regime_up,
-                   "nifty": nifty, "nifty_change_pct": nifty_chg, "vix": vix, "vix_change_pct": vix_chg,
+                   "nifty": nifty, "nifty_change_pct": nifty_chg,
+                   "nifty_sma200": _num(f.index_sma200.iloc[-1]),   # B3: distance to the regime line
+                   "vix": vix, "vix_change_pct": vix_chg,
                    "breadth_50": breadth, "advances": int((pool > 0).sum()), "declines": int((pool < 0).sum())},
         "strategies": strat_out,
+        # B4: kept out of `strategies` so older readers (Streamlit, Telegram, the paper journal) never see them
+        "rejected_strategies": rejected_out,
         "gainers": [mover(s) for s in pool.sort_values(ascending=False).head(movers_n).index],
         "losers": [mover(s) for s in pool.sort_values().head(movers_n).index],
         "volume_spikes": [mover(s) for s in vr[vr >= 3].sort_values(ascending=False).head(movers_n).index],
@@ -379,11 +496,12 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         if not live:
             paper.record_scan(result)
         done = {k: v.iloc[:-1] for k, v in frames.items()} if live else frames
-        result["paper"] = paper.summaries(done, costs)
+        result["paper"] = paper.summaries(done, costs, etfs=etfs)
     except Exception as e:   # the journal must never break a scan
         log(f"Paper-trading journal problem: {type(e).__name__}: {e}")
         result["paper"] = {}
-    _save(result, curves, p, ew, n500, started)
+    trades_df = pd.DataFrame(trade_rows, columns=_TRADE_COLS)
+    _save(result, curves, p, ew, n500, started, trades=trades_df, screener=screener)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
     return result
 
@@ -406,7 +524,9 @@ def _index_tables(h: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
         def ret(n):
             return _num((s.iloc[-1] / s.iloc[-n - 1] - 1) * 100, 1) if len(s) > n else None
         cs = _curve_stats(s)
-        return {"last": _num(s.iloc[-1]), "chg_1d": ret(1), "ret_1m": ret(21), "ret_3m": ret(63), "ret_6m": ret(126),
+        # a one-day index move is shown with 2 decimals everywhere (top bar, tiles, tables)
+        chg_1d = _num((s.iloc[-1] / s.iloc[-2] - 1) * 100, 2) if len(s) > 1 else None
+        return {"last": _num(s.iloc[-1]), "chg_1d": chg_1d, "ret_1m": ret(21), "ret_3m": ret(63), "ret_6m": ret(126),
                 "ret_1y": ret(252), "cagr": _num(cs.get("cagr_pct"), 1), "max_dd": _num(cs.get("max_dd_pct"), 1),
                 "since": s.index[0].date().isoformat(),
                 "above_50dma": bool(s.iloc[-1] > s.iloc[-50:].mean()) if len(s) >= 50 else None}
@@ -418,22 +538,87 @@ def _index_tables(h: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
     return {"factors": factors, "sectors": sectors}
 
 
-def _save(result: dict, curves: dict, p, ew: pd.Series, n500: pd.Series | None, started) -> None:
-    text = json.dumps(result, indent=1, default=str)
-    tmp = LATEST_FILE.with_suffix(".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(LATEST_FILE)
-    (RESULTS_DIR / f"scan_{started:%Y%m%d_%H%M}.json").write_text(text, encoding="utf-8")
-    old = sorted(RESULTS_DIR.glob("scan_*.json"))[:-KEEP_SCAN_FILES]
-    for o in old:
-        o.unlink(missing_ok=True)
+_TRADE_COLS = ["strategy", "symbol", "entry_date", "entry_price", "exit_date", "exit_price", "qty", "pnl",
+               "ret_pct", "days", "reason"]
+
+
+def _trade_row(key: str, t) -> dict:
+    return {"strategy": key, "symbol": t.symbol, "entry_date": t.entry_date.date().isoformat(),
+            "entry_price": round(float(t.entry_price), 4), "exit_date": t.exit_date.date().isoformat(),
+            "exit_price": round(float(t.exit_price), 4), "qty": int(t.qty), "pnl": round(float(t.pnl), 2),
+            "ret_pct": round(float(t.ret_pct), 3), "days": int(t.days), "reason": t.reason}
+
+
+def _screener_frame(f: Factors, frames: dict, p, stock_now: pd.Series, chg: pd.Series, fresh: pd.Series,
+                    mom_rank: pd.Series, meta: dict) -> pd.DataFrame:
+    """B2: the screener's one source - every tradable stock with the indicators of this scan (same live
+    overlay as the orders). Percent columns are in percent units."""
+    syms = [s for s, ok in stock_now.items() if ok]
+    last = lambda df: df.iloc[-1].reindex(syms)   # noqa: E731
+    close, sma50, sma200 = last(p.close), last(f.sma50), last(f.sma200)
+
+    def above(a, b):
+        return pd.array([None if (pd.isna(x) or pd.isna(y)) else bool(x > y) for x, y in zip(a, b)], dtype="boolean")
+
+    deliv = frames.get("deliv_pct")
+    if deliv is not None and len(deliv):
+        deliv = deliv.reindex(columns=syms).iloc[-2:].ffill().iloc[-1]
+    else:
+        deliv = pd.Series(np.nan, index=syms)
+    df = pd.DataFrame({
+        "symbol": syms,
+        "company": [meta.get(s, {}).get("company") for s in syms],
+        "industry": [meta.get(s, {}).get("industry") for s in syms],
+        "price": close.values, "change_pct": chg.reindex(syms).values,
+        "ret_1w": (last(f.ret(5)) * 100).values, "ret_1m": (last(f.ret(21)) * 100).values,
+        "ret_3m": (last(f.ret_3m) * 100).values, "ret_6m": (last(f.ret_6m) * 100).values,
+        "ret_12m": (last(f.ret_12m) * 100).values,
+        "rs": last(f.rs_rating).values, "momentum_score": last(f.momentum).values,
+        "momentum_rank": mom_rank.reindex(syms).values, "vol_ann_pct": (last(f.vol_ann) * 100).values,
+        "pct_from_52w_high": last(f.pct_from_52w_high).values,
+        "above_sma50": above(close, sma50), "above_sma200": above(close, sma200),
+        "sma50_above_sma200": above(sma50, sma200),
+        "rsi14": last(f.rsi14).values, "vol_ratio": last(f.vol_ratio).values,
+        "turnover_cr": last(f.turnover_avg20_cr).values, "atr_pct": last(f.atr_pct).values,
+        "deliv_pct": deliv.reindex(syms).values,
+        "sma50": sma50.values, "sma200": sma200.values,
+        "high_52w": last(f.high_52w).values, "low_52w": last(f.low_52w).values,
+        "fresh": fresh.reindex(syms).fillna(False).astype(bool).values,
+    })
+    num = df.select_dtypes("number").columns
+    df[num] = df[num].astype(float).replace([np.inf, -np.inf], np.nan).round(4)
+    return df
+
+
+def _write_atomic(path, write) -> None:
+    """Write via a temporary file and a Windows-safe replace, so readers never see a half-written file."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    write(tmp)
+    _replace(tmp, path)
+
+
+def _save(result: dict, curves: dict, p, ew: pd.Series, n500: pd.Series | None, started,
+          trades: pd.DataFrame | None = None, screener: pd.DataFrame | None = None) -> None:
+    """B9: every artifact first, latest.json LAST. latest.json is the commit marker: a reader that sees a
+    new scan_id can rely on curves / trades / screener of that scan already being in place."""
     df = pd.DataFrame(curves)
     df["NIFTY 50"] = p.index_close.reindex(df.index).ffill() / p.index_close.reindex(df.index).ffill().iloc[0]
     df["Average stock"] = ew.reindex(df.index) / ew.reindex(df.index).iloc[0]
     if n500 is not None and n500.notna().any():
         n5 = n500.reindex(df.index).ffill()
         df["NIFTY 500"] = n5 / n5.dropna().iloc[0]
-    df.to_parquet(CURVES_FILE)
+    _write_atomic(CURVES_FILE, lambda t: df.to_parquet(t))
+    scan_id = result["generated_at"]
+    for path, frame in ((TRADES_FILE, trades), (SCREENER_FILE, screener)):
+        if frame is not None:
+            frame = frame.assign(scan_id=scan_id)   # lets readers reject an artifact from another scan
+            _write_atomic(path, lambda t, fr=frame: fr.to_parquet(t, index=False))
+    text = json.dumps(result, indent=1, default=str)
+    _write_atomic(RESULTS_DIR / f"scan_{started:%Y%m%d_%H%M}.json", lambda t: t.write_text(text, encoding="utf-8"))
+    old = sorted(RESULTS_DIR.glob("scan_*.json"))[:-KEEP_SCAN_FILES]
+    for o in old:
+        o.unlink(missing_ok=True)
+    _write_atomic(LATEST_FILE, lambda t: t.write_text(text, encoding="utf-8"))
 
 
 def load_latest() -> dict | None:

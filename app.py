@@ -20,7 +20,8 @@ from scanner.daily import CURVES_FILE, load_curves, load_latest
 from scanner.holdings import load_holdings, save_holdings
 from scanner.indicators import add_indicators
 from scanner.lock import running_scan
-from scanner.providers import get_fyers, load_token
+from scanner.fyers_limits import FyersRateLimited
+from scanner.providers import FyersAuthError, get_fyers, load_token
 from scanner.settings import RESULTS_DIR, ROOT, ist_today, load_config
 from scanner.store import PanelStore, load_store
 
@@ -433,12 +434,18 @@ with tabs[3]:
         st.success("Saved. Click 🔄 Run scan now to refresh the alerts.")
     if b2.button("⬇️ Import my holdings from Fyers", help="Replaces the list with your Fyers demat holdings."):
         fy, note = get_fyers(cfg)
+        fy_holdings = None
         if fy is None:
             st.error(note)
         else:
+            try:
+                fy_holdings = fy.holdings()
+            except (FyersAuthError, FyersRateLimited) as e:   # expired token / FYERS budget protection
+                st.error(f"Fyers holdings not available: {e}")
+        if fy_holdings is not None:
             rows = [{"symbol": str(h.get("symbol", "")).split(":")[-1].rsplit("-", 1)[0],
                      "qty": h.get("quantity"), "buy_price": h.get("costPrice"), "buy_date": None,
-                     "stop_loss_pct": None, "target_pct": None} for h in fy.holdings()]
+                     "stop_loss_pct": None, "target_pct": None} for h in fy_holdings]
             if rows:
                 save_holdings(pd.DataFrame(rows))
                 st.success(f"Imported {len(rows)} holdings (Fyers cost prices are already split/bonus adjusted). "

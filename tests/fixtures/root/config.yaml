@@ -1,0 +1,152 @@
+# ---------------------------------------------------------------------------
+#  NSE Stock Scanner v2 - settings. Edit and save; the next scan uses them.
+# ---------------------------------------------------------------------------
+
+# Your account - used to size positions (how many shares to buy).
+account:
+  capital: 500000            # rupees you plan to invest with these strategies
+  min_position: 15000        # skip buys smaller than this (fixed Rs 20 + Rs 14.75 charges hurt tiny orders)
+
+# auto  = Fyers real-time live prices when logged in, otherwise Yahoo (~15 min delayed)
+# yahoo = never use Fyers
+data_source: auto
+fyers_plan: standard         # standard (free) or prime. Sets the safe request rate for ALL FYERS calls:
+                             #   standard: data 4/s, 45/min, 4,500/day (limits 5, 50, 5,000)
+                             #   after 2 rate-limit warnings in a day FYERS is not used again that day
+                             #   (a 3rd breach would block your account for the day). See data/fyers_usage.json
+
+# Index ETFs for the long-term ETF strategies (trend timing, dual momentum)
+etfs: [NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES, MON100]
+
+# Which stocks to scan: nifty50 | nifty100 | nifty200 | nifty500
+universe: nifty500
+
+# Days of price history (~8 years: covers the 2020 crash, 2021 boom, 2022 chop, 2025-26 fall)
+lookback_days: 3000
+
+# Only trade liquid stocks
+filters:
+  min_price: 50              # rupees
+  min_turnover_cr: 5         # average daily traded value, Rs crore (20 days)
+
+# Your own holdings (holdings.csv) without their own stop/target use these
+holdings_defaults:
+  stop_loss_pct: 8
+  target_pct: 20
+
+movers_count: 15
+
+# Warn before buying a stock whose quarterly results are due within this many days
+results:
+  warn_days: 7
+
+# Trading charges per order: NSE equity delivery + FYERS Standard plan, Oct 2026.
+costs:
+  brokerage_pct: 0.3         # % of order value ...
+  brokerage_max: 20          # ... capped at Rs 20 per order (FYERS Prime: 15)
+  stt_pct: 0.1               # buy + sell
+  exchange_pct: 0.00307      # NSE Rs 307/crore incl. IPFT
+  sebi_pct: 0.0001
+  stamp_buy_pct: 0.015
+  gst_pct: 18
+  dp_per_sell: 14.75         # FYERS DP charge per stock per sell day (Rs 12.5 + GST)
+  slippage_pct: 0.10         # assumed price slippage per side, liquid stocks
+  slippage_illiquid_pct: 0.25
+  illiquid_below_cr: 25      # stocks trading under Rs 25 crore/day get the higher slippage
+
+# Capital-gains tax used for the "after tax" returns (individual, listed shares, incl. 4% cess).
+tax:
+  stcg_pct: 20.8             # held <= 12 months
+  ltcg_pct: 13.0             # held > 12 months ...
+  ltcg_exempt: 125000        # ... above Rs 1.25 lakh per financial year
+
+# Strategies. Each is re-tested on 8 years of data after every scan.
+# Set enabled: false to hide one, or change its numbers (the backtest updates automatically).
+strategies:
+  momentum:
+    enabled: true
+    top_n: 15                # hold the 15 strongest stocks
+    keep_rank: 30            # keep a holding while it stays in the top 30
+    rebalance: monthly       # monthly | biweekly | weekly
+    require_uptrend: true    # only stocks above their 200-day average
+    use_regime: true         # no new buys while Nifty is below its 200-day average
+    regime_action: hold      # hold = keep holdings, no new buys (insurance); cash tested worst - avoid
+  near_high:
+    enabled: false           # never beat the average stock in testing
+    top_n: 15
+    keep_rank: 30
+    rebalance: monthly
+  trend_breakout:
+    enabled: true            # experimental: out of sample it only matched the average stock
+    rs_min: 90               # relative strength in the top 10%
+    min_vol_ratio: 2.0       # breakout volume at least 2x normal
+    stop_pct: 8              # 8% beat 10% both in and out of sample
+    trail_pct: 0             # 0 = no trailing stop (the one robust improvement); exit on close below 50-DMA
+    max_positions: 10
+  rsi2_pullback:
+    enabled: false           # short-term dips: lost money after realistic costs
+    rsi2_below: 10
+    stop_pct: 10
+    max_hold: 10
+    max_positions: 10
+  low_vol:
+    enabled: true
+    universe_size: 150       # the 150 most traded stocks (stand-in for "large caps")
+    top_n: 20                # hold the 20 steadiest
+    keep_rank: 40
+    rebalance: quarterly
+    use_regime: false        # defensive by design: stays invested
+  sector_rotation:
+    enabled: true
+    top_industries: 3
+    top_n: 12
+  golden_cross:
+    enabled: true
+  index_trend:
+    enabled: true
+    etf: NIFTYBEES
+  dual_momentum:
+    enabled: true
+    etfs: [NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES, MON100]
+    hold: 2
+  vcp_breakout:
+    enabled: true
+  donchian:
+    enabled: true
+  pullback_leaders:
+    enabled: true
+  earnings_gap:
+    enabled: true
+  bb_squeeze:
+    enabled: true
+  nr7_breakout:
+    enabled: true
+  legacy_rules:
+    enabled: false           # the old v1 rules (-12%/yr); enable only to compare
+
+telegram:
+  top_n: 10
+
+# Intraday (MIS) strategies on 5-minute bars. Data: FYERS first (history + live WebSocket), Yahoo fallback.
+intraday:
+  history_days: 365          # FYERS keeps ~1 year of intraday history (Standard plan); we archive daily
+  max_sync_calls_per_scan: 200   # a scan tops up at most this many FYERS calls; bigger backfills: 5_intraday_backfill.bat
+  min_price: 100             # liquid F&O stocks only (intraday is not allowed in trade-to-trade series)
+  min_turnover_cr: 100       # 20-day average traded value, Rs crore
+  max_symbols: 150
+  etfs: [NIFTYBEES]
+  risk_pct: 0.5              # % of capital lost if a trade's stop is hit
+  leverage: 2.0              # total intraday exposure cap (x capital); MIS allows ~5x - we stay well below
+  costs:
+    brokerage_pct: 0.03      # FYERS intraday: Rs 20 or 0.03% per order, whichever is lower
+    brokerage_max: 20
+    stt_sell_pct: 0.025
+    exchange_pct: 0.00307
+    stamp_buy_pct: 0.003
+    slippage_large_pct: 0.03 # Nifty 50 stocks, per side
+    slippage_other_pct: 0.07 # other F&O stocks, per side
+    tax_pct: 31.2            # intraday profit = speculative business income at YOUR slab rate (set yours)
+
+# Individual intraday strategies can be switched off, e.g.:
+# intraday_strategies:
+#   supertrend: {enabled: false}

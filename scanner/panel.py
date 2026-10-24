@@ -42,11 +42,35 @@ class Panel:
 INDEX_COLUMNS = ("NIFTY50", "INDIAVIX", "NIFTY500")
 
 
+ETF_PRINT_TOL_PCT = 2.0
+
+
+def clean_etf_prints(wide: dict[str, pd.DataFrame], etfs, tol_pct: float = ETF_PRINT_TOL_PCT) -> None:
+    """NSE's daily file often has a stray odd-lot pre-open trade as an ETF's open (and so as its high or low),
+    far from what the fund traded at all day: JUNIORBEES on 3 Jan 2022 'opened' at 386 between closes of 444 and
+    447. A backtest that fills at the next open would book a phantom +15% (or -15%). For ETF columns only, an
+    open beyond BOTH the previous and today's close by more than tol_pct is moved to the nearest edge of that
+    band, and high / low are capped at it (real ETF moves - gaps included - stay inside the band because the
+    band contains today's close). Stocks are never touched: their gaps are real. In place."""
+    cols = [c for c in wide["close"].columns if c in set(etfs or ())]
+    if not cols:
+        return
+    c = wide["close"][cols]
+    pc = c.shift(1).fillna(c)
+    lo = np.minimum(pc, c) * (1 - tol_pct / 100)
+    hi = np.maximum(pc, c) * (1 + tol_pct / 100)
+    o = wide["open"][cols].clip(lower=lo, upper=hi)
+    wide["open"][cols] = o
+    wide["high"][cols] = np.maximum(wide["high"][cols].clip(upper=hi), np.maximum(o, c))
+    wide["low"][cols] = np.minimum(wide["low"][cols].clip(lower=lo), np.minimum(o, c))
+
+
 def panel_from_wide(frames: dict[str, pd.DataFrame], symbols: list[str] | None = None,
-                    index_symbol: str = "NIFTY50", max_gap_fill: int = 5) -> Panel:
+                    index_symbol: str = "NIFTY50", max_gap_fill: int = 5, etfs=None) -> Panel:
     """Build a Panel from wide per-field frames (see store.py). Short gaps inside a stock's history
     (suspended day, missing live quote) are bridged with the last close so rolling indicators don't
-    break; `observed` records where real data existed."""
+    break; `observed` records where real data existed. `etfs`: columns whose stray open prints are
+    cleaned (clean_etf_prints)."""
     close_all = frames["close"]
     cols = [c for c in (symbols if symbols is not None else close_all.columns)
             if c in close_all.columns and c not in INDEX_COLUMNS]
@@ -63,6 +87,8 @@ def panel_from_wide(frames: dict[str, pd.DataFrame], symbols: list[str] | None =
         wide[f] = wide[f].where(~gap, filled_close)
     wide["close"] = filled_close
     wide["volume"] = wide["volume"].where(~gap, 0.0)
+    if etfs:
+        clean_etf_prints(wide, etfs)
     index_close = (close_all[index_symbol].reindex(dates).astype(float) if index_symbol in close_all.columns
                    else pd.Series(np.nan, index=dates))
     return Panel(index_close=index_close, observed=observed, **wide)

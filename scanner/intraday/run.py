@@ -1,14 +1,17 @@
 """Intraday pipeline: universe -> 5-minute bars -> per-day context -> backtests + today's live setups.
 
 Data: Yahoo gives the last ~60 sessions of 5-minute bars (no login). With a FYERS login,
-`backfill_fyers` extends history to ~1 year (and should be run daily to archive, because FYERS only
-keeps a rolling year). Results go to data/results/intraday.json.
+`intraday_sync.py --backfill` (fyers_sync.sync) extends history to ~1 year, and the daily 15:45
+`--archive` keeps it growing, because FYERS only keeps a rolling year. Today's bars come from the
+FYERS live WebSocket service (live.py) for the symbols it streams, from Yahoo for the rest.
+Results go to data/results/intraday.json.
 """
 from __future__ import annotations
 
 import io
 import json
 import math
+import os
 import time
 from datetime import date, timedelta
 
@@ -17,10 +20,13 @@ import pandas as pd
 
 from ..events import results_history
 from ..nse import _get
+from ..providers import get_fyers
 from ..settings import DATA_DIR, RESULTS_DIR, ist_now, ist_today
 from ..store import load_store
 from ..universe import get_universe
 from . import data as idata
+from . import fyers_sync
+from . import live as live_feed
 from .engine import SLOTS, Day, IntradayCosts, run_intraday
 from .strategies import S_0945, build_intraday_strategies
 
@@ -68,26 +74,62 @@ def intraday_universe(cfg: dict, frames: dict) -> tuple[list[str], dict]:
     return liquid + etfs, info
 
 
-def update_bars(symbols: list[str], log=print) -> pd.DataFrame:
-    """Refresh the 5-minute store from Yahoo (last ~60 sessions) and return all stored 5m bars."""
+def update_bars(symbols: list[str], cfg: dict | None = None, log=print) -> tuple[pd.DataFrame, list[str]]:
+    """FYERS first, Yahoo only as fallback. Returns (all 5-minute bars incl. today's, sources used).
+      1. Completed days: top up from FYERS through the shared rate limiter (0 calls when up to date;
+         a big first-time backfill is left to `intraday_sync.py --backfill` so a scan never burns budget).
+      2. Today: bars from the FYERS live WebSocket service for the (up to 100) symbols it streams, as long
+         as its ticks are fresh (real-time, no REST calls).
+      3. Yahoo (~15 min delayed): today's bars for every other symbol (or all of them when the live feed
+         stopped), and the last ~60 sessions only when FYERS hasn't covered them.
+    Where sources overlap the better one wins (fyers > fyers_ws > yahoo), so tick-built bars never replace
+    the official FYERS bars archived at 15:45."""
+    ic = (cfg or {}).get("intraday") or {}
     store = idata.IntradayStore(INTRADAY_DIR / "bars")
-    raw = idata.fetch_yahoo_intraday(symbols, "5m", log=log)
+    days = int(ic.get("history_days", 365))
+    sources: list[str] = []
+    fy = None
+    if cfg is not None:
+        try:
+            fy, _ = get_fyers(cfg)
+        except Exception:
+            fy = None
+    if fy is not None:
+        est = fyers_sync.plan_calls(symbols, INTRADAY_DIR, days)
+        if 0 < est["calls"] <= int(ic.get("max_sync_calls_per_scan", 200)):
+            fyers_sync.sync(fy, symbols, INTRADAY_DIR, days, log=log)
+        elif est["calls"] > 0:
+            log(f"FYERS intraday history needs {est['calls']} calls (~{est['minutes']} min): start the backfill "
+                "from Data & Settings or run intraday_sync.py --backfill. Using what is stored + Yahoo for now.")
+        cov = fyers_sync.coverage(INTRADAY_DIR)
+        if cov["symbols"]:
+            sources.append("fyers")
+    cov_to = fyers_sync.coverage(INTRADAY_DIR)["to"]
+    fyers_recent = bool(cov_to) and pd.Timestamp(cov_to) >= pd.Timestamp(fyers_sync.last_complete_day()) - pd.Timedelta(days=4)
+    live_today = live_feed.load_live(INTRADAY_DIR)
     now = ist_now().replace(tzinfo=None)
-    clean = idata.clean_bars(raw.assign(source="yahoo"), "5m", drop_synthetic_close=True, now=now)
-    store.save(clean, "5m")                       # forming bars are never stored
-    live = clean[(clean["flags"] & idata.FLAG_FORMING) != 0]
+    covered: set[str] = set()                         # symbols whose today's bars come from the live feed
+    if len(live_today):
+        if live_feed.feed_fresh(INTRADAY_DIR):
+            covered = set(live_today["symbol"].astype(str))
+            sources.append("fyers live")
+        else:
+            log("The FYERS live feed stopped receiving ticks today - Yahoo fills in today's bars")
+    need = [s for s in symbols if s not in covered]
+    today_parts = [live_today] if len(live_today) else []   # even stale live bars beat Yahoo's (priority)
+    if need or not fyers_recent:
+        raw = idata.fetch_yahoo_intraday(need if fyers_recent else symbols, "5m",
+                                         days=None if not fyers_recent else 1, log=log)
+        clean = idata.clean_bars(raw.assign(source="yahoo"), "5m", drop_synthetic_close=True, now=now)
+        store.save(clean, "5m")                       # forming bars are never stored; FYERS bars win on overlap
+        forming = clean[((clean["flags"] & idata.FLAG_FORMING) != 0) & clean["symbol"].isin(need)]
+        if len(forming):
+            today_parts.append(forming)
+        sources.append("yahoo")
     bars = store.load("5m")
-    return pd.concat([bars, live], ignore_index=True) if len(live) else bars
-
-
-def backfill_fyers(provider, symbols: list[str], days: int = 365, log=print) -> int:
-    """Extend 5-minute history to ~1 year with FYERS (Standard plan: ~50 requests/minute)."""
-    store = idata.IntradayStore(INTRADAY_DIR / "bars")
-    end = ist_today()
-    got = idata.fetch_fyers_intraday(provider, symbols, end - timedelta(days=days), end, resolution="5")
-    clean = idata.clean_bars(got.assign(source="fyers"), "5m")
-    store.save(clean, "5m")
-    return len(clean)
+    if today_parts:
+        bars = idata.merge_by_priority(bars, *today_parts)
+    return bars, sources
 
 
 def build_days(bars: pd.DataFrame, frames: dict, info: dict, large: set[str], results: dict) -> dict[str, list[Day]]:
@@ -178,7 +220,10 @@ def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True,
     frames = frames or load_store()
     symbols, info = intraday_universe(cfg, frames)
     log(f"Intraday universe: {len(symbols)} liquid F&O stocks + ETFs")
-    bars = update_bars(symbols, log=log) if update else idata.IntradayStore(INTRADAY_DIR / "bars").load("5m")
+    if update:
+        bars, sources = update_bars(symbols, cfg, log=log)
+    else:
+        bars, sources = idata.IntradayStore(INTRADAY_DIR / "bars").load("5m"), ["stored"]
     if bars.empty:
         raise RuntimeError("No intraday bars available")
     bars = bars[bars["symbol"].isin(symbols)]
@@ -224,19 +269,33 @@ def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True,
         "generated_at": now.isoformat(timespec="seconds"), "elapsed_s": round(time.perf_counter() - t0, 1),
         "data": {"source": ", ".join(sorted(bars["source"].astype(str).unique())), "interval": "5m",
                  "from": span[0], "to": span[1], "sessions": int(bars["ts"].dt.normalize().nunique()),
-                 "symbols": len(days), "note": "Yahoo 5-minute data is ~15 min delayed and covers ~60 sessions; "
-                                               "log in to FYERS to backfill ~1 year."},
+                 "symbols": len(days), "sources_used": sources,
+                 "fyers_coverage": fyers_sync.coverage(INTRADAY_DIR),
+                 "note": _data_note(sources)},
         "rules": {"square_off": "15:00 for F&O stocks (FYERS MIS cut-off 15:05), 15:15 others",
                   "fills": "next bar open; stop orders at the level or the open if it gapped",
                   "costs": "FYERS intraday brokerage, STT 0.025% sell, stamp 0.003% buy, NSE + SEBI fees, GST, slippage",
                   "tax": f"speculative business income at {costs.tax_pct}%"},
         "sebi": SEBI_FACTS, "strategies": out,
     }
-    tmp = RESULT_FILE.with_suffix(".tmp")
+    # per-process tmp + retried replace: the web job and the 15:45 task can finish together, and on Windows
+    # a replace fails while the API is reading the file
+    tmp = RESULT_FILE.with_name(f"{RESULT_FILE.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(result, indent=1, default=str), encoding="utf-8")
-    tmp.replace(RESULT_FILE)
+    idata._replace(tmp, RESULT_FILE)
     log(f"Intraday done in {result['elapsed_s']}s: {len(out)} strategies on {result['data']['sessions']} sessions")
     return result
+
+
+def _data_note(sources: list[str]) -> str:
+    if "fyers live" in sources:
+        return "FYERS history + live WebSocket bars" + (
+            "; Yahoo (~15 min delayed) for the symbols the live feed doesn't stream" if "yahoo" in sources else "")
+    if "fyers" in sources:
+        return ("FYERS history; today's bars from Yahoo (~15 min delayed) - start the live feed for "
+                "real-time bars")
+    return ("Yahoo 5-minute data is ~15 min delayed and covers ~60 sessions; log in to FYERS and "
+            "run the backfill for ~1 year of history")
 
 
 def load_intraday() -> dict | None:

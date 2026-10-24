@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from . import corporate, events, nse
+from .fyers_limits import FyersRateLimited
 from .providers import COLS, INDEX_SYMBOLS, FyersAuthError, YahooProvider
 from .settings import HISTORY_DIR, SESSION_START, ist_now, ist_today
 
@@ -442,6 +443,9 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
             except FyersAuthError as e:
                 log(f"Fyers session expired ({e}) - using Yahoo for live prices. Run 1_login.bat.")
                 errors["fyers"] = "session expired - run 1_login.bat"
+            except FyersRateLimited as e:
+                log(f"{e} - using Yahoo for live prices.")
+                errors["fyers"] = str(e)
         if not live_rows:
             recent = yahoo.history(all_syms, {s: today - timedelta(days=5) for s in all_syms}, today)
             for s, df in recent.items():

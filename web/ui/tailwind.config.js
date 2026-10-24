@@ -1,5 +1,5 @@
 /** @type {import('tailwindcss').Config} */
-// Colours are CSS variables (see src/index.css) so dark and light themes share one palette definition.
+// Colours are CSS variables (see src/index.css) so dark, light and colour-blind modes share one palette definition.
 const v = (name) => `rgb(var(--${name}) / <alpha-value>)`
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
@@ -7,16 +7,28 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: v('bg'), panel: v('panel'), raised: v('raised'), line: v('line'),
+        bg: v('bg'), panel: v('panel'), raised: v('raised'), line: v('line'), 'line-strong': v('line-strong'),
         fg: v('fg'), muted: v('muted'), faint: v('faint'),
-        accent: v('accent'), profit: v('profit'), loss: v('loss'), warn: v('warn'), info: v('info'),
+        accent: v('accent'), 'accent-strong': v('accent-strong'),
+        profit: v('profit'), loss: v('loss'), warn: v('warn'), info: v('info'), violet: v('violet'),
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'Segoe UI', 'Roboto', 'sans-serif'],
+        sans: ['"Inter Variable"', 'Inter', 'system-ui', '"Segoe UI"', 'Roboto', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'Consolas', 'monospace'],
       },
-      fontSize: { '2xs': ['0.6875rem', '1rem'] },
-      boxShadow: { card: '0 1px 2px rgb(0 0 0 / 0.25), 0 0 0 1px rgb(var(--line) / 1)' },
+      fontSize: {
+        '2xs': ['11px', '16px'],
+        xs: ['12px', '16px'],
+        sm: ['13px', '20px'],
+        base: ['14px', '22px'],
+        lg: ['16px', '24px'],
+        xl: ['20px', '28px'],
+        '2xl': ['24px', '30px'],
+        '3xl': ['28px', '34px'],
+      },
+      height: { row: 'var(--row-h)' },
+      boxShadow: { pop: 'var(--shadow-pop)' },
+      screens: { '3xl': '1440px' },
     },
   },
   plugins: [],

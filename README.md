@@ -19,7 +19,7 @@ A personal, evidence-based tool for the Indian stock market. Every day it:
 | When (IST) | What to do |
 |---|---|
 | After 9:15 AM, once a day | **🔑 Log in to Fyers.** Click the button in the dashboard, or double-click `1_login.bat`. SEBI rules require a daily login since April 2026. |
-| Any time | Double-click **`3_dashboard.bat`**, then click **🔄 Run scan now**. A scan takes about 15–20 seconds. |
+| Any time | Double-click **`3_dashboard.bat`**, then click **🔄 Run scan now**. A scan takes 1–2 minutes (it re-tests every strategy; longer when it downloads new prices). |
 | 3:40 PM / 7:15 PM | Automatic Telegram summaries, if you set them up (section 5). |
 | **After about 7 PM** | **Best time to decide.** NSE's official end-of-day data is published, so signals are final. |
 
@@ -101,9 +101,46 @@ The first build repaired Yahoo's history automatically:
 
 If NSE is unreachable for more than a day, Yahoo fills in temporarily. Those days are replaced with official data as soon as it is available.
 
+### FYERS first, inside its rate limits
+
+FYERS is the first choice for everything real-time and intraday. Every FYERS call from every program goes through **one shared rate limiter** (`scanner/fyers_limits.py`). The table shows FYERS' published limits and what the platform actually uses.
+
+| FYERS Standard (free) plan | FYERS limit | What the platform uses |
+|---|---|---|
+| Data calls (history, quotes) | 5/second, 50/minute, 5,000/day | **4/second, 45/minute, 4,500/day** |
+| User calls (profile, holdings) | 10/second, 200/minute, 100,000/day | 8/second, 180/minute, 90,000/day |
+| Rate-limit breaches | 3 in a day = account blocked for the day | **Stops using FYERS for the day after 2** |
+| WebSocket (live ticks) | up to 100 symbols, no REST cost | 100 most liquid intraday symbols |
+
+Usage is counted in `data/fyers_usage.json`, which every process shares. If the day's budget runs out, everything falls back to NSE and Yahoo automatically, with no errors.
+
+| Data | Source order | FYERS calls |
+|---|---|---|
+| Live prices in a scan | FYERS quotes → Yahoo | about 11 per scan (50 symbols per call) |
+| Today's intraday bars | FYERS WebSocket live feed → Yahoo (delayed) | 0 (WebSocket) |
+| Intraday history (1 year) | FYERS → Yahoo (60 days only) | about 600 once (`5_intraday_backfill.bat`, ~14 min), then about 150 a day |
+| Completed daily candles | NSE official file → Yahoo | 0 (NSE is the exchange's own data) |
+
 ---
 
-## 5. Telegram alerts and automatic scans (optional)
+## 5. Intraday (honest)
+
+- **Nine intraday strategies** are tested on 5-minute bars of the ~150 most liquid F&O stocks, using textbook parameters with no tuning:
+  - opening-range breakout (15-min and 5-min "in play")
+  - VWAP trend and VWAP pullback
+  - gap-and-go and gap fade
+  - morning-predicts-close momentum
+  - closing-hour trend
+  - narrow CPR breakout
+  - Supertrend
+- Every test uses FYERS intraday charges and slippage, squares off at 15:00 (FYERS' MIS cut-off for F&O stocks), and taxes profit as speculative business income.
+- **Result so far (60 sessions):** every strategy is about break-even *before* costs and **loses money after costs**. This matches SEBI's July 2024 study, which found that 71% of individual intraday traders lost money.
+- **One year of FYERS history** gives a much stronger test. Run `5_intraday_backfill.bat` once after logging in. A daily 15:45 task keeps it growing; FYERS itself only keeps a rolling year.
+- **Real-time setups:** `4_intraday_live.bat` builds live 5-minute bars from the FYERS WebSocket. The scheduled task starts it at 09:14.
+
+---
+
+## 6. Telegram alerts and automatic scans (optional)
 
 1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token. Then send any message to your new bot, and message **@userinfobot** to get your chat ID.
 2. Put both in `.env` (`TELEGRAM_BOT_TOKEN=...`, `TELEGRAM_CHAT_ID=...`).
@@ -113,7 +150,7 @@ If a scan fails, you get a Telegram alert. Details go to `data\logs\scanner.log`
 
 ---
 
-## 6. Your holdings
+## 7. Your holdings
 
 In the dashboard, open **💼 My holdings**:
 - add stocks by hand (symbol, quantity, buy price, **buy date**), or click **⬇️ Import my holdings from Fyers**;
@@ -124,7 +161,7 @@ In the dashboard, open **💼 My holdings**:
 
 ---
 
-## 7. Settings (`config.yaml`)
+## 8. Settings (`config.yaml`)
 
 - `account`: capital, minimum position size
 - `universe`: nifty50 / nifty100 / nifty200 / nifty500
@@ -135,7 +172,7 @@ In the dashboard, open **💼 My holdings**:
 
 ---
 
-## 8. For developers
+## 9. For developers
 
 ```
 scanner/
@@ -156,7 +193,7 @@ login.py         daily Fyers OAuth login
 tests/           pytest suite: costs, tax, corporate actions, factors (no look-ahead), engine, paper trading
 ```
 
-Run the tests with `.venv\Scripts\python.exe -m pytest -q`.
+Run the tests with `.venv\Scripts\python.exe -m pytest -q` (in a git worktree under `.worktrees\` use the main checkout's `..\..\.venv\Scripts\python.exe`; the `.bat` files and `setup_schedule.ps1` find it automatically).
 
 ### Roadmap
 | Next | Why |

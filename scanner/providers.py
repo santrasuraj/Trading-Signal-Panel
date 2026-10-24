@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 
+from .fyers_limits import MAX_STRIKES, FyersLimiter, FyersRateLimited
 from .settings import IST, LOG_DIR, TOKEN_FILE
 
 COLS = ["open", "high", "low", "close", "volume"]
@@ -40,10 +41,13 @@ class FyersAuthError(RuntimeError):
 class FyersProvider:
     name = "fyers"
     INDEX_MAP = {INDEX_NIFTY: "NSE:NIFTY50-INDEX", INDEX_VIX: "NSE:INDIAVIX-INDEX", INDEX_N500: "NSE:NIFTY500-INDEX"}
-    MIN_INTERVAL = {"standard": 1.25, "prime": 0.13}   # seconds between data calls (50/min, 500/min)
     MAX_DAYS_PER_CALL = 365
     AUTH_CODES = {-8, -15, -16, -17, 401}
     RATE_CODES = {-429, -360, 429}
+    # Only these phrases mean "rate limit": a bare "limit" also matches input errors (e.g. a symbol-count
+    # limit), and every false strike brings the stop-for-the-day rule one step closer.
+    RATE_PHRASES = ("request limit", "rate limit", "api limit", "too many request")
+    NO_RETRY_CODES = {-50, -300, -352, 400, 403, 404}  # bad input / unknown symbol: a retry only burns budget
     TIMEOUT = (5, 20)                                   # connect, read seconds
 
     def __init__(self, client_id: str, access_token: str, plan: str = "standard"):
@@ -59,21 +63,29 @@ class FyersProvider:
                 lg.setLevel("WARNING")  # SDK logs every request at DEBUG to an unrotated file
             except Exception:
                 pass
-        self.interval = self.MIN_INTERVAL.get(plan, self.MIN_INTERVAL["standard"])
-        self._last_call = 0.0
+        # One limiter shared with every other process (see fyers_limits.py) - never the raw API speed.
+        self.limiter = FyersLimiter(plan)
         self.calls = 0
         self.errors: dict[str, str] = {}
+
+    @classmethod
+    def from_model(cls, api, plan: str = "standard") -> "FyersProvider":
+        """Wrap an existing fyersModel.FyersModel so its calls also go through the shared limiter and the
+        same error rules (FyersAuthError / strikes / FyersRateLimited). No new SDK client, no login check."""
+        p = cls.__new__(cls)
+        p.api, p.limiter, p.calls, p.errors = api, FyersLimiter(plan), 0, {}
+        return p
 
     def ticker(self, sym: str) -> str:
         return self.INDEX_MAP.get(sym, f"NSE:{sym}-EQ")
 
-    def _call(self, fn, payload=None) -> dict:
+    def _call(self, fn, payload=None, bucket: str = "data") -> dict:
+        """One FYERS REST call through the shared rate limiter. Raises FyersAuthError on an expired
+        session and FyersRateLimited when today's budget is used up (callers fall back to other sources)."""
         resp: dict = {}
-        for attempt in range(3):
-            wait = self.interval - (time.monotonic() - self._last_call)
-            if wait > 0:
-                time.sleep(wait)
-            self._last_call = time.monotonic()
+        attempts = 3
+        for attempt in range(attempts):
+            self.limiter.acquire(bucket)        # before EVERY attempt; also waits out a strike pause
             self.calls += 1
             try:
                 resp = fn(data=payload) if payload is not None else fn()
@@ -87,17 +99,23 @@ class FyersProvider:
             msg = str(resp.get("message", "")).lower()
             if code in self.AUTH_CODES or "token" in msg or "authenticat" in msg:
                 raise FyersAuthError(str(resp.get("message") or "Fyers session expired"))
-            if code in self.RATE_CODES or "limit" in msg:
-                # Wait for the next minute window instead of hammering (3 strikes = blocked for the day).
-                time.sleep(61 - datetime.now().second)
+            if code in self.RATE_CODES or any(p in msg for p in self.RATE_PHRASES):
+                # FYERS counted a per-minute breach (3 in a day = blocked for the day). The shared limiter
+                # records it and makes every process wait for a fresh minute; after 2 we stop at once.
+                if self.limiter.strike() >= MAX_STRIKES:
+                    raise FyersRateLimited("FYERS rate-limit warning received twice today - stopped using "
+                                           "FYERS until tomorrow (a third would block your account)")
                 continue
-            time.sleep(1 + attempt)
+            if code in self.NO_RETRY_CODES:
+                return resp
+            if attempt < attempts - 1:          # no pointless sleep after the last attempt
+                time.sleep(1 + attempt)
         return resp
 
     def check_login(self) -> tuple[bool, str]:
         try:
-            r = self._call(self.api.get_profile)
-        except FyersAuthError as e:
+            r = self._call(self.api.get_profile, bucket="user")
+        except (FyersAuthError, FyersRateLimited) as e:
             return False, str(e)
         if r.get("s") == "ok":
             return True, (r.get("data") or {}).get("name", "")
@@ -164,7 +182,7 @@ class FyersProvider:
 
     def holdings(self) -> list[dict]:
         """The user's demat holdings (broker cost price is already corporate-action adjusted)."""
-        r = self._call(self.api.holdings)
+        r = self._call(self.api.holdings, bucket="user")
         return (r.get("holdings") or []) if r.get("s") == "ok" else []
 
 
@@ -255,6 +273,24 @@ def load_token() -> dict | None:
 _fyers_cache: dict = {}
 
 
+def token_expired(tok: dict, now=None) -> bool:
+    """True when the token was created before the most recent 06:00 IST: Fyers tokens last one trading day, so
+    such a token is dead and checking it would only spend a FYERS call. Unknown creation time -> False (check it)."""
+    from datetime import datetime, time as dtime, timedelta
+    from .settings import IST
+    try:
+        created = datetime.fromisoformat(str(tok.get("created") or ""))
+    except ValueError:
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=IST)
+    now = now or datetime.now(IST)
+    cutoff = datetime.combine(now.astimezone(IST).date(), dtime(6, 0), tzinfo=IST)
+    if now < cutoff:
+        cutoff -= timedelta(days=1)
+    return created < cutoff
+
+
 def get_fyers(cfg: dict) -> tuple[FyersProvider | None, str]:
     """A logged-in Fyers client for live prices (one per process), or None with the reason."""
     if (cfg.get("data_source") or "auto").lower() == "yahoo":
@@ -262,13 +298,24 @@ def get_fyers(cfg: dict) -> tuple[FyersProvider | None, str]:
     tok = load_token()
     if not tok:
         return None, "Not logged in to Fyers - live prices from Yahoo (~15 min delayed). Run 1_login.bat."
-    key = (tok["client_id"], tok["access_token"])
+    if token_expired(tok):      # yesterday's token: no profile call (it would fail and cost a FYERS call)
+        return None, "Not logged in to Fyers today - live prices from Yahoo (~15 min delayed). Run 1_login.bat."
+    plan =str(cfg.get("fyers_plan") or "standard").lower()
+    # Budget first: once protection is active, no profile call and no misleading "login expired" message.
+    use = FyersLimiter(plan).usage()
+    if use["stopped"] or use["data"]["remaining_today"] <= 0:
+        return None, ("FYERS rate-limit protection is active for today - live prices from Yahoo "
+                      "(this prevents FYERS from blocking your account).")
+    key = (tok["client_id"], tok["access_token"], plan)
     p = _fyers_cache.get(key)
     if p is None:
-        p = FyersProvider(tok["client_id"], tok["access_token"], plan=str(cfg.get("fyers_plan", "standard")).lower())
-        ok, msg = p.check_login()
+        try:
+            p = FyersProvider(tok["client_id"], tok["access_token"], plan=plan)
+            ok, msg = p.check_login()
+        except Exception as e:  # SDK missing/broken, log folder not writable, ...: never break the scan
+            return None, f"Fyers unavailable ({type(e).__name__}) - live prices from Yahoo (~15 min delayed)."
         if not ok:
-            return None, f"Fyers login expired ({msg}) - live prices from Yahoo. Run 1_login.bat."
+            return None, f"Fyers login check failed ({msg}) - live prices from Yahoo. Run 1_login.bat."
         _fyers_cache.clear()
         _fyers_cache[key] = p
         p.user_name = msg

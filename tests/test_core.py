@@ -261,3 +261,58 @@ def test_rebalance_offset_moves_decision_earlier():
     base = [x.date().isoformat() for x in d[rebalance_days(d, "monthly")]]
     shifted = [x.date().isoformat() for x in d[rebalance_days(d, "monthly", offset=2)]]
     assert base == ["2025-01-31", "2025-02-28"] and shifted == ["2025-01-29", "2025-02-26"]
+
+
+# ------------------------------------------------------------------ console / Telegram summary
+def _summary_result(**market):
+    m = {"label": "Mixed", "level": "neutral", "advice": "Be selective.", "nifty": 22687.6, "nifty_change_pct": -0.5,
+         "vix": 15.8, "breadth_50": 13.2}
+    m.update(market)
+    buys = [{"action": "BUY", "symbol": "AAA", "qty": 100, "price": 300.0, "amount": 30_000.0, "stop": 276.0},
+            {"action": "BUY", "symbol": "MRF", "qty": 0, "price": 140_000.0, "amount": 0.0},
+            {"action": "BUY", "symbol": "TINY", "qty": 2, "price": 5_000.0, "amount": 10_000.0}]
+    return {"generated_at": "2026-10-23T22:19:02+05:30", "data_date": "2026-10-22", "live": False,
+            "min_position": 15_000, "market": m, "holdings": [],
+            "strategies": [{"key": "momentum", "name": "Momentum", "status": "working", "actions": buys,
+                            "positions": [], "metrics": {"full": {"cagr_pct": 10.0, "start": "2019-08-19",
+                                                                  "end": "2026-10-22"}, "12m": {}}}]}
+
+
+def test_summary_survives_missing_index_data_and_skips_buys_the_backtest_would_skip():
+    from scanner.alerts import format_daily
+    text = format_daily(_summary_result(nifty=None, nifty_change_pct=None, vix=None, breadth_50=None))
+    assert "Nifty - (-)" in text and "VIX -" in text and "- of stocks above 50-DMA" in text
+    buy_line = next(x for x in text.splitlines() if "BUY at next open" in x)
+    assert "AAA x100" in buy_line and "MRF" not in buy_line and "TINY" not in buy_line
+    skipped = next(x for x in text.splitlines() if "Skipped" in x)
+    assert "MRF" in skipped and "TINY" in skipped and "15,000" in skipped
+
+
+def test_telegram_without_credentials_sends_nothing(monkeypatch):
+    from scanner import alerts
+
+    def no_network(*a, **k):
+        raise AssertionError("must not call Telegram without credentials")
+    monkeypatch.setattr(alerts, "env", lambda name, default="": "")
+    monkeypatch.setattr(alerts.requests, "post", no_network)
+    ok, msg = alerts.send_telegram("hello")
+    assert not ok and "not configured" in msg
+
+
+def test_run_scan_finishes_even_if_the_summary_fails(tmp_path, monkeypatch):
+    import json
+    import logging
+    import sys
+
+    import run_scan
+
+    def broken_summary(*a, **k):
+        raise KeyError("market")
+    monkeypatch.setattr(run_scan, "_logger", lambda: logging.getLogger("test-run-scan"))   # not data/logs
+    monkeypatch.setattr(run_scan, "load_config", lambda: {})
+    monkeypatch.setattr(run_scan, "run_daily", lambda cfg, **kw: {"elapsed_s": 1.0})
+    monkeypatch.setattr(run_scan, "format_daily", broken_summary)
+    status = tmp_path / "status.json"
+    monkeypatch.setattr(sys, "argv", ["run_scan.py", "--no-update", "--status", str(status)])
+    assert run_scan.main() == 0
+    assert json.loads(status.read_text(encoding="utf-8"))["state"] == "done"

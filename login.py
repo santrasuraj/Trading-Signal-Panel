@@ -6,6 +6,7 @@ A browser opens -> log in to Fyers yourself -> the token is saved to data/fyers_
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import sys
 import time
@@ -19,6 +20,18 @@ from scanner.providers import FyersProvider
 from scanner.settings import TOKEN_FILE, env, ist_now
 
 DEFAULT_REDIRECT = "http://127.0.0.1:8000/api/v1/auth/callback"
+
+
+def _replace(src, dst, tries: int = 10) -> None:
+    """os.replace with retries: on Windows it fails while another process has the target open."""
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.2 * (i + 1))
 
 
 def _extract_code(text: str) -> str | None:
@@ -76,6 +89,8 @@ def _wait_for_redirect(redirect: str, login_url: str, state: str) -> str | None:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):   # the ✅ / ⚠️ messages must not crash a redirected (cp1252) stdout
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     client_id = env("FYERS_CLIENT_ID")
     secret = env("FYERS_SECRET_KEY")
     redirect = env("FYERS_REDIRECT_URI", DEFAULT_REDIRECT)
@@ -104,18 +119,34 @@ def main() -> int:
         return 1
 
     session.set_token(code)
-    resp = session.generate_token()
+    try:
+        resp = session.generate_token()      # requests.post + .json(): network errors / non-JSON replies raise
+    except Exception as e:
+        print(f"Could not reach Fyers to exchange the login code ({type(e).__name__}). "
+              "Check your internet connection and run the login again.")
+        return 1
     if not isinstance(resp, dict) or "access_token" not in resp:
         print("Fyers did not return a token:", resp)
         print("Check that the App ID, Secret and Redirect URL in .env match your Fyers app exactly.")
         return 1
 
-    TOKEN_FILE.write_text(json.dumps({
-        "client_id": client_id, "access_token": resp["access_token"],
-        "created": ist_now().isoformat(timespec="seconds"),
-    }), encoding="utf-8")
+    # Atomic write: the scanner / web API may read the token file at this very moment.
+    tmp = TOKEN_FILE.with_name(f"{TOKEN_FILE.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps({
+            "client_id": client_id, "access_token": resp["access_token"],
+            "created": ist_now().isoformat(timespec="seconds"),
+        }), encoding="utf-8")
+        _replace(tmp, TOKEN_FILE)
+    except OSError as e:
+        print(f"Could not save the Fyers token to {TOKEN_FILE} ({type(e).__name__}). "
+              "Close any program using that file and run the login again.")
+        return 1
 
-    ok, name = FyersProvider(client_id, resp["access_token"]).check_login()
+    try:
+        ok, name = FyersProvider(client_id, resp["access_token"]).check_login()
+    except Exception as e:
+        ok, name = False, type(e).__name__
     if ok:
         print(f"\n✅ Logged in to Fyers{' as ' + name if name else ''}. Token saved - valid until tomorrow morning.")
         return 0

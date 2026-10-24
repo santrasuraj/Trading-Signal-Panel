@@ -1,13 +1,27 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en-IN" class="dark" data-cvd="off" data-density="comfortable">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="Quant Desk: honest NSE strategy research, signals and portfolio health." />
     <link rel="icon" href="/favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <title>Quant Desk · NSE</title>
+    <script>
+      // Apply the saved theme before React mounts so there is no flash (spec 7: theme).
+      (function () {
+        var d = document.documentElement
+        try {
+          var t = localStorage.getItem('qd.theme') || 'system'
+          // dark-first: 'system' means dark unless the OS explicitly asks for light
+          var dark = t === 'dark' || (t === 'system' && !window.matchMedia('(prefers-color-scheme: light)').matches)
+          d.classList.remove('dark', 'light')
+          d.classList.add(dark ? 'dark' : 'light')
+          d.dataset.cvd = localStorage.getItem('qd.cvd') === 'on' ? 'on' : 'off'
+          d.dataset.density = localStorage.getItem('qd.density') === 'compact' ? 'compact' : 'comfortable'
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -28,7 +28,7 @@ import pandas as pd
 
 from .costs import CostModel
 from .engine import Trade, _curve_stats, _trade_stats
-from .panel import TRADING_DAYS
+from .panel import TRADING_DAYS, clean_etf_prints
 from .providers import INDEX_N500, INDEX_NIFTY
 from .settings import DATA_DIR
 
@@ -117,7 +117,7 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
                 costs: CostModel) -> dict | None:
     """Rebuild one strategy's paper portfolio from its journal and the stored prices (completed days only)."""
     scans = journal["scans"][journal["scans"]["strategy"] == key].sort_values("date")
-    close_all = frames["close"].sort_index()
+    close_all = _sorted(frames["close"])
     if scans.empty or close_all.empty:
         return None
     orders = journal["orders"][journal["orders"]["strategy"] == key]
@@ -135,7 +135,7 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
     col = {s: j for j, s in enumerate(syms)}
 
     def arr(f: str) -> np.ndarray:
-        return frames[f].sort_index().reindex(index=dates, columns=syms).to_numpy(dtype=float)
+        return _sorted(frames[f]).reindex(index=dates, columns=syms).to_numpy(dtype=float)
 
     O, H, L, C = (arr(f) for f in ("open", "high", "low", "close"))
     C_ff = pd.DataFrame(C).ffill().to_numpy()
@@ -147,11 +147,15 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
 
     days: dict[str, dict] = {}
     exec_at: dict[int, str] = {}      # trading-day row -> journal day whose orders fill at its open
+    # one pass over the journal tables (not one string comparison over the whole table per day)
+    orders_by_day = {str(d): g for d, g in orders.groupby("date", sort=False)}
+    positions_by_day = {str(d): g for d, g in positions.groupby("date", sort=False)}
+    empty_orders, empty_positions = orders.iloc[0:0], positions.iloc[0:0]
     for row in scans.itertuples(index=False):
         d = str(row.date)
-        od = orders[orders["date"] == d].sort_values("seq")
+        od = orders_by_day.get(d, empty_orders).sort_values("seq")
         model = {}
-        for pp in positions[positions["date"] == d].itertuples(index=False):
+        for pp in positions_by_day.get(d, empty_positions).itertuples(index=False):
             frac = (pp.stop / pp.last_price if _ok(pp.stop) and _ok(pp.last_price) and pp.last_price > 0 else None)
             model[pp.symbol] = (str(pp.entry_date), frac)   # stop as a fraction of that day's close (split-proof)
         t_exec = int(dates.searchsorted(pd.Timestamp(d), side="right"))
@@ -407,12 +411,38 @@ def summarize(rep: dict) -> dict:
     }
 
 
-def build_report(frames: dict[str, pd.DataFrame], costs: CostModel, path=None) -> dict[str, dict]:
-    """Paper portfolio + summary for every journaled strategy (deterministic: journal + stored prices)."""
+def _sorted(df: pd.DataFrame) -> pd.DataFrame:
+    """The frame itself when its dates are already in order (sort_index() would copy the whole frame)."""
+    return df if df.index.is_monotonic_increasing else df.sort_index()
+
+
+def _clean_etfs(frames: dict[str, pd.DataFrame], etfs) -> dict[str, pd.DataFrame]:
+    """The backtest fills ETF orders at opens cleaned of stray odd-lot prints (panel.clean_etf_prints): replay the
+    journal on the same prices. Works on copies - the store frames are shared (API cache) and never changed."""
+    cols = [c for c in frames["close"].columns if c in set(etfs or ())]
+    if not cols:
+        return frames
+    wide = {f: frames[f][cols].astype(float) for f in ("open", "high", "low", "close")}
+    clean_etf_prints(wide, cols)
+    out = dict(frames)
+    for f in ("open", "high", "low"):
+        df = frames[f].astype(float)
+        df[cols] = wide[f]
+        out[f] = df
+    return out
+
+
+def build_report(frames: dict[str, pd.DataFrame], costs: CostModel, path=None, etfs=()) -> dict[str, dict]:
+    """Paper portfolio + summary for every journaled strategy (deterministic: journal + stored prices).
+    `etfs`: ETF columns whose stray open prints are cleaned, as in the backtest."""
     journal = load_journal(path)
+    frames = {k: _sorted(v) for k, v in frames.items()}           # sort once, not 6 times per strategy
+    frames = _clean_etfs(frames, etfs)
+    by_key = {t: {str(k): g for k, g in df.groupby("strategy", sort=False)} for t, df in journal.items()}
     out = {}
     for key in dict.fromkeys(journal["scans"]["strategy"]):
-        rep = paper_trade(key, journal, frames, costs)
+        mine = {t: by_key[t].get(key, journal[t].iloc[0:0]) for t in journal}
+        rep = paper_trade(key, mine, frames, costs)
         if rep is not None:
             rep["summary"] = summarize(rep)
             out[key] = rep
@@ -439,7 +469,7 @@ def _points(s: pd.Series | None) -> list:
 
 
 def paper_report(frames: dict[str, pd.DataFrame] | None = None, costs: CostModel | None = None,
-                 path=None) -> dict:
+                 path=None, etfs=None) -> dict:
     """All paper-trading results as one JSON-serialisable dict (dashboard, GET /api/paper, Telegram).
 
     Defaults: the price store and the `costs:` from config.yaml. Per strategy key:
@@ -451,11 +481,15 @@ def paper_report(frames: dict[str, pd.DataFrame] | None = None, costs: CostModel
     if frames is None:
         from .store import load_store
         frames = load_store()
-    if costs is None:
+    if costs is None or etfs is None:
         from .settings import load_config
-        costs = CostModel.from_config(load_config().get("costs"))
+        cfg = load_config()
+        if costs is None:
+            costs = CostModel.from_config(cfg.get("costs"))
+        if etfs is None:
+            etfs = [str(e).upper() for e in (cfg.get("etfs") or [])]
     out = {}
-    for key, rep in build_report(frames, costs, path).items():
+    for key, rep in build_report(frames, costs, path, etfs).items():
         curves = rep["equity"]
         out[key] = _json({
             **{k: rep[k] for k in ("key", "name", "kind", "capital", "start", "last_date", "days", "journal_days",
@@ -469,6 +503,6 @@ def paper_report(frames: dict[str, pd.DataFrame] | None = None, costs: CostModel
             "strategies": out}
 
 
-def summaries(frames: dict[str, pd.DataFrame], costs: CostModel, path=None) -> dict[str, dict]:
+def summaries(frames: dict[str, pd.DataFrame], costs: CostModel, path=None, etfs=None) -> dict[str, dict]:
     """Per-strategy summaries only (saved with each scan for Telegram)."""
-    return {k: v["summary"] for k, v in paper_report(frames, costs, path)["strategies"].items()}
+    return {k: v["summary"] for k, v in paper_report(frames, costs, path, etfs)["strategies"].items()}

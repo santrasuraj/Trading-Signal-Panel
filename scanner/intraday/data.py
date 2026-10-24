@@ -1,8 +1,12 @@
-"""Intraday bars for NSE equities: fetch (Yahoo / Fyers), clean + validate, store, load.
+"""Intraday bars for NSE equities: fetch (FYERS history / Yahoo), clean, store, load, and bars built
+from FYERS WebSocket ticks.
 
-Draft for scanner/intraday.py. Self-contained (pandas + numpy + pyarrow); the only project
-dependency is optional (`validate_against_daily` / `adjust_to_store` take the store dict
-returned by scanner.store.load_store()).
+Used by fyers_sync.py (FYERS backfill + daily archive), live.py (WebSocket bars) and run.py (the
+intraday pipeline). Self-contained (pandas + numpy + pyarrow). FYERS calls go through
+FyersProvider._call, i.e. the shared rate limiter in scanner/fyers_limits.py - never the raw SDK.
+Research helpers not used by the pipeline (measurements in docs/intraday_data.md):
+`fyers_backfill_budget`, `validate_against_daily`, `adjust_to_store`, `resample_bars`,
+`IntradayStore.load_grid`, `completed_only` (the first two take scanner.store.load_store()'s dict).
 
 Conventions
   * Timestamps are IST *naive* bar-START times (09:15 = the 09:15:00-09:19:59 bar for 5m).
@@ -13,7 +17,8 @@ Conventions
   * Storage: <root>/<interval>/<YYYY-MM>.parquet, long format
         ts datetime64[ns], symbol category, open/high/low/close float64, volume float64,
         flags uint8, source category
-    plus <root>/<interval>/manifest.json. Writes are atomic (tmp file + os.replace).
+    plus <root>/<interval>/manifest.json. Writes are atomic (tmp file + os.replace) and one process
+    at a time (<root>/<interval>/.save.lock), so two writers never drop each other's bars.
 
 Measured Yahoo quirks this module handles (Nifty 100, Jul-Oct 2026; see out_quality.json):
   * The 09:15 bar of 1m/5m/1h has volume 0 (opening minutes' volume is dropped) -> FLAG_VOL0_OPEN.
@@ -166,52 +171,20 @@ def fetch_yahoo_intraday(symbols: list[str], interval: str = "5m", days: int | N
 
 
 # ---------------------------------------------------------------------------------------------
-# Fyers (follows fyers_apiv3 3.2.0 FyersModel.history; untested against the live API)
+# Fyers history (fyers_apiv3 3.2.0 FyersModel.history, always through FyersProvider._call)
 # ---------------------------------------------------------------------------------------------
-class _Throttle:
-    """Spacing + rolling-minute guard for the Standard plan (5/s, 50/min, 5000/day)."""
-
-    def __init__(self, per_min: int = 50, per_day: int = 5000, min_gap: float = 1.25):
-        self.per_min, self.per_day, self.min_gap = per_min, per_day, min_gap
-        self.calls: list[float] = []
-        self.day_calls = 0
-
-    def wait(self):
-        if self.day_calls >= self.per_day - 50:      # leave headroom for quotes/login checks
-            raise RuntimeError("Fyers daily data-API budget nearly exhausted - resume tomorrow")
-        now = time.monotonic()
-        if self.calls and now - self.calls[-1] < self.min_gap:
-            time.sleep(self.min_gap - (now - self.calls[-1]))
-        self.calls = [t for t in self.calls if time.monotonic() - t < 60]
-        if len(self.calls) >= self.per_min - 2:
-            time.sleep(60.5 - (time.monotonic() - self.calls[0]))
-        self.calls.append(time.monotonic())
-        self.day_calls += 1
-
-
-def _fyers_call(provider, payload: dict, throttle: _Throttle | None) -> dict:
-    """provider = scanner.providers.FyersProvider (has its own throttled _call) or a raw FyersModel."""
+def _as_provider(provider):
+    """provider = scanner.providers.FyersProvider or a raw FyersModel. A raw model is wrapped, so every call
+    goes through the shared cross-process limiter (scanner/fyers_limits.py) and FyersProvider's error rules:
+    FyersAuthError on an expired login, strikes + FyersRateLimited on rate-limit errors, no own sleeps."""
     if hasattr(provider, "_call") and hasattr(provider, "api"):
-        return provider._call(provider.api.history, payload)
-    for attempt in range(3):
-        if throttle:
-            throttle.wait()
-        try:
-            r = provider.history(data=payload)
-        except Exception as e:
-            r = {"s": "error", "code": -99, "message": type(e).__name__}
-        if not isinstance(r, dict):
-            r = {"s": "error", "message": str(r)[:200]}
-        if r.get("s") in ("ok", "no_data"):
-            return r
-        code, msg = r.get("code"), str(r.get("message", "")).lower()
-        if code in (-8, -15, -16, -17, 401) or "token" in msg or "authenticat" in msg:
-            raise RuntimeError(f"Fyers auth error: {r.get('message')}")
-        if code in (-429, 429, -360) or "limit" in msg:
-            time.sleep(61 - datetime.now().second)   # 3 per-minute breaches = blocked for the day
-            continue
-        time.sleep(1 + attempt)
-    return r
+        return provider
+    from ..providers import FyersProvider     # lazy: the rest of this module needs no project imports
+    return FyersProvider.from_model(provider)
+
+
+def _fyers_call(provider, payload: dict) -> dict:
+    return provider._call(provider.api.history, payload)
 
 
 def fyers_candles_to_frame(candles: list, symbol: str) -> pd.DataFrame:
@@ -228,18 +201,22 @@ def fyers_candles_to_frame(candles: list, symbol: str) -> pd.DataFrame:
 
 
 def fetch_fyers_intraday(provider, symbols: list[str], start: date, end: date, resolution: str = "5",
-                         progress=None, throttle: _Throttle | None = None, now: datetime | None = None) -> pd.DataFrame:
+                         progress=None, throttle=None, now: datetime | None = None,
+                         errors: dict | None = None) -> pd.DataFrame:
     """Fyers intraday candles for NSE equities, chunked to <=100 calendar days per call.
 
     resolution: '1','2','3','5','10','15','20','30','60','120','240' (or '5m' style).
     Standard plan: intraday history only for the last ~1 year (docs: "from 2025", rolling);
     5000 data calls/day, 50/min. Calls needed = symbols x ceil(days / 100).
     The forming candle is excluded by clamping range_to to (now - one bar) when `end` is today.
+    errors: if given, symbols whose request failed are recorded here ({symbol: message}), so a caller
+    never mistakes a failed range for one that simply had no data.
+    throttle: ignored (kept for older callers) - the shared FYERS limiter spaces every call.
     """
     res = FYERS_RES.get(resolution, resolution)
     step = int(res)
     now = now or datetime.now(IST).replace(tzinfo=None)
-    throttle = throttle or _Throttle()
+    provider = _as_provider(provider)
     out = []
     for i, sym in enumerate(symbols, 1):
         ticker = sym if ":" in sym else f"NSE:{sym}-EQ"
@@ -256,10 +233,12 @@ def fetch_fyers_intraday(provider, symbols: list[str], start: date, end: date, r
             else:
                 payload = {"symbol": ticker, "resolution": res, "date_format": "1",
                            "range_from": s.isoformat(), "range_to": e.isoformat(), "cont_flag": "1"}
-            r = _fyers_call(provider, payload, throttle)
+            r = _fyers_call(provider, payload)
             if r.get("s") == "ok" and r.get("candles"):
                 out.append(fyers_candles_to_frame(r["candles"], sym.split(":")[-1].removesuffix("-EQ")))
             elif r.get("s") not in ("ok", "no_data"):
+                if errors is not None:
+                    errors[sym] = str(r.get("message") or "FYERS history request failed")
                 if progress:
                     progress(i, len(symbols), f"{sym}: {r.get('message')}")
                 break
@@ -430,6 +409,10 @@ def resample_bars(bars: pd.DataFrame, interval: str) -> pd.DataFrame:
 # ---------------------------------------------------------------------------------------------
 # Storage
 # ---------------------------------------------------------------------------------------------
+SOURCE_PRIORITY = {"fyers": 3, "nse": 3, "fyers_ws": 2, "yahoo": 1, "unknown": 0}
+SAVE_LOCK_TIMEOUT_S = 120.0
+
+
 def _replace(src: Path, dst: Path, tries: int = 10):
     for i in range(tries):
         try:
@@ -441,11 +424,78 @@ def _replace(src: Path, dst: Path, tries: int = 10):
             time.sleep(0.2 * (i + 1))
 
 
+class FileLock:
+    """Exclusive cross-process lock on byte 0 of `path` (same msvcrt/fcntl pattern as scanner/lock.py).
+    acquire(timeout) -> bool; as a context manager it raises TimeoutError when the lock stays busy."""
+
+    def __init__(self, path: str | Path, timeout: float = 60.0):
+        self.path, self.timeout, self.fh = Path(path), timeout, None
+
+    def acquire(self, timeout: float | None = None) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(self.path, "a+")
+        deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    fh.seek(0)   # msvcrt locks from the current position ("a+" starts at the end): always byte 0
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.fh = fh
+                return True
+            except OSError:
+                if time.monotonic() >= deadline:
+                    fh.close()
+                    return False
+                time.sleep(0.1)
+
+    def release(self) -> None:
+        fh, self.fh = self.fh, None
+        if fh is None:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        fh.close()
+
+    def __enter__(self):
+        if not self.acquire():
+            raise TimeoutError(f"{self.path} is locked by another process")
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.release()
+        return False
+
+
+def merge_by_priority(*frames: pd.DataFrame) -> pd.DataFrame:
+    """Concatenate bar frames; per (symbol, ts) the best source wins (fyers > fyers_ws > yahoo), and between
+    equal sources the bar from the later frame. Tick-built bars therefore never replace FYERS' official ones."""
+    parts = [f for f in frames if f is not None and len(f)]
+    if not parts:
+        return empty_bars()
+    allb = pd.concat(parts, ignore_index=True)
+    allb = allb.assign(_pri=allb["source"].astype(str).map(SOURCE_PRIORITY).fillna(0).to_numpy(),
+                       _ord=np.arange(len(allb)))
+    allb = allb.sort_values(["symbol", "ts", "_pri", "_ord"]).drop_duplicates(["symbol", "ts"], keep="last")
+    return allb.drop(columns=["_pri", "_ord"]).reset_index(drop=True)
+
+
 class IntradayStore:
     """<root>/<interval>/<YYYY-MM>.parquet + manifest.json. Merge-on-save, newest source wins
-    per (symbol, ts) with priority fyers > yahoo (Fyers has the complete last 15 minutes)."""
+    per (symbol, ts) with priority fyers > fyers_ws > yahoo (Fyers has the complete last 15 minutes)."""
 
-    PRIORITY = {"fyers": 3, "nse": 3, "fyers_ws": 2, "yahoo": 1, "unknown": 0}
+    PRIORITY = SOURCE_PRIORITY
 
     def __init__(self, root: str | Path):
         self.root = Path(root)
@@ -466,39 +516,42 @@ class IntradayStore:
             return {"months": {}}
 
     def save(self, bars: pd.DataFrame, interval: str) -> dict:
-        """Merge cleaned bars into monthly partitions. Forming bars are never stored."""
+        """Merge cleaned bars into monthly partitions. Forming bars are never stored. The read-merge-write
+        runs under a lock: two processes saving the same month (live service, archive, a scan) would
+        otherwise each write back only their own merge and drop the other's bars."""
         iv = norm_interval(interval)
         d = self._dir(iv)
         bars = bars[(bars["flags"] & FLAG_FORMING) == 0]
         if bars.empty:
             return {}
-        man = self.manifest(iv)
         written = {}
-        for month, part in bars.groupby(bars["ts"].dt.strftime("%Y-%m")):
-            path = d / f"{month}.parquet"
-            old = pd.read_parquet(path) if path.exists() else empty_bars()
-            allb = pd.concat([old.astype({"symbol": str, "source": str}), part.astype({"symbol": str, "source": str})],
-                             ignore_index=True)
-            allb["_pri"] = allb["source"].map(self.PRIORITY).fillna(0)
-            allb["_ord"] = np.arange(len(allb))
-            allb = (allb.sort_values(["symbol", "ts", "_pri", "_ord"])
-                        .drop_duplicates(["symbol", "ts"], keep="last").drop(columns=["_pri", "_ord"]))
-            allb = allb.sort_values(["ts", "symbol"]).reset_index(drop=True)
-            allb["symbol"] = allb["symbol"].astype("category")
-            allb["source"] = allb["source"].astype("category")
-            allb["flags"] = allb["flags"].astype("uint8")
-            tmp = path.with_suffix(f".{os.getpid()}.tmp")
-            allb.to_parquet(tmp, index=False, compression="zstd")
-            _replace(tmp, path)
-            man["months"][month] = {"rows": int(len(allb)), "symbols": int(allb["symbol"].nunique()),
-                                    "days": int(allb["ts"].dt.normalize().nunique()),
-                                    "first": str(allb["ts"].min()), "last": str(allb["ts"].max()),
-                                    "sources": sorted(map(str, allb["source"].unique())),
-                                    "updated": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")}
-            written[month] = len(allb)
-        tmp = d / f"manifest.{os.getpid()}.tmp"
-        tmp.write_text(json.dumps(man, indent=1), encoding="utf-8")
-        _replace(tmp, d / "manifest.json")
+        with FileLock(d / ".save.lock", timeout=SAVE_LOCK_TIMEOUT_S):
+            man = self.manifest(iv)
+            for month, part in bars.groupby(bars["ts"].dt.strftime("%Y-%m")):
+                path = d / f"{month}.parquet"
+                old = pd.read_parquet(path) if path.exists() else empty_bars()
+                allb = pd.concat([old.astype({"symbol": str, "source": str}),
+                                  part.astype({"symbol": str, "source": str})], ignore_index=True)
+                allb["_pri"] = allb["source"].map(self.PRIORITY).fillna(0)
+                allb["_ord"] = np.arange(len(allb))
+                allb = (allb.sort_values(["symbol", "ts", "_pri", "_ord"])
+                            .drop_duplicates(["symbol", "ts"], keep="last").drop(columns=["_pri", "_ord"]))
+                allb = allb.sort_values(["ts", "symbol"]).reset_index(drop=True)
+                allb["symbol"] = allb["symbol"].astype("category")
+                allb["source"] = allb["source"].astype("category")
+                allb["flags"] = allb["flags"].astype("uint8")
+                tmp = path.with_suffix(f".{os.getpid()}.tmp")
+                allb.to_parquet(tmp, index=False, compression="zstd")
+                _replace(tmp, path)
+                man["months"][month] = {"rows": int(len(allb)), "symbols": int(allb["symbol"].nunique()),
+                                        "days": int(allb["ts"].dt.normalize().nunique()),
+                                        "first": str(allb["ts"].min()), "last": str(allb["ts"].max()),
+                                        "sources": sorted(map(str, allb["source"].unique())),
+                                        "updated": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")}
+                written[month] = len(allb)
+            tmp = d / f"manifest.{os.getpid()}.tmp"
+            tmp.write_text(json.dumps(man, indent=1), encoding="utf-8")
+            _replace(tmp, d / "manifest.json")
         return written
 
     def load(self, interval: str, symbols: list[str] | None = None, start=None, end=None,
@@ -581,14 +634,20 @@ class TickBarBuilder:
         if not sym or ltp is None or not t:
             return
         ts = pd.Timestamp(int(t), unit="s") + pd.Timedelta(hours=5, minutes=30)
+        if ts.date() != datetime.now(IST).date():
+            return      # subscription snapshot of a stock not traded yet today: yesterday's last trade
         m = int((ts - ts.normalize()).total_seconds() // 60) - 555
         if m < 0 or m >= SESSION_MINUTES:
             return
         start = ts.normalize() + pd.Timedelta(minutes=555 + (m // self.step) * self.step)
-        cum = float(msg.get("vol_traded_today") or 0)
-        dv = max(cum - self.last_cum.get(sym, cum), 0.0)
-        self.last_cum[sym] = cum
         b = self.cur.get(sym)
+        if b is not None and start < b["ts"]:
+            return      # late / repeated older trade time: never reopen a bar that is already closed
+        # both checks come before the volume bookkeeping, so stale ticks cannot distort the volume deltas
+        cum = float(msg.get("vol_traded_today") or 0)
+        prev = self.last_cum.get(sym, cum)
+        dv = max(cum - prev, 0.0)
+        self.last_cum[sym] = max(cum, prev)
         if b is None or b["ts"] != start:
             if b is not None:
                 self.done.append(b)

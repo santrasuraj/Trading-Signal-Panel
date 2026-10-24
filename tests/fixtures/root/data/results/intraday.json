@@ -1,0 +1,7950 @@
+{
+ "generated_at": "2026-10-23T09:57:27+05:30",
+ "elapsed_s": 48.0,
+ "data": {
+  "source": "yahoo",
+  "interval": "5m",
+  "from": "2026-07-29",
+  "to": "2026-10-23",
+  "sessions": 60,
+  "symbols": 151,
+  "note": "Yahoo 5-minute data is ~15 min delayed and covers ~60 sessions; log in to FYERS to backfill ~1 year."
+ },
+ "rules": {
+  "square_off": "15:00 for F&O stocks (FYERS MIS cut-off 15:05), 15:15 others",
+  "fills": "next bar open; stop orders at the level or the open if it gapped",
+  "costs": "FYERS intraday brokerage, STT 0.025% sell, stamp 0.003% buy, NSE + SEBI fees, GST, slippage",
+  "tax": "speculative business income at 31.2%"
+ },
+ "sebi": {
+  "source": "SEBI, Analysis of Intraday Trading by Individuals in Equity Cash Segment (July 2024)",
+  "url": "https://www.sebi.gov.in/sebi_data/attachdocs/jul-2024/1721818140715.pdf",
+  "points": [
+   "71% of individual intraday traders made net losses in FY23 (65% in FY19).",
+   "80% of those making more than 500 trades a year lost money.",
+   "Trading costs made loss-makers' losses 57% larger and took 19% of profit-makers' profits.",
+   "In F&O, 93% of individual traders lost money in FY22-FY24 (SEBI, Sep 2024)."
+  ]
+ },
+ "strategies": [
+  {
+   "key": "gap_go_fade",
+   "name": "Gap-and-go / gap fade",
+   "description": "Big opening gaps: follow them when there is news (results) and heavy volume, fade them when there is no news and the gap fails in the first 15 minutes.",
+   "evidence": "WEAK",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 53,
+    "trades_per_day": 0.9,
+    "return_pct": -4.98,
+    "after_tax_return_pct": -4.98,
+    "annualised_pct": -19.6,
+    "sharpe": -2.86,
+    "max_dd_pct": -6.14,
+    "win_rate": 35.8,
+    "avg_trade_pct": -0.414,
+    "profit_factor": 0.51,
+    "avg_day_pct": -0.085,
+    "ci95_day_pct": [
+     -0.207,
+     0.036
+    ],
+    "t_stat": -1.38,
+    "significant": false,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     499043.0
+    ],
+    [
+     "2026-07-30",
+     499043.0
+    ],
+    [
+     "2026-07-31",
+     504489.0
+    ],
+    [
+     "2026-08-03",
+     499968.0
+    ],
+    [
+     "2026-08-04",
+     497202.0
+    ],
+    [
+     "2026-08-05",
+     497479.0
+    ],
+    [
+     "2026-08-06",
+     497479.0
+    ],
+    [
+     "2026-08-07",
+     496567.0
+    ],
+    [
+     "2026-08-10",
+     497807.0
+    ],
+    [
+     "2026-08-11",
+     498127.0
+    ],
+    [
+     "2026-08-12",
+     498602.0
+    ],
+    [
+     "2026-08-13",
+     498461.0
+    ],
+    [
+     "2026-08-14",
+     498543.0
+    ],
+    [
+     "2026-08-17",
+     495694.0
+    ],
+    [
+     "2026-08-18",
+     495694.0
+    ],
+    [
+     "2026-08-19",
+     495694.0
+    ],
+    [
+     "2026-08-20",
+     492690.0
+    ],
+    [
+     "2026-08-21",
+     492690.0
+    ],
+    [
+     "2026-08-24",
+     492690.0
+    ],
+    [
+     "2026-08-25",
+     492690.0
+    ],
+    [
+     "2026-08-26",
+     492690.0
+    ],
+    [
+     "2026-08-27",
+     492690.0
+    ],
+    [
+     "2026-08-28",
+     492690.0
+    ],
+    [
+     "2026-08-31",
+     489988.0
+    ],
+    [
+     "2026-09-01",
+     483470.0
+    ],
+    [
+     "2026-09-02",
+     483470.0
+    ],
+    [
+     "2026-09-03",
+     483470.0
+    ],
+    [
+     "2026-09-04",
+     480885.0
+    ],
+    [
+     "2026-09-07",
+     480885.0
+    ],
+    [
+     "2026-09-08",
+     484224.0
+    ],
+    [
+     "2026-09-09",
+     481494.0
+    ],
+    [
+     "2026-09-10",
+     481494.0
+    ],
+    [
+     "2026-09-11",
+     481494.0
+    ],
+    [
+     "2026-09-15",
+     488588.0
+    ],
+    [
+     "2026-09-16",
+     487525.0
+    ],
+    [
+     "2026-09-17",
+     487525.0
+    ],
+    [
+     "2026-09-18",
+     487525.0
+    ],
+    [
+     "2026-09-21",
+     487525.0
+    ],
+    [
+     "2026-09-22",
+     487525.0
+    ],
+    [
+     "2026-09-23",
+     487525.0
+    ],
+    [
+     "2026-09-24",
+     476951.0
+    ],
+    [
+     "2026-09-25",
+     476951.0
+    ],
+    [
+     "2026-09-28",
+     476951.0
+    ],
+    [
+     "2026-09-29",
+     476951.0
+    ],
+    [
+     "2026-09-30",
+     476951.0
+    ],
+    [
+     "2026-10-01",
+     476951.0
+    ],
+    [
+     "2026-10-05",
+     476951.0
+    ],
+    [
+     "2026-10-06",
+     476951.0
+    ],
+    [
+     "2026-10-07",
+     476196.0
+    ],
+    [
+     "2026-10-08",
+     476196.0
+    ],
+    [
+     "2026-10-09",
+     475522.0
+    ],
+    [
+     "2026-10-12",
+     475522.0
+    ],
+    [
+     "2026-10-13",
+     475199.0
+    ],
+    [
+     "2026-10-14",
+     474464.0
+    ],
+    [
+     "2026-10-15",
+     473488.0
+    ],
+    [
+     "2026-10-16",
+     475468.0
+    ],
+    [
+     "2026-10-19",
+     475468.0
+    ],
+    [
+     "2026-10-21",
+     475468.0
+    ],
+    [
+     "2026-10-22",
+     475083.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "KEI",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 3870.0,
+     "stop": 4060.1,
+     "exit_time": "15:00",
+     "exit": 3890.6,
+     "reason": "square-off",
+     "qty": 12,
+     "pnl": -385.0,
+     "ret_pct": -0.83
+    },
+    {
+     "symbol": "TECHM",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 1737.5,
+     "stop": 1692.5,
+     "exit_time": "15:00",
+     "exit": 1779.8,
+     "reason": "square-off",
+     "qty": 51,
+     "pnl": 1980.0,
+     "ret_pct": 2.233
+    },
+    {
+     "symbol": "CUMMINSIND",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 4701.8,
+     "stop": 4680.3,
+     "exit_time": "09:40",
+     "exit": 4680.3,
+     "reason": "stop",
+     "qty": 67,
+     "pnl": -2416.0,
+     "ret_pct": -0.766
+    },
+    {
+     "symbol": "HINDALCO",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "09:50",
+     "entry": 875.0,
+     "stop": 860.1,
+     "exit_time": "10:05",
+     "exit": 882.5,
+     "reason": "target",
+     "qty": 152,
+     "pnl": 899.0,
+     "ret_pct": 0.675
+    },
+    {
+     "symbol": "BHEL",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "10:30",
+     "entry": 441.2,
+     "stop": 452.55,
+     "exit_time": "15:00",
+     "exit": 437.25,
+     "reason": "square-off",
+     "qty": 199,
+     "pnl": 542.0,
+     "ret_pct": 0.618
+    },
+    {
+     "symbol": "TATAELXSI",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 3685.5,
+     "stop": 3500.0,
+     "exit_time": "15:00",
+     "exit": 3635.1,
+     "reason": "square-off",
+     "qty": 12,
+     "pnl": -735.0,
+     "ret_pct": -1.66
+    },
+    {
+     "symbol": "RBLBANK",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "11:40",
+     "entry": 388.25,
+     "stop": 400.45,
+     "exit_time": "15:00",
+     "exit": 388.85,
+     "reason": "square-off",
+     "qty": 187,
+     "pnl": -323.0,
+     "ret_pct": -0.446
+    },
+    {
+     "symbol": "FORTIS",
+     "date": "2026-10-09",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 779.05,
+     "stop": 805.9,
+     "exit_time": "15:00",
+     "exit": 781.8,
+     "reason": "square-off",
+     "qty": 85,
+     "pnl": -430.0,
+     "ret_pct": -0.65
+    },
+    {
+     "symbol": "MAXHEALTH",
+     "date": "2026-10-09",
+     "side": "SHORT",
+     "entry_time": "12:00",
+     "entry": 885.85,
+     "stop": 915.0,
+     "exit_time": "15:00",
+     "exit": 887.05,
+     "reason": "square-off",
+     "qty": 79,
+     "pnl": -244.0,
+     "ret_pct": -0.349
+    },
+    {
+     "symbol": "SBILIFE",
+     "date": "2026-10-07",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1724.0,
+     "stop": 1702.6,
+     "exit_time": "15:00",
+     "exit": 1719.7,
+     "reason": "square-off",
+     "qty": 104,
+     "pnl": -755.0,
+     "ret_pct": -0.421
+    },
+    {
+     "symbol": "BANDHANBNK",
+     "date": "2026-09-24",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 187.72,
+     "stop": 183.5,
+     "exit_time": "14:05",
+     "exit": 183.5,
+     "reason": "stop",
+     "qty": 548,
+     "pnl": -2660.0,
+     "ret_pct": -2.582
+    },
+    {
+     "symbol": "NAUKRI",
+     "date": "2026-09-24",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1235.8,
+     "stop": 1209.8,
+     "exit_time": "14:40",
+     "exit": 1209.8,
+     "reason": "stop",
+     "qty": 88,
+     "pnl": -2653.0,
+     "ret_pct": -2.436
+    },
+    {
+     "symbol": "CHOLAFIN",
+     "date": "2026-09-24",
+     "side": "LONG",
+     "entry_time": "09:55",
+     "entry": 1700.9,
+     "stop": 1646.0,
+     "exit_time": "15:00",
+     "exit": 1674.4,
+     "reason": "square-off",
+     "qty": 42,
+     "pnl": -1320.0,
+     "ret_pct": -1.846
+    },
+    {
+     "symbol": "MFSL",
+     "date": "2026-09-24",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1423.1,
+     "stop": 1406.7,
+     "exit_time": "09:45",
+     "exit": 1406.7,
+     "reason": "stop",
+     "qty": 134,
+     "pnl": -2805.0,
+     "ret_pct": -1.469
+    },
+    {
+     "symbol": "LTF",
+     "date": "2026-09-24",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 288.9,
+     "stop": 279.0,
+     "exit_time": "15:00",
+     "exit": 284.95,
+     "reason": "square-off",
+     "qty": 237,
+     "pnl": -1137.0,
+     "ret_pct": -1.658
+    },
+    {
+     "symbol": "PAYTM",
+     "date": "2026-09-16",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1742.3,
+     "stop": 1855.4,
+     "exit_time": "15:00",
+     "exit": 1787.7,
+     "reason": "square-off",
+     "qty": 21,
+     "pnl": -1063.0,
+     "ret_pct": -2.908
+    },
+    {
+     "symbol": "COFORGE",
+     "date": "2026-09-15",
+     "side": "SHORT",
+     "entry_time": "09:40",
+     "entry": 1858.6,
+     "stop": 1890.3,
+     "exit_time": "09:45",
+     "exit": 1846.5,
+     "reason": "target",
+     "qty": 70,
+     "pnl": 507.0,
+     "ret_pct": 0.39
+    },
+    {
+     "symbol": "TATAPOWER",
+     "date": "2026-09-15",
+     "side": "SHORT",
+     "entry_time": "09:45",
+     "entry": 369.0,
+     "stop": 376.55,
+     "exit_time": "14:10",
+     "exit": 364.65,
+     "reason": "target",
+     "qty": 301,
+     "pnl": 1013.0,
+     "ret_pct": 0.913
+    },
+    {
+     "symbol": "TMPV",
+     "date": "2026-09-15",
+     "side": "SHORT",
+     "entry_time": "10:30",
+     "entry": 313.4,
+     "stop": 316.85,
+     "exit_time": "15:00",
+     "exit": 304.3,
+     "reason": "square-off",
+     "qty": 650,
+     "pnl": 5574.0,
+     "ret_pct": 2.738
+    },
+    {
+     "symbol": "PERSISTENT",
+     "date": "2026-09-09",
+     "side": "LONG",
+     "entry_time": "10:55",
+     "entry": 5470.0,
+     "stop": 5415.5,
+     "exit_time": "15:00",
+     "exit": 5421.5,
+     "reason": "square-off",
+     "qty": 39,
+     "pnl": -2418.0,
+     "ret_pct": -1.132
+    },
+    {
+     "symbol": "COFORGE",
+     "date": "2026-09-09",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 1843.6,
+     "stop": 1782.0,
+     "exit_time": "15:00",
+     "exit": 1840.6,
+     "reason": "square-off",
+     "qty": 37,
+     "pnl": -312.0,
+     "ret_pct": -0.457
+    },
+    {
+     "symbol": "HDFCLIFE",
+     "date": "2026-09-08",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 541.95,
+     "stop": 547.5,
+     "exit_time": "15:00",
+     "exit": 535.25,
+     "reason": "square-off",
+     "qty": 401,
+     "pnl": 2324.0,
+     "ret_pct": 1.07
+    },
+    {
+     "symbol": "NAUKRI",
+     "date": "2026-09-08",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 1280.5,
+     "stop": 1260.9,
+     "exit_time": "15:00",
+     "exit": 1292.8,
+     "reason": "square-off",
+     "qty": 113,
+     "pnl": 1015.0,
+     "ret_pct": 0.701
+    },
+    {
+     "symbol": "POLYCAB",
+     "date": "2026-09-04",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 8474.5,
+     "stop": 8304.0,
+     "exit_time": "11:10",
+     "exit": 8304.0,
+     "reason": "stop",
+     "qty": 13,
+     "pnl": -2585.0,
+     "ret_pct": -2.344
+    },
+    {
+     "symbol": "OFSS",
+     "date": "2026-09-01",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 12290.0,
+     "stop": 12197.0,
+     "exit_time": "13:35",
+     "exit": 12197.0,
+     "reason": "stop",
+     "qty": 15,
+     "pnl": -1985.0,
+     "ret_pct": -1.075
+    },
+    {
+     "symbol": "GAIL",
+     "date": "2026-09-01",
+     "side": "LONG",
+     "entry_time": "10:00",
+     "entry": 173.74,
+     "stop": 172.19,
+     "exit_time": "15:00",
+     "exit": 172.79,
+     "reason": "square-off",
+     "qty": 1126,
+     "pnl": -1557.0,
+     "ret_pct": -0.795
+    },
+    {
+     "symbol": "AXISBANK",
+     "date": "2026-09-01",
+     "side": "LONG",
+     "entry_time": "10:50",
+     "entry": 1271.9,
+     "stop": 1265.1,
+     "exit_time": "13:25",
+     "exit": 1265.1,
+     "reason": "stop",
+     "qty": 153,
+     "pnl": -1428.0,
+     "ret_pct": -0.733
+    },
+    {
+     "symbol": "M&M",
+     "date": "2026-09-01",
+     "side": "SHORT",
+     "entry_time": "10:30",
+     "entry": 3314.7,
+     "stop": 3365.7,
+     "exit_time": "12:15",
+     "exit": 3282.0,
+     "reason": "target",
+     "qty": 45,
+     "pnl": 1208.0,
+     "ret_pct": 0.81
+    },
+    {
+     "symbol": "ADANIPOWER",
+     "date": "2026-09-01",
+     "side": "SHORT",
+     "entry_time": "09:45",
+     "entry": 201.9,
+     "stop": 204.09,
+     "exit_time": "10:35",
+     "exit": 204.09,
+     "reason": "stop",
+     "qty": 971,
+     "pnl": -2756.0,
+     "ret_pct": -1.408
+    },
+    {
+     "symbol": "ATHERENERG",
+     "date": "2026-08-31",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1641.5,
+     "stop": 1674.0,
+     "exit_time": "10:30",
+     "exit": 1674.0,
+     "reason": "stop",
+     "qty": 71,
+     "pnl": -2702.0,
+     "ret_pct": -2.322
+    },
+    {
+     "symbol": "HINDZINC",
+     "date": "2026-08-20",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 568.25,
+     "stop": 572.75,
+     "exit_time": "12:15",
+     "exit": 572.75,
+     "reason": "stop",
+     "qty": 478,
+     "pnl": -3004.0,
+     "ret_pct": -1.107
+    },
+    {
+     "symbol": "ASHOKLEY",
+     "date": "2026-08-17",
+     "side": "SHORT",
+     "entry_time": "09:55",
+     "entry": 173.78,
+     "stop": 176.04,
+     "exit_time": "13:40",
+     "exit": 176.04,
+     "reason": "stop",
+     "qty": 1009,
+     "pnl": -2849.0,
+     "ret_pct": -1.627
+    },
+    {
+     "symbol": "TMPV",
+     "date": "2026-08-14",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 331.65,
+     "stop": 337.5,
+     "exit_time": "15:00",
+     "exit": 330.85,
+     "reason": "square-off",
+     "qty": 407,
+     "pnl": 82.0,
+     "ret_pct": 0.061
+    },
+    {
+     "symbol": "JIOFIN",
+     "date": "2026-08-13",
+     "side": "SHORT",
+     "entry_time": "11:50",
+     "entry": 256.15,
+     "stop": 263.15,
+     "exit_time": "11:55",
+     "exit": 256.05,
+     "reason": "target",
+     "qty": 346,
+     "pnl": -142.0,
+     "ret_pct": -0.16
+    },
+    {
+     "symbol": "MCX",
+     "date": "2026-08-12",
+     "side": "SHORT",
+     "entry_time": "09:40",
+     "entry": 2912.0,
+     "stop": 2958.0,
+     "exit_time": "09:45",
+     "exit": 2895.0,
+     "reason": "target",
+     "qty": 50,
+     "pnl": 475.0,
+     "ret_pct": 0.327
+    },
+    {
+     "symbol": "ADANIENSOL",
+     "date": "2026-08-11",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1643.2,
+     "stop": 1671.4,
+     "exit_time": "09:50",
+     "exit": 1632.0,
+     "reason": "target",
+     "qty": 82,
+     "pnl": 568.0,
+     "ret_pct": 0.422
+    },
+    {
+     "symbol": "ADANIGREEN",
+     "date": "2026-08-11",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1367.4,
+     "stop": 1409.8,
+     "exit_time": "09:35",
+     "exit": 1367.9,
+     "reason": "target",
+     "qty": 56,
+     "pnl": -248.0,
+     "ret_pct": -0.324
+    },
+    {
+     "symbol": "DELHIVERY",
+     "date": "2026-08-10",
+     "side": "LONG",
+     "entry_time": "11:20",
+     "entry": 479.1,
+     "stop": 454.9,
+     "exit_time": "11:25",
+     "exit": 479.2,
+     "reason": "target",
+     "qty": 100,
+     "pnl": -132.0,
+     "ret_pct": -0.275
+    },
+    {
+     "symbol": "POWERINDIA",
+     "date": "2026-08-10",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 35440.0,
+     "stop": 34250.0,
+     "exit_time": "15:00",
+     "exit": 36230.0,
+     "reason": "square-off",
+     "qty": 2,
+     "pnl": 1371.0,
+     "ret_pct": 1.933
+    },
+    {
+     "symbol": "BRITANNIA",
+     "date": "2026-08-07",
+     "side": "LONG",
+     "entry_time": "09:50",
+     "entry": 5653.5,
+     "stop": 5520.5,
+     "exit_time": "12:05",
+     "exit": 5520.5,
+     "reason": "stop",
+     "qty": 17,
+     "pnl": -2588.0,
+     "ret_pct": -2.69
+    }
+   ],
+   "today": [
+    {
+     "symbol": "SWIGGY",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 191.1,
+     "stop": 204.45,
+     "exit_time": "09:40",
+     "exit": 190.3,
+     "reason": "square-off",
+     "qty": 184,
+     "pnl": 43.0,
+     "ret_pct": 0.123,
+     "open_now": false
+    },
+    {
+     "symbol": "INFY",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1179.05,
+     "stop": 1196.95,
+     "exit_time": "09:40",
+     "exit": 1181.6,
+     "reason": "square-off",
+     "qty": 132,
+     "pnl": -610.0,
+     "ret_pct": -0.392,
+     "open_now": false
+    },
+    {
+     "symbol": "WIPRO",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 193.39,
+     "stop": 197.18,
+     "exit_time": "09:40",
+     "exit": 193.45,
+     "reason": "square-off",
+     "qty": 621,
+     "pnl": -355.0,
+     "ret_pct": -0.296,
+     "open_now": false
+    },
+    {
+     "symbol": "HCLTECH",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1440.9,
+     "stop": 1467.5,
+     "exit_time": "09:40",
+     "exit": 1448.0,
+     "reason": "square-off",
+     "qty": 90,
+     "pnl": -875.0,
+     "ret_pct": -0.675,
+     "open_now": false
+    }
+   ]
+  },
+  {
+   "key": "supertrend",
+   "name": "Supertrend (10, 3) on 5-min",
+   "description": "Follow each Supertrend flip within the day. An ATR trailing stop - trend following with lots of whipsaw.",
+   "evidence": "EXPERIMENTAL",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 295,
+    "trades_per_day": 5.0,
+    "return_pct": -9.86,
+    "after_tax_return_pct": -9.86,
+    "annualised_pct": -35.8,
+    "sharpe": -4.94,
+    "max_dd_pct": -9.86,
+    "win_rate": 35.3,
+    "avg_trade_pct": -0.087,
+    "profit_factor": 0.65,
+    "avg_day_pct": -0.174,
+    "ci95_day_pct": [
+     -0.317,
+     -0.031
+    ],
+    "t_stat": -2.39,
+    "significant": true,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     498406.0
+    ],
+    [
+     "2026-07-30",
+     495766.0
+    ],
+    [
+     "2026-07-31",
+     495102.0
+    ],
+    [
+     "2026-08-03",
+     494178.0
+    ],
+    [
+     "2026-08-04",
+     491576.0
+    ],
+    [
+     "2026-08-05",
+     490385.0
+    ],
+    [
+     "2026-08-06",
+     489761.0
+    ],
+    [
+     "2026-08-07",
+     490110.0
+    ],
+    [
+     "2026-08-10",
+     490603.0
+    ],
+    [
+     "2026-08-11",
+     489738.0
+    ],
+    [
+     "2026-08-12",
+     489225.0
+    ],
+    [
+     "2026-08-13",
+     488350.0
+    ],
+    [
+     "2026-08-14",
+     485827.0
+    ],
+    [
+     "2026-08-17",
+     484851.0
+    ],
+    [
+     "2026-08-18",
+     483895.0
+    ],
+    [
+     "2026-08-19",
+     482953.0
+    ],
+    [
+     "2026-08-20",
+     484188.0
+    ],
+    [
+     "2026-08-21",
+     483636.0
+    ],
+    [
+     "2026-08-24",
+     482222.0
+    ],
+    [
+     "2026-08-25",
+     481121.0
+    ],
+    [
+     "2026-08-26",
+     478641.0
+    ],
+    [
+     "2026-08-27",
+     474677.0
+    ],
+    [
+     "2026-08-28",
+     474961.0
+    ],
+    [
+     "2026-08-31",
+     478712.0
+    ],
+    [
+     "2026-09-01",
+     475448.0
+    ],
+    [
+     "2026-09-02",
+     469069.0
+    ],
+    [
+     "2026-09-03",
+     467993.0
+    ],
+    [
+     "2026-09-04",
+     465394.0
+    ],
+    [
+     "2026-09-07",
+     462275.0
+    ],
+    [
+     "2026-09-08",
+     459071.0
+    ],
+    [
+     "2026-09-09",
+     455422.0
+    ],
+    [
+     "2026-09-10",
+     456889.0
+    ],
+    [
+     "2026-09-11",
+     463819.0
+    ],
+    [
+     "2026-09-15",
+     464757.0
+    ],
+    [
+     "2026-09-16",
+     463573.0
+    ],
+    [
+     "2026-09-17",
+     461784.0
+    ],
+    [
+     "2026-09-18",
+     461475.0
+    ],
+    [
+     "2026-09-21",
+     466033.0
+    ],
+    [
+     "2026-09-22",
+     463553.0
+    ],
+    [
+     "2026-09-23",
+     463747.0
+    ],
+    [
+     "2026-09-24",
+     463951.0
+    ],
+    [
+     "2026-09-25",
+     462683.0
+    ],
+    [
+     "2026-09-28",
+     462982.0
+    ],
+    [
+     "2026-09-29",
+     455843.0
+    ],
+    [
+     "2026-09-30",
+     452247.0
+    ],
+    [
+     "2026-10-01",
+     455878.0
+    ],
+    [
+     "2026-10-05",
+     456338.0
+    ],
+    [
+     "2026-10-06",
+     452592.0
+    ],
+    [
+     "2026-10-07",
+     451313.0
+    ],
+    [
+     "2026-10-08",
+     453407.0
+    ],
+    [
+     "2026-10-09",
+     452854.0
+    ],
+    [
+     "2026-10-12",
+     450978.0
+    ],
+    [
+     "2026-10-13",
+     455515.0
+    ],
+    [
+     "2026-10-14",
+     453415.0
+    ],
+    [
+     "2026-10-15",
+     455647.0
+    ],
+    [
+     "2026-10-16",
+     452197.0
+    ],
+    [
+     "2026-10-19",
+     451420.0
+    ],
+    [
+     "2026-10-21",
+     455410.0
+    ],
+    [
+     "2026-10-22",
+     450717.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "12:55",
+     "entry": 1913.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1903.8,
+     "reason": "square-off",
+     "qty": 95,
+     "pnl": -1151.0,
+     "ret_pct": -0.633
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "11:50",
+     "entry": 1891.5,
+     "stop": null,
+     "exit_time": "12:55",
+     "exit": 1913.6,
+     "reason": "flip",
+     "qty": 96,
+     "pnl": -2343.0,
+     "ret_pct": -1.291
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "13:30",
+     "entry": 1187.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1190.4,
+     "reason": "square-off",
+     "qty": 153,
+     "pnl": -649.0,
+     "ret_pct": -0.357
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "14:45",
+     "entry": 3262.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3254.5,
+     "reason": "square-off",
+     "qty": 55,
+     "pnl": -669.0,
+     "ret_pct": -0.373
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "12:00",
+     "entry": 694.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 692.7,
+     "reason": "square-off",
+     "qty": 262,
+     "pnl": 120.0,
+     "ret_pct": 0.066
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "11:40",
+     "entry": 1871.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1874.0,
+     "reason": "square-off",
+     "qty": 96,
+     "pnl": -507.0,
+     "ret_pct": -0.282
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "11:55",
+     "entry": 1391.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1384.6,
+     "reason": "square-off",
+     "qty": 129,
+     "pnl": 698.0,
+     "ret_pct": 0.389
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "13:15",
+     "entry": 1208.4,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1203.6,
+     "reason": "square-off",
+     "qty": 149,
+     "pnl": 496.0,
+     "ret_pct": 0.276
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "12:10",
+     "entry": 3285.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3245.8,
+     "reason": "square-off",
+     "qty": 54,
+     "pnl": 1928.0,
+     "ret_pct": 1.087
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "11:40",
+     "entry": 707.25,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 701.0,
+     "reason": "square-off",
+     "qty": 255,
+     "pnl": 1375.0,
+     "ret_pct": 0.763
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "12:30",
+     "entry": 1878.1,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1874.0,
+     "reason": "square-off",
+     "qty": 96,
+     "pnl": 174.0,
+     "ret_pct": 0.097
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "13:45",
+     "entry": 1379.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1385.0,
+     "reason": "square-off",
+     "qty": 131,
+     "pnl": -927.0,
+     "ret_pct": -0.513
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "12:05",
+     "entry": 1214.8,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1204.5,
+     "reason": "square-off",
+     "qty": 148,
+     "pnl": 1306.0,
+     "ret_pct": 0.727
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "12:20",
+     "entry": 3346.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3346.0,
+     "reason": "square-off",
+     "qty": 54,
+     "pnl": -193.0,
+     "ret_pct": -0.107
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "13:35",
+     "entry": 708.4,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 712.0,
+     "reason": "square-off",
+     "qty": 255,
+     "pnl": -1138.0,
+     "ret_pct": -0.63
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "13:55",
+     "entry": 1891.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1899.3,
+     "reason": "square-off",
+     "qty": 96,
+     "pnl": -960.0,
+     "ret_pct": -0.529
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "12:10",
+     "entry": 1395.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1393.6,
+     "reason": "square-off",
+     "qty": 130,
+     "pnl": -402.0,
+     "ret_pct": -0.222
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "13:20",
+     "entry": 1214.8,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1208.6,
+     "reason": "square-off",
+     "qty": 149,
+     "pnl": -1143.0,
+     "ret_pct": -0.631
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "13:40",
+     "entry": 3382.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3367.5,
+     "reason": "square-off",
+     "qty": 53,
+     "pnl": -986.0,
+     "ret_pct": -0.55
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "13:50",
+     "entry": 726.45,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 725.4,
+     "reason": "square-off",
+     "qty": 250,
+     "pnl": 42.0,
+     "ret_pct": 0.023
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "14:45",
+     "entry": 1211.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1206.0,
+     "reason": "square-off",
+     "qty": 149,
+     "pnl": 526.0,
+     "ret_pct": 0.291
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "10:45",
+     "entry": 1205.8,
+     "stop": null,
+     "exit_time": "14:45",
+     "exit": 1211.0,
+     "reason": "flip",
+     "qty": 150,
+     "pnl": 560.0,
+     "ret_pct": 0.309
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "13:35",
+     "entry": 3371.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3436.2,
+     "reason": "square-off",
+     "qty": 53,
+     "pnl": 3199.0,
+     "ret_pct": 1.789
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "12:15",
+     "entry": 3343.0,
+     "stop": null,
+     "exit_time": "13:35",
+     "exit": 3371.7,
+     "reason": "flip",
+     "qty": 54,
+     "pnl": -1770.0,
+     "ret_pct": -0.981
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "12:35",
+     "entry": 725.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 725.45,
+     "reason": "square-off",
+     "qty": 249,
+     "pnl": -282.0,
+     "ret_pct": -0.156
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "13:55",
+     "entry": 1185.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1181.8,
+     "reason": "square-off",
+     "qty": 153,
+     "pnl": -801.0,
+     "ret_pct": -0.442
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "13:05",
+     "entry": 1178.1,
+     "stop": null,
+     "exit_time": "13:55",
+     "exit": 1185.6,
+     "reason": "flip",
+     "qty": 154,
+     "pnl": -1376.0,
+     "ret_pct": -0.759
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "12:05",
+     "entry": 1181.6,
+     "stop": null,
+     "exit_time": "13:05",
+     "exit": 1178.1,
+     "reason": "flip",
+     "qty": 154,
+     "pnl": -760.0,
+     "ret_pct": -0.417
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "13:05",
+     "entry": 3338.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3323.4,
+     "reason": "square-off",
+     "qty": 54,
+     "pnl": 596.0,
+     "ret_pct": 0.331
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "13:05",
+     "entry": 711.4,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 709.6,
+     "reason": "square-off",
+     "qty": 256,
+     "pnl": 240.0,
+     "ret_pct": 0.132
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "12:00",
+     "entry": 1783.1,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1797.5,
+     "reason": "square-off",
+     "qty": 101,
+     "pnl": 1234.0,
+     "ret_pct": 0.685
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 1354.9,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1362.2,
+     "reason": "square-off",
+     "qty": 133,
+     "pnl": 751.0,
+     "ret_pct": 0.417
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "13:40",
+     "entry": 1159.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1165.0,
+     "reason": "square-off",
+     "qty": 155,
+     "pnl": 633.0,
+     "ret_pct": 0.352
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "13:45",
+     "entry": 3329.1,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3366.7,
+     "reason": "square-off",
+     "qty": 54,
+     "pnl": 1810.0,
+     "ret_pct": 1.007
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "14:35",
+     "entry": 713.35,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 714.65,
+     "reason": "square-off",
+     "qty": 252,
+     "pnl": 109.0,
+     "ret_pct": 0.06
+    },
+    {
+     "symbol": "INFY",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "13:40",
+     "entry": 1012.15,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1012.15,
+     "reason": "square-off",
+     "qty": 179,
+     "pnl": -220.0,
+     "ret_pct": -0.122
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "11:30",
+     "entry": 1335.3,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1341.0,
+     "reason": "square-off",
+     "qty": 135,
+     "pnl": -989.0,
+     "ret_pct": -0.549
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "13:15",
+     "entry": 1156.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1155.0,
+     "reason": "square-off",
+     "qty": 156,
+     "pnl": -63.0,
+     "ret_pct": -0.035
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "12:25",
+     "entry": 3353.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3335.4,
+     "reason": "square-off",
+     "qty": 53,
+     "pnl": -1181.0,
+     "ret_pct": -0.664
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "13:15",
+     "entry": 704.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 701.4,
+     "reason": "square-off",
+     "qty": 257,
+     "pnl": 577.0,
+     "ret_pct": 0.319
+    }
+   ],
+   "today": []
+  },
+  {
+   "key": "vwap_trend",
+   "name": "VWAP trend",
+   "description": "Long above VWAP, short below (with a small band), flipping as price crosses. One working paper on QQQ; each flip costs ~0.1-0.2% here.",
+   "evidence": "WEAK",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 295,
+    "trades_per_day": 5.0,
+    "return_pct": -13.63,
+    "after_tax_return_pct": -13.63,
+    "annualised_pct": -46.5,
+    "sharpe": -6.49,
+    "max_dd_pct": -15.25,
+    "win_rate": 26.8,
+    "avg_trade_pct": -0.124,
+    "profit_factor": 0.58,
+    "avg_day_pct": -0.246,
+    "ci95_day_pct": [
+     -0.4,
+     -0.092
+    ],
+    "t_stat": -3.14,
+    "significant": true,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     500630.0
+    ],
+    [
+     "2026-07-30",
+     497457.0
+    ],
+    [
+     "2026-07-31",
+     494257.0
+    ],
+    [
+     "2026-08-03",
+     491568.0
+    ],
+    [
+     "2026-08-04",
+     490998.0
+    ],
+    [
+     "2026-08-05",
+     489098.0
+    ],
+    [
+     "2026-08-06",
+     485570.0
+    ],
+    [
+     "2026-08-07",
+     485869.0
+    ],
+    [
+     "2026-08-10",
+     491193.0
+    ],
+    [
+     "2026-08-11",
+     491378.0
+    ],
+    [
+     "2026-08-12",
+     488100.0
+    ],
+    [
+     "2026-08-13",
+     484549.0
+    ],
+    [
+     "2026-08-14",
+     480194.0
+    ],
+    [
+     "2026-08-17",
+     477606.0
+    ],
+    [
+     "2026-08-18",
+     478403.0
+    ],
+    [
+     "2026-08-19",
+     478945.0
+    ],
+    [
+     "2026-08-20",
+     476934.0
+    ],
+    [
+     "2026-08-21",
+     473587.0
+    ],
+    [
+     "2026-08-24",
+     472312.0
+    ],
+    [
+     "2026-08-25",
+     470088.0
+    ],
+    [
+     "2026-08-26",
+     468559.0
+    ],
+    [
+     "2026-08-27",
+     466284.0
+    ],
+    [
+     "2026-08-28",
+     464154.0
+    ],
+    [
+     "2026-08-31",
+     471735.0
+    ],
+    [
+     "2026-09-01",
+     468840.0
+    ],
+    [
+     "2026-09-02",
+     465285.0
+    ],
+    [
+     "2026-09-03",
+     461952.0
+    ],
+    [
+     "2026-09-04",
+     459010.0
+    ],
+    [
+     "2026-09-07",
+     456755.0
+    ],
+    [
+     "2026-09-08",
+     454346.0
+    ],
+    [
+     "2026-09-09",
+     453251.0
+    ],
+    [
+     "2026-09-10",
+     450929.0
+    ],
+    [
+     "2026-09-11",
+     452067.0
+    ],
+    [
+     "2026-09-15",
+     450351.0
+    ],
+    [
+     "2026-09-16",
+     446226.0
+    ],
+    [
+     "2026-09-17",
+     444889.0
+    ],
+    [
+     "2026-09-18",
+     445469.0
+    ],
+    [
+     "2026-09-21",
+     445350.0
+    ],
+    [
+     "2026-09-22",
+     444045.0
+    ],
+    [
+     "2026-09-23",
+     442739.0
+    ],
+    [
+     "2026-09-24",
+     438328.0
+    ],
+    [
+     "2026-09-25",
+     435500.0
+    ],
+    [
+     "2026-09-28",
+     437833.0
+    ],
+    [
+     "2026-09-29",
+     435212.0
+    ],
+    [
+     "2026-09-30",
+     432571.0
+    ],
+    [
+     "2026-10-01",
+     431557.0
+    ],
+    [
+     "2026-10-05",
+     436419.0
+    ],
+    [
+     "2026-10-06",
+     434550.0
+    ],
+    [
+     "2026-10-07",
+     430037.0
+    ],
+    [
+     "2026-10-08",
+     428204.0
+    ],
+    [
+     "2026-10-09",
+     428850.0
+    ],
+    [
+     "2026-10-12",
+     427611.0
+    ],
+    [
+     "2026-10-13",
+     425245.0
+    ],
+    [
+     "2026-10-14",
+     424290.0
+    ],
+    [
+     "2026-10-15",
+     432550.0
+    ],
+    [
+     "2026-10-16",
+     432374.0
+    ],
+    [
+     "2026-10-19",
+     429725.0
+    ],
+    [
+     "2026-10-21",
+     434335.0
+    ],
+    [
+     "2026-10-22",
+     431862.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "BSE",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 3223.9,
+     "stop": null,
+     "exit_time": "10:05",
+     "exit": 3210.9,
+     "reason": "flip",
+     "qty": 53,
+     "pnl": -899.0,
+     "ret_pct": -0.526
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:25",
+     "entry": 3201.0,
+     "stop": null,
+     "exit_time": "09:40",
+     "exit": 3223.9,
+     "reason": "flip",
+     "qty": 54,
+     "pnl": -1449.0,
+     "ret_pct": -0.839
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "11:40",
+     "entry": 696.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 692.7,
+     "reason": "square-off",
+     "qty": 249,
+     "pnl": 784.0,
+     "ret_pct": 0.452
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "10:25",
+     "entry": 698.45,
+     "stop": null,
+     "exit_time": "11:40",
+     "exit": 696.7,
+     "reason": "flip",
+     "qty": 248,
+     "pnl": -646.0,
+     "ret_pct": -0.373
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:25",
+     "entry": 698.25,
+     "stop": null,
+     "exit_time": "10:25",
+     "exit": 698.45,
+     "reason": "flip",
+     "qty": 248,
+     "pnl": -262.0,
+     "ret_pct": -0.151
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "11:00",
+     "entry": 3317.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3245.8,
+     "reason": "square-off",
+     "qty": 51,
+     "pnl": 3424.0,
+     "ret_pct": 2.025
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "10:40",
+     "entry": 3333.5,
+     "stop": null,
+     "exit_time": "11:00",
+     "exit": 3317.0,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -1051.0,
+     "ret_pct": -0.618
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "09:40",
+     "entry": 3349.5,
+     "stop": null,
+     "exit_time": "10:40",
+     "exit": 3333.5,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": 606.0,
+     "ret_pct": 0.355
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "10:05",
+     "entry": 712.3,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 701.0,
+     "reason": "square-off",
+     "qty": 241,
+     "pnl": 2513.0,
+     "ret_pct": 1.464
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 715.1,
+     "stop": null,
+     "exit_time": "10:05",
+     "exit": 712.3,
+     "reason": "flip",
+     "qty": 240,
+     "pnl": -883.0,
+     "ret_pct": -0.514
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "10:25",
+     "entry": 3373.0,
+     "stop": null,
+     "exit_time": "10:45",
+     "exit": 3365.2,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -609.0,
+     "ret_pct": -0.354
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 3361.9,
+     "stop": null,
+     "exit_time": "10:25",
+     "exit": 3373.0,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -777.0,
+     "ret_pct": -0.453
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:55",
+     "entry": 715.3,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 712.0,
+     "reason": "square-off",
+     "qty": 241,
+     "pnl": 584.0,
+     "ret_pct": 0.339
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 717.65,
+     "stop": null,
+     "exit_time": "09:55",
+     "exit": 715.3,
+     "reason": "flip",
+     "qty": 240,
+     "pnl": -775.0,
+     "ret_pct": -0.45
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 714.1,
+     "stop": null,
+     "exit_time": "09:40",
+     "exit": 717.65,
+     "reason": "flip",
+     "qty": 242,
+     "pnl": -1072.0,
+     "ret_pct": -0.62
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:50",
+     "entry": 3352.6,
+     "stop": null,
+     "exit_time": "10:00",
+     "exit": 3338.0,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -955.0,
+     "ret_pct": -0.558
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:25",
+     "entry": 3375.5,
+     "stop": null,
+     "exit_time": "09:50",
+     "exit": 3352.6,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": 957.0,
+     "ret_pct": 0.556
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "11:10",
+     "entry": 730.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 725.4,
+     "reason": "square-off",
+     "qty": 237,
+     "pnl": 878.0,
+     "ret_pct": 0.508
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:45",
+     "entry": 729.75,
+     "stop": null,
+     "exit_time": "11:10",
+     "exit": 730.0,
+     "reason": "flip",
+     "qty": 237,
+     "pnl": -153.0,
+     "ret_pct": -0.089
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 726.85,
+     "stop": null,
+     "exit_time": "09:45",
+     "exit": 729.75,
+     "reason": "flip",
+     "qty": 238,
+     "pnl": -903.0,
+     "ret_pct": -0.522
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 1181.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1206.0,
+     "reason": "square-off",
+     "qty": 143,
+     "pnl": 3364.0,
+     "ret_pct": 1.992
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "13:35",
+     "entry": 3371.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3436.2,
+     "reason": "square-off",
+     "qty": 50,
+     "pnl": 3015.0,
+     "ret_pct": 1.788
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "11:35",
+     "entry": 3353.0,
+     "stop": null,
+     "exit_time": "13:35",
+     "exit": 3371.7,
+     "reason": "flip",
+     "qty": 50,
+     "pnl": -1143.0,
+     "ret_pct": -0.682
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 3329.7,
+     "stop": null,
+     "exit_time": "11:35",
+     "exit": 3353.0,
+     "reason": "flip",
+     "qty": 50,
+     "pnl": 958.0,
+     "ret_pct": 0.575
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "09:25",
+     "entry": 715.85,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 725.45,
+     "reason": "square-off",
+     "qty": 237,
+     "pnl": 2065.0,
+     "ret_pct": 1.217
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "10:40",
+     "entry": 3391.0,
+     "stop": null,
+     "exit_time": "11:05",
+     "exit": 3381.0,
+     "reason": "flip",
+     "qty": 50,
+     "pnl": -709.0,
+     "ret_pct": -0.418
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "10:00",
+     "entry": 3379.3,
+     "stop": null,
+     "exit_time": "10:40",
+     "exit": 3391.0,
+     "reason": "flip",
+     "qty": 50,
+     "pnl": -794.0,
+     "ret_pct": -0.47
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "09:25",
+     "entry": 3363.0,
+     "stop": null,
+     "exit_time": "10:00",
+     "exit": 3379.3,
+     "reason": "flip",
+     "qty": 50,
+     "pnl": 607.0,
+     "ret_pct": 0.361
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "10:10",
+     "entry": 713.25,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 709.6,
+     "reason": "square-off",
+     "qty": 238,
+     "pnl": 660.0,
+     "ret_pct": 0.389
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 715.4,
+     "stop": null,
+     "exit_time": "10:10",
+     "exit": 713.25,
+     "reason": "flip",
+     "qty": 237,
+     "pnl": -718.0,
+     "ret_pct": -0.424
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "09:50",
+     "entry": 3329.7,
+     "stop": null,
+     "exit_time": "10:00",
+     "exit": 3339.0,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -684.0,
+     "ret_pct": -0.403
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 3345.8,
+     "stop": null,
+     "exit_time": "09:50",
+     "exit": 3329.7,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -1031.0,
+     "ret_pct": -0.604
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "14:35",
+     "entry": 713.35,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 714.65,
+     "reason": "square-off",
+     "qty": 239,
+     "pnl": 101.0,
+     "ret_pct": 0.059
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "09:40",
+     "entry": 713.75,
+     "stop": null,
+     "exit_time": "14:35",
+     "exit": 713.35,
+     "reason": "flip",
+     "qty": 239,
+     "pnl": -114.0,
+     "ret_pct": -0.067
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "09:25",
+     "entry": 715.55,
+     "stop": null,
+     "exit_time": "09:40",
+     "exit": 713.75,
+     "reason": "flip",
+     "qty": 238,
+     "pnl": -638.0,
+     "ret_pct": -0.374
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "12:00",
+     "entry": 3331.2,
+     "stop": null,
+     "exit_time": "13:15",
+     "exit": 3323.0,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -627.0,
+     "ret_pct": -0.369
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 3328.0,
+     "stop": null,
+     "exit_time": "12:00",
+     "exit": 3331.2,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -373.0,
+     "ret_pct": -0.22
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:25",
+     "entry": 3344.1,
+     "stop": null,
+     "exit_time": "09:35",
+     "exit": 3328.0,
+     "reason": "flip",
+     "qty": 51,
+     "pnl": -1031.0,
+     "ret_pct": -0.604
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "09:55",
+     "entry": 708.3,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 701.4,
+     "reason": "square-off",
+     "qty": 242,
+     "pnl": 1460.0,
+     "ret_pct": 0.852
+    },
+    {
+     "symbol": "HDFCBANK",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 710.2,
+     "stop": null,
+     "exit_time": "09:55",
+     "exit": 708.3,
+     "reason": "flip",
+     "qty": 241,
+     "pnl": -668.0,
+     "ret_pct": -0.39
+    }
+   ],
+   "today": [
+    {
+     "symbol": "BSE",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 3263.9,
+     "stop": null,
+     "exit_time": "09:40",
+     "exit": 3244.4,
+     "reason": "square-off",
+     "qty": 61,
+     "pnl": 953.0,
+     "ret_pct": 0.479,
+     "open_now": false
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-23",
+     "side": "LONG",
+     "entry_time": "09:25",
+     "entry": 1196.6,
+     "stop": null,
+     "exit_time": "09:35",
+     "exit": 1193.6,
+     "reason": "flip",
+     "qty": 167,
+     "pnl": -739.0,
+     "ret_pct": -0.37,
+     "open_now": false
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 1193.6,
+     "stop": null,
+     "exit_time": "09:40",
+     "exit": 1192.5,
+     "reason": "square-off",
+     "qty": 167,
+     "pnl": -54.0,
+     "ret_pct": -0.027,
+     "open_now": false
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:25",
+     "entry": 1394.8,
+     "stop": null,
+     "exit_time": "09:40",
+     "exit": 1399.8,
+     "reason": "flip",
+     "qty": 143,
+     "pnl": -953.0,
+     "ret_pct": -0.478,
+     "open_now": false
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-23",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 1399.8,
+     "stop": null,
+     "exit_time": "09:40",
+     "exit": 1400.7,
+     "reason": "square-off",
+     "qty": 142,
+     "pnl": -109.0,
+     "ret_pct": -0.055,
+     "open_now": false
+    }
+   ]
+  },
+  {
+   "key": "intraday_momentum",
+   "name": "Intraday momentum (morning predicts close)",
+   "description": "Gao, Han, Li & Zhou (2018, JFE): the move from yesterday's close to 09:45 predicts the last half hour. Enter 14:30, exit 15:00. Tiny edge per trade - costs decide.",
+   "evidence": "MODERATE",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 390,
+    "trades_per_day": 6.61,
+    "return_pct": -16.24,
+    "after_tax_return_pct": -16.24,
+    "annualised_pct": -53.1,
+    "sharpe": -15.57,
+    "max_dd_pct": -16.24,
+    "win_rate": 21.8,
+    "avg_trade_pct": -0.229,
+    "profit_factor": 0.17,
+    "avg_day_pct": -0.299,
+    "ci95_day_pct": [
+     -0.377,
+     -0.222
+    ],
+    "t_stat": -7.54,
+    "significant": true,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     500000.0
+    ],
+    [
+     "2026-07-30",
+     500000.0
+    ],
+    [
+     "2026-07-31",
+     500000.0
+    ],
+    [
+     "2026-08-03",
+     500000.0
+    ],
+    [
+     "2026-08-04",
+     500000.0
+    ],
+    [
+     "2026-08-05",
+     500000.0
+    ],
+    [
+     "2026-08-06",
+     500000.0
+    ],
+    [
+     "2026-08-07",
+     500000.0
+    ],
+    [
+     "2026-08-10",
+     500000.0
+    ],
+    [
+     "2026-08-11",
+     500000.0
+    ],
+    [
+     "2026-08-12",
+     500000.0
+    ],
+    [
+     "2026-08-13",
+     500000.0
+    ],
+    [
+     "2026-08-14",
+     500000.0
+    ],
+    [
+     "2026-08-17",
+     500000.0
+    ],
+    [
+     "2026-08-18",
+     500000.0
+    ],
+    [
+     "2026-08-19",
+     500000.0
+    ],
+    [
+     "2026-08-20",
+     500000.0
+    ],
+    [
+     "2026-08-21",
+     500000.0
+    ],
+    [
+     "2026-08-24",
+     500000.0
+    ],
+    [
+     "2026-08-25",
+     500000.0
+    ],
+    [
+     "2026-08-26",
+     499595.0
+    ],
+    [
+     "2026-08-27",
+     497691.0
+    ],
+    [
+     "2026-08-28",
+     495836.0
+    ],
+    [
+     "2026-08-31",
+     493817.0
+    ],
+    [
+     "2026-09-01",
+     492227.0
+    ],
+    [
+     "2026-09-02",
+     488503.0
+    ],
+    [
+     "2026-09-03",
+     484854.0
+    ],
+    [
+     "2026-09-04",
+     485400.0
+    ],
+    [
+     "2026-09-07",
+     483816.0
+    ],
+    [
+     "2026-09-08",
+     480857.0
+    ],
+    [
+     "2026-09-09",
+     478939.0
+    ],
+    [
+     "2026-09-10",
+     476569.0
+    ],
+    [
+     "2026-09-11",
+     475788.0
+    ],
+    [
+     "2026-09-15",
+     473345.0
+    ],
+    [
+     "2026-09-16",
+     472596.0
+    ],
+    [
+     "2026-09-17",
+     469092.0
+    ],
+    [
+     "2026-09-18",
+     467394.0
+    ],
+    [
+     "2026-09-21",
+     465892.0
+    ],
+    [
+     "2026-09-22",
+     463042.0
+    ],
+    [
+     "2026-09-23",
+     460242.0
+    ],
+    [
+     "2026-09-24",
+     455649.0
+    ],
+    [
+     "2026-09-25",
+     453965.0
+    ],
+    [
+     "2026-09-28",
+     452600.0
+    ],
+    [
+     "2026-09-29",
+     448958.0
+    ],
+    [
+     "2026-09-30",
+     444811.0
+    ],
+    [
+     "2026-10-01",
+     441453.0
+    ],
+    [
+     "2026-10-05",
+     436622.0
+    ],
+    [
+     "2026-10-06",
+     435700.0
+    ],
+    [
+     "2026-10-07",
+     434520.0
+    ],
+    [
+     "2026-10-08",
+     432223.0
+    ],
+    [
+     "2026-10-09",
+     429659.0
+    ],
+    [
+     "2026-10-12",
+     427274.0
+    ],
+    [
+     "2026-10-13",
+     426431.0
+    ],
+    [
+     "2026-10-14",
+     424984.0
+    ],
+    [
+     "2026-10-15",
+     422659.0
+    ],
+    [
+     "2026-10-16",
+     422337.0
+    ],
+    [
+     "2026-10-19",
+     421535.0
+    ],
+    [
+     "2026-10-21",
+     419856.0
+    ],
+    [
+     "2026-10-22",
+     418804.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "SBILIFE",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1635.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1639.9,
+     "reason": "square-off",
+     "qty": 51,
+     "pnl": -341.0,
+     "ret_pct": -0.409
+    },
+    {
+     "symbol": "BHARATFORG",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1732.9,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1736.8,
+     "reason": "square-off",
+     "qty": 48,
+     "pnl": -380.0,
+     "ret_pct": -0.458
+    },
+    {
+     "symbol": "NESTLEIND",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1185.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1186.9,
+     "reason": "square-off",
+     "qty": 70,
+     "pnl": -210.0,
+     "ret_pct": -0.254
+    },
+    {
+     "symbol": "SWIGGY",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 209.65,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 208.45,
+     "reason": "square-off",
+     "qty": 400,
+     "pnl": 286.0,
+     "ret_pct": 0.341
+    },
+    {
+     "symbol": "WAAREEENER",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 2369.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2360.9,
+     "reason": "square-off",
+     "qty": 35,
+     "pnl": 91.0,
+     "ret_pct": 0.11
+    },
+    {
+     "symbol": "INDHOTEL",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 786.2,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 788.8,
+     "reason": "square-off",
+     "qty": 106,
+     "pnl": 82.0,
+     "ret_pct": 0.098
+    },
+    {
+     "symbol": "POWERGRID",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 247.4,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 247.45,
+     "reason": "square-off",
+     "qty": 339,
+     "pnl": -144.0,
+     "ret_pct": -0.172
+    },
+    {
+     "symbol": "LUPIN",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1915.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1913.6,
+     "reason": "square-off",
+     "qty": 43,
+     "pnl": -106.0,
+     "ret_pct": -0.128
+    },
+    {
+     "symbol": "MAZDOCK",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1908.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1908.6,
+     "reason": "square-off",
+     "qty": 44,
+     "pnl": -221.0,
+     "ret_pct": -0.263
+    },
+    {
+     "symbol": "KEI",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 3894.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3890.6,
+     "reason": "square-off",
+     "qty": 21,
+     "pnl": -109.0,
+     "ret_pct": -0.133
+    },
+    {
+     "symbol": "NIFTYBEES",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "14:45",
+     "entry": 259.13,
+     "stop": null,
+     "exit_time": "15:15",
+     "exit": 259.81,
+     "reason": "square-off",
+     "qty": 325,
+     "pnl": 26.0,
+     "ret_pct": 0.031
+    },
+    {
+     "symbol": "JSWSTEEL",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 1217.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1221.5,
+     "reason": "square-off",
+     "qty": 69,
+     "pnl": 135.0,
+     "ret_pct": 0.16
+    },
+    {
+     "symbol": "WAAREEENER",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 2417.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2409.0,
+     "reason": "square-off",
+     "qty": 34,
+     "pnl": 81.0,
+     "ret_pct": 0.098
+    },
+    {
+     "symbol": "KALYANKJIL",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 563.9,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 558.65,
+     "reason": "square-off",
+     "qty": 149,
+     "pnl": -976.0,
+     "ret_pct": -1.161
+    },
+    {
+     "symbol": "WIPRO",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 188.72,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 188.06,
+     "reason": "square-off",
+     "qty": 446,
+     "pnl": -489.0,
+     "ret_pct": -0.581
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 1202.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1203.6,
+     "reason": "square-off",
+     "qty": 70,
+     "pnl": -65.0,
+     "ret_pct": -0.077
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 1383.8,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1384.6,
+     "reason": "square-off",
+     "qty": 60,
+     "pnl": -79.0,
+     "ret_pct": -0.095
+    },
+    {
+     "symbol": "MANAPPURAM",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 299.95,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 299.35,
+     "reason": "square-off",
+     "qty": 281,
+     "pnl": -26.0,
+     "ret_pct": -0.031
+    },
+    {
+     "symbol": "ULTRACEMCO",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 10816.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 10808.0,
+     "reason": "square-off",
+     "qty": 7,
+     "pnl": -175.0,
+     "ret_pct": -0.232
+    },
+    {
+     "symbol": "UNITDSPR",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1290.9,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1289.6,
+     "reason": "square-off",
+     "qty": 65,
+     "pnl": -110.0,
+     "ret_pct": -0.131
+    },
+    {
+     "symbol": "MANKIND",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 2267.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2258.9,
+     "reason": "square-off",
+     "qty": 37,
+     "pnl": -512.0,
+     "ret_pct": -0.61
+    },
+    {
+     "symbol": "SHREECEM",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 22390.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 22375.0,
+     "reason": "square-off",
+     "qty": 3,
+     "pnl": -210.0,
+     "ret_pct": -0.312
+    },
+    {
+     "symbol": "ONGC",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 223.59,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 224.39,
+     "reason": "square-off",
+     "qty": 377,
+     "pnl": 174.0,
+     "ret_pct": 0.206
+    },
+    {
+     "symbol": "ULTRACEMCO",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 10606.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 10601.0,
+     "reason": "square-off",
+     "qty": 7,
+     "pnl": -153.0,
+     "ret_pct": -0.206
+    },
+    {
+     "symbol": "CANBK",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 121.94,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 121.93,
+     "reason": "square-off",
+     "qty": 692,
+     "pnl": -202.0,
+     "ret_pct": -0.239
+    },
+    {
+     "symbol": "UNIONBANK",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 181.32,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 182.29,
+     "reason": "square-off",
+     "qty": 465,
+     "pnl": 255.0,
+     "ret_pct": 0.303
+    },
+    {
+     "symbol": "SBIN",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 968.35,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 972.3,
+     "reason": "square-off",
+     "qty": 87,
+     "pnl": 216.0,
+     "ret_pct": 0.256
+    },
+    {
+     "symbol": "FEDERALBNK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 349.75,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 348.45,
+     "reason": "square-off",
+     "qty": 241,
+     "pnl": 118.0,
+     "ret_pct": 0.141
+    },
+    {
+     "symbol": "AXISBANK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1235.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1236.3,
+     "reason": "square-off",
+     "qty": 68,
+     "pnl": -175.0,
+     "ret_pct": -0.208
+    },
+    {
+     "symbol": "PNB",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 122.1,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 121.93,
+     "reason": "square-off",
+     "qty": 691,
+     "pnl": -313.0,
+     "ret_pct": -0.37
+    },
+    {
+     "symbol": "TCS",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 2451.8,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2460.7,
+     "reason": "square-off",
+     "qty": 34,
+     "pnl": 176.0,
+     "ret_pct": 0.211
+    },
+    {
+     "symbol": "LUPIN",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1959.4,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1956.5,
+     "reason": "square-off",
+     "qty": 43,
+     "pnl": -70.0,
+     "ret_pct": -0.083
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 1210.1,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1208.6,
+     "reason": "square-off",
+     "qty": 69,
+     "pnl": -23.0,
+     "ret_pct": -0.028
+    },
+    {
+     "symbol": "JIOFIN",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 216.02,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 215.92,
+     "reason": "square-off",
+     "qty": 391,
+     "pnl": -89.0,
+     "ret_pct": -0.105
+    },
+    {
+     "symbol": "KPITTECH",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 550.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 552.15,
+     "reason": "square-off",
+     "qty": 153,
+     "pnl": 57.0,
+     "ret_pct": 0.068
+    },
+    {
+     "symbol": "LTF",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 253.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 254.4,
+     "reason": "square-off",
+     "qty": 333,
+     "pnl": -462.0,
+     "ret_pct": -0.547
+    },
+    {
+     "symbol": "INFY",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 1151.45,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1160.7,
+     "reason": "square-off",
+     "qty": 73,
+     "pnl": 547.0,
+     "ret_pct": 0.651
+    },
+    {
+     "symbol": "PERSISTENT",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "14:30",
+     "entry": 5715.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 5740.0,
+     "reason": "square-off",
+     "qty": 14,
+     "pnl": -531.0,
+     "ret_pct": -0.664
+    },
+    {
+     "symbol": "WIPRO",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 183.92,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 184.74,
+     "reason": "square-off",
+     "qty": 459,
+     "pnl": 181.0,
+     "ret_pct": 0.214
+    },
+    {
+     "symbol": "TECHM",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:30",
+     "entry": 1779.4,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1779.8,
+     "reason": "square-off",
+     "qty": 47,
+     "pnl": -108.0,
+     "ret_pct": -0.129
+    }
+   ],
+   "today": []
+  },
+  {
+   "key": "vwap_pullback",
+   "name": "VWAP pullback on trend days",
+   "description": "After a strong first hour, buy the first dip to VWAP that closes back above it (mirror for down days).",
+   "evidence": "EXPERIMENTAL",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 295,
+    "trades_per_day": 5.0,
+    "return_pct": -18.67,
+    "after_tax_return_pct": -18.67,
+    "annualised_pct": -58.6,
+    "sharpe": -10.22,
+    "max_dd_pct": -18.67,
+    "win_rate": 40.3,
+    "avg_trade_pct": -0.176,
+    "profit_factor": 0.47,
+    "avg_day_pct": -0.348,
+    "ci95_day_pct": [
+     -0.486,
+     -0.21
+    ],
+    "t_stat": -4.94,
+    "significant": true,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     494086.0
+    ],
+    [
+     "2026-07-30",
+     490241.0
+    ],
+    [
+     "2026-07-31",
+     486416.0
+    ],
+    [
+     "2026-08-03",
+     482357.0
+    ],
+    [
+     "2026-08-04",
+     479097.0
+    ],
+    [
+     "2026-08-05",
+     474967.0
+    ],
+    [
+     "2026-08-06",
+     471835.0
+    ],
+    [
+     "2026-08-07",
+     471696.0
+    ],
+    [
+     "2026-08-10",
+     472671.0
+    ],
+    [
+     "2026-08-11",
+     473823.0
+    ],
+    [
+     "2026-08-12",
+     471647.0
+    ],
+    [
+     "2026-08-13",
+     467063.0
+    ],
+    [
+     "2026-08-14",
+     464162.0
+    ],
+    [
+     "2026-08-17",
+     462867.0
+    ],
+    [
+     "2026-08-18",
+     460756.0
+    ],
+    [
+     "2026-08-19",
+     455773.0
+    ],
+    [
+     "2026-08-20",
+     454538.0
+    ],
+    [
+     "2026-08-21",
+     453873.0
+    ],
+    [
+     "2026-08-24",
+     450582.0
+    ],
+    [
+     "2026-08-25",
+     450159.0
+    ],
+    [
+     "2026-08-26",
+     448680.0
+    ],
+    [
+     "2026-08-27",
+     445856.0
+    ],
+    [
+     "2026-08-28",
+     445053.0
+    ],
+    [
+     "2026-08-31",
+     443095.0
+    ],
+    [
+     "2026-09-01",
+     444614.0
+    ],
+    [
+     "2026-09-02",
+     444358.0
+    ],
+    [
+     "2026-09-03",
+     439430.0
+    ],
+    [
+     "2026-09-04",
+     440265.0
+    ],
+    [
+     "2026-09-07",
+     438168.0
+    ],
+    [
+     "2026-09-08",
+     439523.0
+    ],
+    [
+     "2026-09-09",
+     436383.0
+    ],
+    [
+     "2026-09-10",
+     433318.0
+    ],
+    [
+     "2026-09-11",
+     428093.0
+    ],
+    [
+     "2026-09-15",
+     431170.0
+    ],
+    [
+     "2026-09-16",
+     425792.0
+    ],
+    [
+     "2026-09-17",
+     425539.0
+    ],
+    [
+     "2026-09-18",
+     422157.0
+    ],
+    [
+     "2026-09-21",
+     426903.0
+    ],
+    [
+     "2026-09-22",
+     427044.0
+    ],
+    [
+     "2026-09-23",
+     425823.0
+    ],
+    [
+     "2026-09-24",
+     423949.0
+    ],
+    [
+     "2026-09-25",
+     420676.0
+    ],
+    [
+     "2026-09-28",
+     421328.0
+    ],
+    [
+     "2026-09-29",
+     416074.0
+    ],
+    [
+     "2026-09-30",
+     414758.0
+    ],
+    [
+     "2026-10-01",
+     415894.0
+    ],
+    [
+     "2026-10-05",
+     416278.0
+    ],
+    [
+     "2026-10-06",
+     418485.0
+    ],
+    [
+     "2026-10-07",
+     418667.0
+    ],
+    [
+     "2026-10-08",
+     421020.0
+    ],
+    [
+     "2026-10-09",
+     422699.0
+    ],
+    [
+     "2026-10-12",
+     419876.0
+    ],
+    [
+     "2026-10-13",
+     418624.0
+    ],
+    [
+     "2026-10-14",
+     412791.0
+    ],
+    [
+     "2026-10-15",
+     410760.0
+    ],
+    [
+     "2026-10-16",
+     409235.0
+    ],
+    [
+     "2026-10-19",
+     409447.0
+    ],
+    [
+     "2026-10-21",
+     408990.0
+    ],
+    [
+     "2026-10-22",
+     406628.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "HEROMOTOCO",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "12:55",
+     "entry": 5172.5,
+     "stop": 5142.35,
+     "exit_time": "13:10",
+     "exit": 5142.35,
+     "reason": "stop",
+     "qty": 31,
+     "pnl": -1374.0,
+     "ret_pct": -0.856
+    },
+    {
+     "symbol": "TORNTPHARM",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "12:00",
+     "entry": 4602.5,
+     "stop": 4591.5,
+     "exit_time": "12:10",
+     "exit": 4591.5,
+     "reason": "stop",
+     "qty": 35,
+     "pnl": -827.0,
+     "ret_pct": -0.513
+    },
+    {
+     "symbol": "BAJFINANCE",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "14:15",
+     "entry": 931.75,
+     "stop": 930.77,
+     "exit_time": "14:20",
+     "exit": 933.71,
+     "reason": "target",
+     "qty": 175,
+     "pnl": 141.0,
+     "ret_pct": 0.086
+    },
+    {
+     "symbol": "KAYNES",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "12:15",
+     "entry": 3257.9,
+     "stop": 3241.95,
+     "exit_time": "14:55",
+     "exit": 3289.79,
+     "reason": "target",
+     "qty": 50,
+     "pnl": 1260.0,
+     "ret_pct": 0.773
+    },
+    {
+     "symbol": "KEI",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "10:45",
+     "entry": 3851.0,
+     "stop": 3877.57,
+     "exit_time": "10:50",
+     "exit": 3877.57,
+     "reason": "stop",
+     "qty": 42,
+     "pnl": -1562.0,
+     "ret_pct": -0.966
+    },
+    {
+     "symbol": "MCX",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "10:45",
+     "entry": 3157.3,
+     "stop": 3166.56,
+     "exit_time": "10:50",
+     "exit": 3138.77,
+     "reason": "target",
+     "qty": 51,
+     "pnl": 616.0,
+     "ret_pct": 0.383
+    },
+    {
+     "symbol": "ATHERENERG",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "10:30",
+     "entry": 1459.9,
+     "stop": 1464.86,
+     "exit_time": "10:45",
+     "exit": 1449.97,
+     "reason": "target",
+     "qty": 112,
+     "pnl": 779.0,
+     "ret_pct": 0.476
+    },
+    {
+     "symbol": "MPHASIS",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "10:25",
+     "entry": 2553.4,
+     "stop": 2547.35,
+     "exit_time": "10:30",
+     "exit": 2565.5,
+     "reason": "target",
+     "qty": 64,
+     "pnl": 440.0,
+     "ret_pct": 0.269
+    },
+    {
+     "symbol": "KALYANKJIL",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "10:50",
+     "entry": 568.9,
+     "stop": 565.08,
+     "exit_time": "10:55",
+     "exit": 565.08,
+     "reason": "stop",
+     "qty": 287,
+     "pnl": -1541.0,
+     "ret_pct": -0.943
+    },
+    {
+     "symbol": "WIPRO",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "11:00",
+     "entry": 188.97,
+     "stop": 188.62,
+     "exit_time": "11:10",
+     "exit": 188.62,
+     "reason": "stop",
+     "qty": 866,
+     "pnl": -750.0,
+     "ret_pct": -0.458
+    },
+    {
+     "symbol": "UNIONBANK",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "10:55",
+     "entry": 176.62,
+     "stop": 176.05,
+     "exit_time": "11:35",
+     "exit": 177.75,
+     "reason": "target",
+     "qty": 926,
+     "pnl": 713.0,
+     "ret_pct": 0.436
+    },
+    {
+     "symbol": "LODHA",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "11:35",
+     "entry": 1044.4,
+     "stop": 1047.85,
+     "exit_time": "12:40",
+     "exit": 1037.51,
+     "reason": "target",
+     "qty": 156,
+     "pnl": 743.0,
+     "ret_pct": 0.456
+    },
+    {
+     "symbol": "BANKBARODA",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "10:45",
+     "entry": 234.35,
+     "stop": 233.89,
+     "exit_time": "11:00",
+     "exit": 235.28,
+     "reason": "target",
+     "qty": 698,
+     "pnl": 313.0,
+     "ret_pct": 0.191
+    },
+    {
+     "symbol": "LTM",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "12:55",
+     "entry": 4300.6,
+     "stop": 4292.8,
+     "exit_time": "13:10",
+     "exit": 4292.8,
+     "reason": "stop",
+     "qty": 38,
+     "pnl": -744.0,
+     "ret_pct": -0.455
+    },
+    {
+     "symbol": "POLYCAB",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "11:00",
+     "entry": 8038.5,
+     "stop": 8057.05,
+     "exit_time": "11:00",
+     "exit": 8057.05,
+     "reason": "stop",
+     "qty": 20,
+     "pnl": -813.0,
+     "ret_pct": -0.506
+    },
+    {
+     "symbol": "INFY",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "11:10",
+     "entry": 1151.05,
+     "stop": 1149.75,
+     "exit_time": "11:15",
+     "exit": 1155.9,
+     "reason": "target",
+     "qty": 142,
+     "pnl": 485.0,
+     "ret_pct": 0.297
+    },
+    {
+     "symbol": "FEDERALBNK",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "12:35",
+     "entry": 331.85,
+     "stop": 333.18,
+     "exit_time": "12:40",
+     "exit": 333.18,
+     "reason": "stop",
+     "qty": 495,
+     "pnl": -1111.0,
+     "ret_pct": -0.677
+    },
+    {
+     "symbol": "MCX",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "10:30",
+     "entry": 3151.6,
+     "stop": 3163.06,
+     "exit_time": "10:40",
+     "exit": 3163.06,
+     "reason": "stop",
+     "qty": 52,
+     "pnl": -1046.0,
+     "ret_pct": -0.639
+    },
+    {
+     "symbol": "BSE",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "10:55",
+     "entry": 3340.0,
+     "stop": 3351.85,
+     "exit_time": "11:00",
+     "exit": 3351.85,
+     "reason": "stop",
+     "qty": 49,
+     "pnl": -834.0,
+     "ret_pct": -0.509
+    },
+    {
+     "symbol": "KPITTECH",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "10:50",
+     "entry": 546.65,
+     "stop": 544.46,
+     "exit_time": "11:10",
+     "exit": 551.04,
+     "reason": "target",
+     "qty": 300,
+     "pnl": 981.0,
+     "ret_pct": 0.598
+    },
+    {
+     "symbol": "OFSS",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "11:35",
+     "entry": 10219.0,
+     "stop": 10255.24,
+     "exit_time": "11:55",
+     "exit": 10263.0,
+     "reason": "stop",
+     "qty": 16,
+     "pnl": -1154.0,
+     "ret_pct": -0.706
+    },
+    {
+     "symbol": "APOLLOHOSP",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "11:55",
+     "entry": 7925.0,
+     "stop": 7903.09,
+     "exit_time": "12:10",
+     "exit": 7903.09,
+     "reason": "stop",
+     "qty": 20,
+     "pnl": -684.0,
+     "ret_pct": -0.431
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "10:45",
+     "entry": 1849.3,
+     "stop": 1843.55,
+     "exit_time": "11:25",
+     "exit": 1860.79,
+     "reason": "target",
+     "qty": 89,
+     "pnl": 818.0,
+     "ret_pct": 0.497
+    },
+    {
+     "symbol": "ICICIGI",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "11:10",
+     "entry": 1714.0,
+     "stop": 1724.42,
+     "exit_time": "11:20",
+     "exit": 1724.42,
+     "reason": "stop",
+     "qty": 96,
+     "pnl": -1453.0,
+     "ret_pct": -0.884
+    },
+    {
+     "symbol": "CANBK",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "13:20",
+     "entry": 118.04,
+     "stop": 118.32,
+     "exit_time": "14:00",
+     "exit": 117.48,
+     "reason": "target",
+     "qty": 1399,
+     "pnl": 442.0,
+     "ret_pct": 0.268
+    },
+    {
+     "symbol": "GLENMARK",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "10:35",
+     "entry": 2248.6,
+     "stop": 2261.36,
+     "exit_time": "10:55",
+     "exit": 2261.36,
+     "reason": "stop",
+     "qty": 74,
+     "pnl": -1401.0,
+     "ret_pct": -0.843
+    },
+    {
+     "symbol": "FORTIS",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "10:25",
+     "entry": 744.7,
+     "stop": 746.35,
+     "exit_time": "10:30",
+     "exit": 746.35,
+     "reason": "stop",
+     "qty": 225,
+     "pnl": -829.0,
+     "ret_pct": -0.495
+    },
+    {
+     "symbol": "DIVISLAB",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "10:25",
+     "entry": 9108.5,
+     "stop": 9141.63,
+     "exit_time": "10:30",
+     "exit": 9141.63,
+     "reason": "stop",
+     "qty": 18,
+     "pnl": -1047.0,
+     "ret_pct": -0.639
+    },
+    {
+     "symbol": "LICHSGFIN",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "10:35",
+     "entry": 542.2,
+     "stop": 544.54,
+     "exit_time": "10:40",
+     "exit": 544.54,
+     "reason": "stop",
+     "qty": 309,
+     "pnl": -1184.0,
+     "ret_pct": -0.707
+    },
+    {
+     "symbol": "TATAELXSI",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "10:35",
+     "entry": 3672.7,
+     "stop": 3652.24,
+     "exit_time": "11:25",
+     "exit": 3652.24,
+     "reason": "stop",
+     "qty": 45,
+     "pnl": -1372.0,
+     "ret_pct": -0.829
+    },
+    {
+     "symbol": "TVSMOTOR",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "10:40",
+     "entry": 3954.0,
+     "stop": 3946.15,
+     "exit_time": "11:55",
+     "exit": 3969.7,
+     "reason": "target",
+     "qty": 42,
+     "pnl": 320.0,
+     "ret_pct": 0.193
+    },
+    {
+     "symbol": "KPITTECH",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "10:40",
+     "entry": 496.75,
+     "stop": 495.5,
+     "exit_time": "10:40",
+     "exit": 495.5,
+     "reason": "stop",
+     "qty": 337,
+     "pnl": -877.0,
+     "ret_pct": -0.524
+    },
+    {
+     "symbol": "MFSL",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "12:25",
+     "entry": 1325.0,
+     "stop": 1322.38,
+     "exit_time": "12:25",
+     "exit": 1322.38,
+     "reason": "stop",
+     "qty": 126,
+     "pnl": -787.0,
+     "ret_pct": -0.471
+    },
+    {
+     "symbol": "TECHM",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "13:45",
+     "entry": 1523.7,
+     "stop": 1518.68,
+     "exit_time": "14:30",
+     "exit": 1533.74,
+     "reason": "target",
+     "qty": 110,
+     "pnl": 897.0,
+     "ret_pct": 0.535
+    },
+    {
+     "symbol": "BANDHANBNK",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "10:30",
+     "entry": 169.03,
+     "stop": 168.68,
+     "exit_time": "11:25",
+     "exit": 168.68,
+     "reason": "stop",
+     "qty": 992,
+     "pnl": -804.0,
+     "ret_pct": -0.479
+    },
+    {
+     "symbol": "SAIL",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "10:25",
+     "entry": 175.68,
+     "stop": 175.06,
+     "exit_time": "10:25",
+     "exit": 175.06,
+     "reason": "stop",
+     "qty": 961,
+     "pnl": -1052.0,
+     "ret_pct": -0.623
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "10:30",
+     "entry": 1765.2,
+     "stop": 1772.27,
+     "exit_time": "10:55",
+     "exit": 1772.27,
+     "reason": "stop",
+     "qty": 95,
+     "pnl": -930.0,
+     "ret_pct": -0.555
+    },
+    {
+     "symbol": "MAZDOCK",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "10:55",
+     "entry": 2063.9,
+     "stop": 2058.94,
+     "exit_time": "11:10",
+     "exit": 2058.94,
+     "reason": "stop",
+     "qty": 81,
+     "pnl": -859.0,
+     "ret_pct": -0.513
+    },
+    {
+     "symbol": "TATAELXSI",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "11:45",
+     "entry": 3255.8,
+     "stop": 3244.95,
+     "exit_time": "11:55",
+     "exit": 3277.5,
+     "reason": "target",
+     "qty": 51,
+     "pnl": 767.0,
+     "ret_pct": 0.462
+    },
+    {
+     "symbol": "DELHIVERY",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "11:15",
+     "entry": 420.4,
+     "stop": 419.68,
+     "exit_time": "11:20",
+     "exit": 419.68,
+     "reason": "stop",
+     "qty": 401,
+     "pnl": -749.0,
+     "ret_pct": -0.444
+    }
+   ],
+   "today": []
+  },
+  {
+   "key": "orb15",
+   "name": "Opening range breakout (15-min)",
+   "description": "Break of the 09:15-09:30 high or low (OCO stop orders), stop at the other side of the range, target twice the risk. The most popular intraday setup; US studies are positive before costs, independent replications find roughly zero after costs.",
+   "evidence": "WEAK",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 295,
+    "trades_per_day": 5.0,
+    "return_pct": -20.29,
+    "after_tax_return_pct": -20.29,
+    "annualised_pct": -62.0,
+    "sharpe": -5.58,
+    "max_dd_pct": -20.29,
+    "win_rate": 38.0,
+    "avg_trade_pct": -0.224,
+    "profit_factor": 0.64,
+    "avg_day_pct": -0.378,
+    "ci95_day_pct": [
+     -0.652,
+     -0.103
+    ],
+    "t_stat": -2.7,
+    "significant": true,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     488740.0
+    ],
+    [
+     "2026-07-30",
+     481613.0
+    ],
+    [
+     "2026-07-31",
+     478340.0
+    ],
+    [
+     "2026-08-03",
+     478120.0
+    ],
+    [
+     "2026-08-04",
+     472384.0
+    ],
+    [
+     "2026-08-05",
+     466781.0
+    ],
+    [
+     "2026-08-06",
+     473795.0
+    ],
+    [
+     "2026-08-07",
+     475822.0
+    ],
+    [
+     "2026-08-10",
+     476207.0
+    ],
+    [
+     "2026-08-11",
+     481896.0
+    ],
+    [
+     "2026-08-12",
+     481671.0
+    ],
+    [
+     "2026-08-13",
+     482832.0
+    ],
+    [
+     "2026-08-14",
+     483715.0
+    ],
+    [
+     "2026-08-17",
+     472786.0
+    ],
+    [
+     "2026-08-18",
+     472789.0
+    ],
+    [
+     "2026-08-19",
+     466173.0
+    ],
+    [
+     "2026-08-20",
+     461190.0
+    ],
+    [
+     "2026-08-21",
+     458278.0
+    ],
+    [
+     "2026-08-24",
+     457847.0
+    ],
+    [
+     "2026-08-25",
+     460692.0
+    ],
+    [
+     "2026-08-26",
+     462082.0
+    ],
+    [
+     "2026-08-27",
+     455551.0
+    ],
+    [
+     "2026-08-28",
+     461802.0
+    ],
+    [
+     "2026-08-31",
+     463958.0
+    ],
+    [
+     "2026-09-01",
+     458194.0
+    ],
+    [
+     "2026-09-02",
+     460319.0
+    ],
+    [
+     "2026-09-03",
+     460662.0
+    ],
+    [
+     "2026-09-04",
+     453707.0
+    ],
+    [
+     "2026-09-07",
+     450138.0
+    ],
+    [
+     "2026-09-08",
+     447586.0
+    ],
+    [
+     "2026-09-09",
+     448286.0
+    ],
+    [
+     "2026-09-10",
+     443677.0
+    ],
+    [
+     "2026-09-11",
+     447571.0
+    ],
+    [
+     "2026-09-15",
+     447325.0
+    ],
+    [
+     "2026-09-16",
+     445696.0
+    ],
+    [
+     "2026-09-17",
+     440645.0
+    ],
+    [
+     "2026-09-18",
+     435961.0
+    ],
+    [
+     "2026-09-21",
+     450586.0
+    ],
+    [
+     "2026-09-22",
+     445510.0
+    ],
+    [
+     "2026-09-23",
+     441631.0
+    ],
+    [
+     "2026-09-24",
+     432458.0
+    ],
+    [
+     "2026-09-25",
+     427134.0
+    ],
+    [
+     "2026-09-28",
+     427144.0
+    ],
+    [
+     "2026-09-29",
+     420352.0
+    ],
+    [
+     "2026-09-30",
+     427543.0
+    ],
+    [
+     "2026-10-01",
+     425460.0
+    ],
+    [
+     "2026-10-05",
+     418953.0
+    ],
+    [
+     "2026-10-06",
+     416647.0
+    ],
+    [
+     "2026-10-07",
+     414898.0
+    ],
+    [
+     "2026-10-08",
+     419320.0
+    ],
+    [
+     "2026-10-09",
+     417557.0
+    ],
+    [
+     "2026-10-12",
+     410603.0
+    ],
+    [
+     "2026-10-13",
+     409866.0
+    ],
+    [
+     "2026-10-14",
+     402075.0
+    ],
+    [
+     "2026-10-15",
+     402665.0
+    ],
+    [
+     "2026-10-16",
+     406132.0
+    ],
+    [
+     "2026-10-19",
+     406098.0
+    ],
+    [
+     "2026-10-21",
+     404637.0
+    ],
+    [
+     "2026-10-22",
+     398550.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "DRREDDY",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 1215.49,
+     "stop": 1227.1,
+     "exit_time": "09:50",
+     "exit": 1227.1,
+     "reason": "stop",
+     "qty": 133,
+     "pnl": -1876.0,
+     "ret_pct": -1.161
+    },
+    {
+     "symbol": "KEI",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 3868.07,
+     "stop": 3965.05,
+     "exit_time": "12:05",
+     "exit": 3965.05,
+     "reason": "stop",
+     "qty": 19,
+     "pnl": -2110.0,
+     "ret_pct": -2.874
+    },
+    {
+     "symbol": "DIVISLAB",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "09:45",
+     "entry": 9123.06,
+     "stop": 9062.75,
+     "exit_time": "11:55",
+     "exit": 9062.75,
+     "reason": "stop",
+     "qty": 17,
+     "pnl": -1529.0,
+     "ret_pct": -0.985
+    },
+    {
+     "symbol": "ETERNAL",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 317.56,
+     "stop": 312.27,
+     "exit_time": "10:00",
+     "exit": 312.27,
+     "reason": "stop",
+     "qty": 365,
+     "pnl": -2177.0,
+     "ret_pct": -1.877
+    },
+    {
+     "symbol": "INDHOTEL",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "09:45",
+     "entry": 775.24,
+     "stop": 761.77,
+     "exit_time": "15:00",
+     "exit": 788.8,
+     "reason": "square-off",
+     "qty": 140,
+     "pnl": 1605.0,
+     "ret_pct": 1.477
+    },
+    {
+     "symbol": "LTM",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 4329.56,
+     "stop": 4290.85,
+     "exit_time": "11:00",
+     "exit": 4290.85,
+     "reason": "stop",
+     "qty": 37,
+     "pnl": -1950.0,
+     "ret_pct": -1.216
+    },
+    {
+     "symbol": "UNIONBANK",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 185.79,
+     "stop": 183.39,
+     "exit_time": "09:45",
+     "exit": 183.39,
+     "reason": "stop",
+     "qty": 773,
+     "pnl": -2326.0,
+     "ret_pct": -1.617
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1904.95,
+     "stop": 1894.15,
+     "exit_time": "09:55",
+     "exit": 1894.15,
+     "reason": "stop",
+     "qty": 85,
+     "pnl": -1249.0,
+     "ret_pct": -0.771
+    },
+    {
+     "symbol": "HINDZINC",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 548.63,
+     "stop": 553.83,
+     "exit_time": "10:30",
+     "exit": 538.23,
+     "reason": "target",
+     "qty": 296,
+     "pnl": 2667.0,
+     "ret_pct": 1.644
+    },
+    {
+     "symbol": "ABB",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "11:10",
+     "entry": 6665.17,
+     "stop": 6787.25,
+     "exit_time": "15:00",
+     "exit": 6554.0,
+     "reason": "square-off",
+     "qty": 15,
+     "pnl": 1396.0,
+     "ret_pct": 1.398
+    },
+    {
+     "symbol": "UNIONBANK",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 176.58,
+     "stop": 174.98,
+     "exit_time": "12:05",
+     "exit": 179.77,
+     "reason": "target",
+     "qty": 918,
+     "pnl": 2519.0,
+     "ret_pct": 1.552
+    },
+    {
+     "symbol": "AXISBANK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1226.29,
+     "stop": 1242.4,
+     "exit_time": "10:10",
+     "exit": 1242.4,
+     "reason": "stop",
+     "qty": 118,
+     "pnl": -2204.0,
+     "ret_pct": -1.524
+    },
+    {
+     "symbol": "MANKIND",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 2319.06,
+     "stop": 2291.0,
+     "exit_time": "11:15",
+     "exit": 2291.0,
+     "reason": "stop",
+     "qty": 65,
+     "pnl": -2313.0,
+     "ret_pct": -1.533
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1391.5,
+     "stop": 1401.8,
+     "exit_time": "09:35",
+     "exit": 1401.8,
+     "reason": "stop",
+     "qty": 116,
+     "pnl": -1526.0,
+     "ret_pct": -0.946
+    },
+    {
+     "symbol": "FEDERALBNK",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "10:25",
+     "entry": 333.07,
+     "stop": 327.32,
+     "exit_time": "10:40",
+     "exit": 344.55,
+     "reason": "target",
+     "qty": 330,
+     "pnl": 3491.0,
+     "ret_pct": 3.172
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:45",
+     "entry": 1881.84,
+     "stop": 1872.65,
+     "exit_time": "10:20",
+     "exit": 1900.22,
+     "reason": "target",
+     "qty": 85,
+     "pnl": 1282.0,
+     "ret_pct": 0.801
+    },
+    {
+     "symbol": "HDFCAMC",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 2397.7,
+     "stop": 2427.95,
+     "exit_time": "15:00",
+     "exit": 2406.9,
+     "reason": "square-off",
+     "qty": 60,
+     "pnl": -924.0,
+     "ret_pct": -0.643
+    },
+    {
+     "symbol": "ANGELONE",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 307.25,
+     "stop": 314.52,
+     "exit_time": "15:00",
+     "exit": 299.8,
+     "reason": "square-off",
+     "qty": 263,
+     "pnl": 1731.0,
+     "ret_pct": 2.144
+    },
+    {
+     "symbol": "LTF",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 246.98,
+     "stop": 255.38,
+     "exit_time": "11:10",
+     "exit": 255.38,
+     "reason": "stop",
+     "qty": 231,
+     "pnl": -2153.0,
+     "ret_pct": -3.778
+    },
+    {
+     "symbol": "TECHM",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 1738.37,
+     "stop": 1715.0,
+     "exit_time": "12:10",
+     "exit": 1785.11,
+     "reason": "target",
+     "qty": 81,
+     "pnl": 3531.0,
+     "ret_pct": 2.506
+    },
+    {
+     "symbol": "CIPLA",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1326.36,
+     "stop": 1318.25,
+     "exit_time": "15:00",
+     "exit": 1325.6,
+     "reason": "square-off",
+     "qty": 121,
+     "pnl": -373.0,
+     "ret_pct": -0.232
+    },
+    {
+     "symbol": "BHEL",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "10:30",
+     "entry": 440.98,
+     "stop": 446.88,
+     "exit_time": "15:00",
+     "exit": 437.25,
+     "reason": "square-off",
+     "qty": 312,
+     "pnl": 807.0,
+     "ret_pct": 0.587
+    },
+    {
+     "symbol": "COALINDIA",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "11:05",
+     "entry": 419.11,
+     "stop": 417.02,
+     "exit_time": "15:00",
+     "exit": 418.95,
+     "reason": "square-off",
+     "qty": 383,
+     "pnl": -342.0,
+     "ret_pct": -0.213
+    },
+    {
+     "symbol": "CANBK",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 117.94,
+     "stop": 120.69,
+     "exit_time": "15:00",
+     "exit": 117.23,
+     "reason": "square-off",
+     "qty": 695,
+     "pnl": 263.0,
+     "ret_pct": 0.321
+    },
+    {
+     "symbol": "ICICIGI",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "12:05",
+     "entry": 1697.85,
+     "stop": 1739.35,
+     "exit_time": "15:00",
+     "exit": 1687.9,
+     "reason": "square-off",
+     "qty": 46,
+     "pnl": 235.0,
+     "ret_pct": 0.301
+    },
+    {
+     "symbol": "POLYCAB",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 7913.04,
+     "stop": 8078.0,
+     "exit_time": "10:25",
+     "exit": 8078.0,
+     "reason": "stop",
+     "qty": 11,
+     "pnl": -2122.0,
+     "ret_pct": -2.44
+    },
+    {
+     "symbol": "KPITTECH",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 527.81,
+     "stop": 521.9,
+     "exit_time": "10:25",
+     "exit": 521.9,
+     "reason": "stop",
+     "qty": 310,
+     "pnl": -2361.0,
+     "ret_pct": -1.441
+    },
+    {
+     "symbol": "BANKBARODA",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "12:40",
+     "entry": 230.28,
+     "stop": 232.68,
+     "exit_time": "15:00",
+     "exit": 229.6,
+     "reason": "square-off",
+     "qty": 712,
+     "pnl": 71.0,
+     "ret_pct": 0.043
+    },
+    {
+     "symbol": "HYUNDAI",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 1976.51,
+     "stop": 1995.65,
+     "exit_time": "09:40",
+     "exit": 1995.65,
+     "reason": "stop",
+     "qty": 83,
+     "pnl": -2123.0,
+     "ret_pct": -1.296
+    },
+    {
+     "symbol": "TATAELXSI",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 3687.34,
+     "stop": 3592.75,
+     "exit_time": "15:00",
+     "exit": 3635.1,
+     "reason": "square-off",
+     "qty": 20,
+     "pnl": -1257.0,
+     "ret_pct": -1.703
+    },
+    {
+     "symbol": "MARICO",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 782.74,
+     "stop": 778.0,
+     "exit_time": "11:40",
+     "exit": 778.0,
+     "reason": "stop",
+     "qty": 209,
+     "pnl": -1520.0,
+     "ret_pct": -0.928
+    },
+    {
+     "symbol": "POLYCAB",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 8269.13,
+     "stop": 8115.25,
+     "exit_time": "15:00",
+     "exit": 8300.0,
+     "reason": "square-off",
+     "qty": 12,
+     "pnl": 99.0,
+     "ret_pct": 0.1
+    },
+    {
+     "symbol": "HCLTECH",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "09:45",
+     "entry": 1282.54,
+     "stop": 1263.05,
+     "exit_time": "15:00",
+     "exit": 1316.8,
+     "reason": "square-off",
+     "qty": 100,
+     "pnl": 3190.0,
+     "ret_pct": 2.485
+    },
+    {
+     "symbol": "NESTLEIND",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1333.77,
+     "stop": 1320.6,
+     "exit_time": "13:20",
+     "exit": 1320.6,
+     "reason": "stop",
+     "qty": 123,
+     "pnl": -1953.0,
+     "ret_pct": -1.19
+    },
+    {
+     "symbol": "RBLBANK",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "11:40",
+     "entry": 388.06,
+     "stop": 394.35,
+     "exit_time": "15:00",
+     "exit": 388.85,
+     "reason": "square-off",
+     "qty": 303,
+     "pnl": -553.0,
+     "ret_pct": -0.471
+    },
+    {
+     "symbol": "ANANDRATHI",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:40",
+     "entry": 2065.33,
+     "stop": 2040.9,
+     "exit_time": "15:00",
+     "exit": 2080.0,
+     "reason": "square-off",
+     "qty": 77,
+     "pnl": 723.0,
+     "ret_pct": 0.454
+    },
+    {
+     "symbol": "BAJAJ-AUTO",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 10095.05,
+     "stop": 9999.5,
+     "exit_time": "15:00",
+     "exit": 10038.0,
+     "reason": "square-off",
+     "qty": 16,
+     "pnl": -1194.0,
+     "ret_pct": -0.739
+    },
+    {
+     "symbol": "AUROPHARMA",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "10:05",
+     "entry": 1690.35,
+     "stop": 1705.6,
+     "exit_time": "11:40",
+     "exit": 1705.6,
+     "reason": "stop",
+     "qty": 98,
+     "pnl": -2033.0,
+     "ret_pct": -1.229
+    },
+    {
+     "symbol": "DELHIVERY",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 421.01,
+     "stop": 411.9,
+     "exit_time": "14:00",
+     "exit": 411.9,
+     "reason": "stop",
+     "qty": 217,
+     "pnl": -2291.0,
+     "ret_pct": -2.504
+    },
+    {
+     "symbol": "DMART",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "09:45",
+     "entry": 3368.71,
+     "stop": 3401.8,
+     "exit_time": "10:00",
+     "exit": 3401.8,
+     "reason": "stop",
+     "qty": 49,
+     "pnl": -2158.0,
+     "ret_pct": -1.309
+    }
+   ],
+   "today": [
+    {
+     "symbol": "SWIGGY",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 191.0,
+     "stop": 197.78,
+     "exit_time": "09:40",
+     "exit": 190.3,
+     "reason": "square-off",
+     "qty": 357,
+     "pnl": 51.0,
+     "ret_pct": 0.075,
+     "open_now": false
+    },
+    {
+     "symbol": "HINDPETRO",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 335.83,
+     "stop": 339.73,
+     "exit_time": "09:40",
+     "exit": 334.8,
+     "reason": "square-off",
+     "qty": 581,
+     "pnl": 113.0,
+     "ret_pct": 0.058,
+     "open_now": false
+    },
+    {
+     "symbol": "COFORGE",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:35",
+     "entry": 1925.94,
+     "stop": 1958.7,
+     "exit_time": "09:40",
+     "exit": 1936.3,
+     "reason": "square-off",
+     "qty": 71,
+     "pnl": -1092.0,
+     "ret_pct": -0.799,
+     "open_now": false
+    },
+    {
+     "symbol": "PATANJALI",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 350.97,
+     "stop": 353.38,
+     "exit_time": "09:40",
+     "exit": 350.6,
+     "reason": "square-off",
+     "qty": 570,
+     "pnl": -285.0,
+     "ret_pct": -0.142,
+     "open_now": false
+    },
+    {
+     "symbol": "LTM",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 4304.45,
+     "stop": 4344.75,
+     "exit_time": "09:40",
+     "exit": 4267.8,
+     "reason": "square-off",
+     "qty": 46,
+     "pnl": 1193.0,
+     "ret_pct": 0.603,
+     "open_now": false
+    }
+   ]
+  },
+  {
+   "key": "closing_hour_trend",
+   "name": "Closing-hour trend",
+   "description": "At 14:05, buy stocks up 1%+ near their day high and above VWAP (mirror for losers), exit at the square-off.",
+   "evidence": "WEAK",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 295,
+    "trades_per_day": 5.0,
+    "return_pct": -20.73,
+    "after_tax_return_pct": -20.73,
+    "annualised_pct": -62.9,
+    "sharpe": -11.17,
+    "max_dd_pct": -20.92,
+    "win_rate": 31.2,
+    "avg_trade_pct": -0.197,
+    "profit_factor": 0.33,
+    "avg_day_pct": -0.392,
+    "ci95_day_pct": [
+     -0.533,
+     -0.25
+    ],
+    "t_stat": -5.41,
+    "significant": true,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     490878.0
+    ],
+    [
+     "2026-07-30",
+     487914.0
+    ],
+    [
+     "2026-07-31",
+     485028.0
+    ],
+    [
+     "2026-08-03",
+     484050.0
+    ],
+    [
+     "2026-08-04",
+     483175.0
+    ],
+    [
+     "2026-08-05",
+     480339.0
+    ],
+    [
+     "2026-08-06",
+     480330.0
+    ],
+    [
+     "2026-08-07",
+     477862.0
+    ],
+    [
+     "2026-08-10",
+     480135.0
+    ],
+    [
+     "2026-08-11",
+     476178.0
+    ],
+    [
+     "2026-08-12",
+     472958.0
+    ],
+    [
+     "2026-08-13",
+     471746.0
+    ],
+    [
+     "2026-08-14",
+     471206.0
+    ],
+    [
+     "2026-08-17",
+     470695.0
+    ],
+    [
+     "2026-08-18",
+     464929.0
+    ],
+    [
+     "2026-08-19",
+     458699.0
+    ],
+    [
+     "2026-08-20",
+     456492.0
+    ],
+    [
+     "2026-08-21",
+     454292.0
+    ],
+    [
+     "2026-08-24",
+     451780.0
+    ],
+    [
+     "2026-08-25",
+     451704.0
+    ],
+    [
+     "2026-08-26",
+     451111.0
+    ],
+    [
+     "2026-08-27",
+     443388.0
+    ],
+    [
+     "2026-08-28",
+     442285.0
+    ],
+    [
+     "2026-08-31",
+     442747.0
+    ],
+    [
+     "2026-09-01",
+     439328.0
+    ],
+    [
+     "2026-09-02",
+     442552.0
+    ],
+    [
+     "2026-09-03",
+     440756.0
+    ],
+    [
+     "2026-09-04",
+     436748.0
+    ],
+    [
+     "2026-09-07",
+     435173.0
+    ],
+    [
+     "2026-09-08",
+     432055.0
+    ],
+    [
+     "2026-09-09",
+     430679.0
+    ],
+    [
+     "2026-09-10",
+     430872.0
+    ],
+    [
+     "2026-09-11",
+     430013.0
+    ],
+    [
+     "2026-09-15",
+     433564.0
+    ],
+    [
+     "2026-09-16",
+     432738.0
+    ],
+    [
+     "2026-09-17",
+     429924.0
+    ],
+    [
+     "2026-09-18",
+     427910.0
+    ],
+    [
+     "2026-09-21",
+     428786.0
+    ],
+    [
+     "2026-09-22",
+     423434.0
+    ],
+    [
+     "2026-09-23",
+     423152.0
+    ],
+    [
+     "2026-09-24",
+     427152.0
+    ],
+    [
+     "2026-09-25",
+     425525.0
+    ],
+    [
+     "2026-09-28",
+     424134.0
+    ],
+    [
+     "2026-09-29",
+     420633.0
+    ],
+    [
+     "2026-09-30",
+     417616.0
+    ],
+    [
+     "2026-10-01",
+     409439.0
+    ],
+    [
+     "2026-10-05",
+     409463.0
+    ],
+    [
+     "2026-10-06",
+     407489.0
+    ],
+    [
+     "2026-10-07",
+     406645.0
+    ],
+    [
+     "2026-10-08",
+     404445.0
+    ],
+    [
+     "2026-10-09",
+     401200.0
+    ],
+    [
+     "2026-10-12",
+     399675.0
+    ],
+    [
+     "2026-10-13",
+     398807.0
+    ],
+    [
+     "2026-10-14",
+     398390.0
+    ],
+    [
+     "2026-10-15",
+     397000.0
+    ],
+    [
+     "2026-10-16",
+     396295.0
+    ],
+    [
+     "2026-10-19",
+     395401.0
+    ],
+    [
+     "2026-10-21",
+     395393.0
+    ],
+    [
+     "2026-10-22",
+     396327.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "OFSS",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 9984.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 9912.0,
+     "reason": "square-off",
+     "qty": 15,
+     "pnl": 771.0,
+     "ret_pct": 0.515
+    },
+    {
+     "symbol": "HDFCLIFE",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 524.55,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 523.55,
+     "reason": "square-off",
+     "qty": 301,
+     "pnl": 103.0,
+     "ret_pct": 0.065
+    },
+    {
+     "symbol": "BHEL",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 398.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 397.2,
+     "reason": "square-off",
+     "qty": 397,
+     "pnl": 192.0,
+     "ret_pct": 0.121
+    },
+    {
+     "symbol": "RADICO",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 4222.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 4192.5,
+     "reason": "square-off",
+     "qty": 37,
+     "pnl": 790.0,
+     "ret_pct": 0.506
+    },
+    {
+     "symbol": "KALYANKJIL",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 531.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 533.0,
+     "reason": "square-off",
+     "qty": 298,
+     "pnl": -921.0,
+     "ret_pct": -0.583
+    },
+    {
+     "symbol": "CUMMINSIND",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 4415.8,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 4405.8,
+     "reason": "square-off",
+     "qty": 35,
+     "pnl": 32.0,
+     "ret_pct": 0.021
+    },
+    {
+     "symbol": "CGPOWER",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 817.15,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 814.85,
+     "reason": "square-off",
+     "qty": 193,
+     "pnl": 120.0,
+     "ret_pct": 0.076
+    },
+    {
+     "symbol": "UNITDSPR",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 1296.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1289.6,
+     "reason": "square-off",
+     "qty": 122,
+     "pnl": 457.0,
+     "ret_pct": 0.289
+    },
+    {
+     "symbol": "RBLBANK",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 356.05,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 355.8,
+     "reason": "square-off",
+     "qty": 444,
+     "pnl": -214.0,
+     "ret_pct": -0.135
+    },
+    {
+     "symbol": "MANAPPURAM",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 299.2,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 299.35,
+     "reason": "square-off",
+     "qty": 528,
+     "pnl": -404.0,
+     "ret_pct": -0.256
+    },
+    {
+     "symbol": "TMPV",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 279.45,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 279.25,
+     "reason": "square-off",
+     "qty": 567,
+     "pnl": -85.0,
+     "ret_pct": -0.054
+    },
+    {
+     "symbol": "NAUKRI",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 1229.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1230.3,
+     "reason": "square-off",
+     "qty": 128,
+     "pnl": -400.0,
+     "ret_pct": -0.254
+    },
+    {
+     "symbol": "TRENT",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 2875.3,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2881.1,
+     "reason": "square-off",
+     "qty": 55,
+     "pnl": -517.0,
+     "ret_pct": -0.327
+    },
+    {
+     "symbol": "POLICYBZR",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 1039.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1036.1,
+     "reason": "square-off",
+     "qty": 152,
+     "pnl": 208.0,
+     "ret_pct": 0.132
+    },
+    {
+     "symbol": "INFY",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 1128.25,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1127.55,
+     "reason": "square-off",
+     "qty": 140,
+     "pnl": -100.0,
+     "ret_pct": -0.063
+    },
+    {
+     "symbol": "SWIGGY",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 234.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 233.25,
+     "reason": "square-off",
+     "qty": 676,
+     "pnl": -1237.0,
+     "ret_pct": -0.78
+    },
+    {
+     "symbol": "LTM",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 4357.2,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 4388.7,
+     "reason": "square-off",
+     "qty": 36,
+     "pnl": 810.0,
+     "ret_pct": 0.516
+    },
+    {
+     "symbol": "ANGELONE",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 301.75,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 299.8,
+     "reason": "square-off",
+     "qty": 526,
+     "pnl": 701.0,
+     "ret_pct": 0.442
+    },
+    {
+     "symbol": "TCS",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 2450.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2460.7,
+     "reason": "square-off",
+     "qty": 64,
+     "pnl": 487.0,
+     "ret_pct": 0.311
+    },
+    {
+     "symbol": "INDHOTEL",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 775.3,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 769.7,
+     "reason": "square-off",
+     "qty": 204,
+     "pnl": -1466.0,
+     "ret_pct": -0.926
+    },
+    {
+     "symbol": "ICICIBANK",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 1386.2,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1385.1,
+     "reason": "square-off",
+     "qty": 114,
+     "pnl": -323.0,
+     "ret_pct": -0.205
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 1216.6,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1206.0,
+     "reason": "square-off",
+     "qty": 130,
+     "pnl": -1575.0,
+     "ret_pct": -0.996
+    },
+    {
+     "symbol": "CGPOWER",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 818.7,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 817.5,
+     "reason": "square-off",
+     "qty": 194,
+     "pnl": -93.0,
+     "ret_pct": -0.059
+    },
+    {
+     "symbol": "BHEL",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 438.55,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 437.25,
+     "reason": "square-off",
+     "qty": 363,
+     "pnl": 146.0,
+     "ret_pct": 0.092
+    },
+    {
+     "symbol": "ENRIN",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 2973.3,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2958.6,
+     "reason": "square-off",
+     "qty": 53,
+     "pnl": 456.0,
+     "ret_pct": 0.29
+    },
+    {
+     "symbol": "TATACONSUM",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 981.35,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 979.65,
+     "reason": "square-off",
+     "qty": 162,
+     "pnl": -474.0,
+     "ret_pct": -0.298
+    },
+    {
+     "symbol": "INFY",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 1091.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 1092.75,
+     "reason": "square-off",
+     "qty": 146,
+     "pnl": -17.0,
+     "ret_pct": -0.011
+    },
+    {
+     "symbol": "DIVISLAB",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 9006.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 8958.5,
+     "reason": "square-off",
+     "qty": 17,
+     "pnl": 501.0,
+     "ret_pct": 0.327
+    },
+    {
+     "symbol": "WAAREEENER",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 2533.8,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2529.5,
+     "reason": "square-off",
+     "qty": 62,
+     "pnl": -589.0,
+     "ret_pct": -0.375
+    },
+    {
+     "symbol": "LICHSGFIN",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 537.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 535.85,
+     "reason": "square-off",
+     "qty": 296,
+     "pnl": 162.0,
+     "ret_pct": 0.102
+    },
+    {
+     "symbol": "OFSS",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 10655.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 10647.0,
+     "reason": "square-off",
+     "qty": 14,
+     "pnl": -421.0,
+     "ret_pct": -0.282
+    },
+    {
+     "symbol": "BAJAJ-AUTO",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 10334.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 10325.0,
+     "reason": "square-off",
+     "qty": 15,
+     "pnl": -330.0,
+     "ret_pct": -0.213
+    },
+    {
+     "symbol": "VEDL",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 254.95,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 255.65,
+     "reason": "square-off",
+     "qty": 627,
+     "pnl": -767.0,
+     "ret_pct": -0.48
+    },
+    {
+     "symbol": "WAAREEENER",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 2434.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2444.2,
+     "reason": "square-off",
+     "qty": 65,
+     "pnl": 338.0,
+     "ret_pct": 0.213
+    },
+    {
+     "symbol": "MAZDOCK",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 2107.0,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 2115.5,
+     "reason": "square-off",
+     "qty": 75,
+     "pnl": 312.0,
+     "ret_pct": 0.198
+    },
+    {
+     "symbol": "LT",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 3634.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3624.7,
+     "reason": "square-off",
+     "qty": 44,
+     "pnl": 231.0,
+     "ret_pct": 0.145
+    },
+    {
+     "symbol": "HINDPETRO",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 333.55,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 333.0,
+     "reason": "square-off",
+     "qty": 480,
+     "pnl": -592.0,
+     "ret_pct": -0.369
+    },
+    {
+     "symbol": "TVSMOTOR",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 3955.3,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 3946.5,
+     "reason": "square-off",
+     "qty": 40,
+     "pnl": -676.0,
+     "ret_pct": -0.427
+    },
+    {
+     "symbol": "HAL",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "14:10",
+     "entry": 4763.5,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 4760.8,
+     "reason": "square-off",
+     "qty": 33,
+     "pnl": -412.0,
+     "ret_pct": -0.262
+    },
+    {
+     "symbol": "ITC",
+     "date": "2026-10-12",
+     "side": "SHORT",
+     "entry_time": "14:10",
+     "entry": 257.45,
+     "stop": null,
+     "exit_time": "15:00",
+     "exit": 257.25,
+     "reason": "square-off",
+     "qty": 623,
+     "pnl": -76.0,
+     "ret_pct": -0.047
+    }
+   ],
+   "today": []
+  },
+  {
+   "key": "cpr_breakout",
+   "name": "Narrow CPR breakout",
+   "description": "Popular in India: on narrow Central Pivot Range days, trade the side the market opens and holds (first 15 minutes), stop at the other side of the CPR, target R1/S1. No peer-reviewed evidence.",
+   "evidence": "EXPERIMENTAL",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 290,
+    "trades_per_day": 4.92,
+    "return_pct": -21.06,
+    "after_tax_return_pct": -21.06,
+    "annualised_pct": -63.6,
+    "sharpe": -18.72,
+    "max_dd_pct": -21.06,
+    "win_rate": 28.6,
+    "avg_trade_pct": -0.227,
+    "profit_factor": 0.23,
+    "avg_day_pct": -0.399,
+    "ci95_day_pct": [
+     -0.486,
+     -0.313
+    ],
+    "t_stat": -9.06,
+    "significant": true,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     495883.0
+    ],
+    [
+     "2026-07-30",
+     495422.0
+    ],
+    [
+     "2026-07-31",
+     492712.0
+    ],
+    [
+     "2026-08-03",
+     490840.0
+    ],
+    [
+     "2026-08-04",
+     489699.0
+    ],
+    [
+     "2026-08-05",
+     484439.0
+    ],
+    [
+     "2026-08-06",
+     484730.0
+    ],
+    [
+     "2026-08-07",
+     482186.0
+    ],
+    [
+     "2026-08-10",
+     481262.0
+    ],
+    [
+     "2026-08-11",
+     477324.0
+    ],
+    [
+     "2026-08-12",
+     475824.0
+    ],
+    [
+     "2026-08-13",
+     469472.0
+    ],
+    [
+     "2026-08-14",
+     467669.0
+    ],
+    [
+     "2026-08-17",
+     466978.0
+    ],
+    [
+     "2026-08-18",
+     465107.0
+    ],
+    [
+     "2026-08-19",
+     466127.0
+    ],
+    [
+     "2026-08-20",
+     466030.0
+    ],
+    [
+     "2026-08-21",
+     463551.0
+    ],
+    [
+     "2026-08-24",
+     459576.0
+    ],
+    [
+     "2026-08-25",
+     457535.0
+    ],
+    [
+     "2026-08-26",
+     455144.0
+    ],
+    [
+     "2026-08-27",
+     453351.0
+    ],
+    [
+     "2026-08-28",
+     450353.0
+    ],
+    [
+     "2026-08-31",
+     447617.0
+    ],
+    [
+     "2026-09-01",
+     446669.0
+    ],
+    [
+     "2026-09-02",
+     445229.0
+    ],
+    [
+     "2026-09-03",
+     445773.0
+    ],
+    [
+     "2026-09-04",
+     442801.0
+    ],
+    [
+     "2026-09-07",
+     441304.0
+    ],
+    [
+     "2026-09-08",
+     442920.0
+    ],
+    [
+     "2026-09-09",
+     443556.0
+    ],
+    [
+     "2026-09-10",
+     442104.0
+    ],
+    [
+     "2026-09-11",
+     440678.0
+    ],
+    [
+     "2026-09-15",
+     439746.0
+    ],
+    [
+     "2026-09-16",
+     436472.0
+    ],
+    [
+     "2026-09-17",
+     437120.0
+    ],
+    [
+     "2026-09-18",
+     435453.0
+    ],
+    [
+     "2026-09-21",
+     433185.0
+    ],
+    [
+     "2026-09-22",
+     432036.0
+    ],
+    [
+     "2026-09-23",
+     431077.0
+    ],
+    [
+     "2026-09-24",
+     426137.0
+    ],
+    [
+     "2026-09-25",
+     424199.0
+    ],
+    [
+     "2026-09-28",
+     422701.0
+    ],
+    [
+     "2026-09-29",
+     421235.0
+    ],
+    [
+     "2026-09-30",
+     419902.0
+    ],
+    [
+     "2026-10-01",
+     419641.0
+    ],
+    [
+     "2026-10-05",
+     415739.0
+    ],
+    [
+     "2026-10-06",
+     413547.0
+    ],
+    [
+     "2026-10-07",
+     412673.0
+    ],
+    [
+     "2026-10-08",
+     411706.0
+    ],
+    [
+     "2026-10-09",
+     411780.0
+    ],
+    [
+     "2026-10-12",
+     408390.0
+    ],
+    [
+     "2026-10-13",
+     406070.0
+    ],
+    [
+     "2026-10-14",
+     405405.0
+    ],
+    [
+     "2026-10-15",
+     402747.0
+    ],
+    [
+     "2026-10-16",
+     401112.0
+    ],
+    [
+     "2026-10-19",
+     397638.0
+    ],
+    [
+     "2026-10-21",
+     395691.0
+    ],
+    [
+     "2026-10-22",
+     394706.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "GRASIM",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 2832.9,
+     "stop": 2888.57,
+     "exit_time": "09:35",
+     "exit": 2837.7,
+     "reason": "target",
+     "qty": 35,
+     "pnl": -310.0,
+     "ret_pct": -0.313
+    },
+    {
+     "symbol": "COFORGE",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1964.0,
+     "stop": 1950.05,
+     "exit_time": "09:35",
+     "exit": 1969.63,
+     "reason": "target",
+     "qty": 80,
+     "pnl": 127.0,
+     "ret_pct": 0.081
+    },
+    {
+     "symbol": "BRITANNIA",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 4619.2,
+     "stop": 4689.85,
+     "exit_time": "09:35",
+     "exit": 4615.3,
+     "reason": "target",
+     "qty": 26,
+     "pnl": -156.0,
+     "ret_pct": -0.13
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1886.2,
+     "stop": 1890.48,
+     "exit_time": "09:35",
+     "exit": 1890.48,
+     "reason": "stop",
+     "qty": 83,
+     "pnl": -599.0,
+     "ret_pct": -0.383
+    },
+    {
+     "symbol": "ASIANPAINT",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 2284.0,
+     "stop": 2323.55,
+     "exit_time": "09:35",
+     "exit": 2281.8,
+     "reason": "target",
+     "qty": 49,
+     "pnl": -46.0,
+     "ret_pct": -0.041
+    },
+    {
+     "symbol": "HAL",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 4936.0,
+     "stop": 4967.5,
+     "exit_time": "09:35",
+     "exit": 4917.33,
+     "reason": "target",
+     "qty": 32,
+     "pnl": 273.0,
+     "ret_pct": 0.173
+    },
+    {
+     "symbol": "FORTIS",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 738.6,
+     "stop": 738.48,
+     "exit_time": "09:30",
+     "exit": 738.48,
+     "reason": "stop",
+     "qty": 215,
+     "pnl": -410.0,
+     "ret_pct": -0.258
+    },
+    {
+     "symbol": "CUMMINSIND",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 4583.9,
+     "stop": 4616.15,
+     "exit_time": "09:35",
+     "exit": 4582.9,
+     "reason": "target",
+     "qty": 34,
+     "pnl": -287.0,
+     "ret_pct": -0.184
+    },
+    {
+     "symbol": "ANANDRATHI",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 2170.2,
+     "stop": 2157.75,
+     "exit_time": "10:10",
+     "exit": 2176.1,
+     "reason": "target",
+     "qty": 73,
+     "pnl": 105.0,
+     "ret_pct": 0.066
+    },
+    {
+     "symbol": "ADANIPORTS",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1781.0,
+     "stop": 1765.45,
+     "exit_time": "09:50",
+     "exit": 1765.45,
+     "reason": "stop",
+     "qty": 89,
+     "pnl": -1629.0,
+     "ret_pct": -1.027
+    },
+    {
+     "symbol": "CANBK",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 121.52,
+     "stop": 118.32,
+     "exit_time": "09:35",
+     "exit": 121.9,
+     "reason": "target",
+     "qty": 609,
+     "pnl": 54.0,
+     "ret_pct": 0.073
+    },
+    {
+     "symbol": "BPCL",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 293.75,
+     "stop": 293.53,
+     "exit_time": "09:30",
+     "exit": 293.53,
+     "reason": "stop",
+     "qty": 546,
+     "pnl": -318.0,
+     "ret_pct": -0.198
+    },
+    {
+     "symbol": "AUROPHARMA",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1657.7,
+     "stop": 1668.35,
+     "exit_time": "09:35",
+     "exit": 1668.35,
+     "reason": "stop",
+     "qty": 96,
+     "pnl": -1462.0,
+     "ret_pct": -0.919
+    },
+    {
+     "symbol": "ASHOKLEY",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 147.77,
+     "stop": 149.0,
+     "exit_time": "09:55",
+     "exit": 147.95,
+     "reason": "target",
+     "qty": 1086,
+     "pnl": -521.0,
+     "ret_pct": -0.325
+    },
+    {
+     "symbol": "ADANIPOWER",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 194.91,
+     "stop": 195.86,
+     "exit_time": "09:30",
+     "exit": 195.86,
+     "reason": "stop",
+     "qty": 823,
+     "pnl": -1228.0,
+     "ret_pct": -0.766
+    },
+    {
+     "symbol": "DMART",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 3338.1,
+     "stop": 3381.75,
+     "exit_time": "09:45",
+     "exit": 3338.07,
+     "reason": "target",
+     "qty": 43,
+     "pnl": -298.0,
+     "ret_pct": -0.207
+    },
+    {
+     "symbol": "BHARATFORG",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1839.1,
+     "stop": 1851.03,
+     "exit_time": "09:40",
+     "exit": 1836.33,
+     "reason": "target",
+     "qty": 87,
+     "pnl": -87.0,
+     "ret_pct": -0.054
+    },
+    {
+     "symbol": "BANKBARODA",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 228.05,
+     "stop": 227.78,
+     "exit_time": "09:30",
+     "exit": 227.78,
+     "reason": "stop",
+     "qty": 705,
+     "pnl": -635.0,
+     "ret_pct": -0.395
+    },
+    {
+     "symbol": "AUBANK",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 988.0,
+     "stop": 1003.7,
+     "exit_time": "09:35",
+     "exit": 987.8,
+     "reason": "target",
+     "qty": 122,
+     "pnl": -234.0,
+     "ret_pct": -0.195
+    },
+    {
+     "symbol": "ADANIPORTS",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1744.8,
+     "stop": 1743.37,
+     "exit_time": "09:30",
+     "exit": 1743.37,
+     "reason": "stop",
+     "qty": 92,
+     "pnl": -380.0,
+     "ret_pct": -0.237
+    },
+    {
+     "symbol": "CUMMINSIND",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 4698.2,
+     "stop": 4792.27,
+     "exit_time": "09:35",
+     "exit": 4690.3,
+     "reason": "target",
+     "qty": 20,
+     "pnl": -54.0,
+     "ret_pct": -0.057
+    },
+    {
+     "symbol": "AXISBANK",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1279.2,
+     "stop": 1264.15,
+     "exit_time": "09:35",
+     "exit": 1277.4,
+     "reason": "target",
+     "qty": 126,
+     "pnl": -428.0,
+     "ret_pct": -0.265
+    },
+    {
+     "symbol": "AUBANK",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 999.2,
+     "stop": 1000.2,
+     "exit_time": "09:30",
+     "exit": 1000.2,
+     "reason": "stop",
+     "qty": 162,
+     "pnl": -607.0,
+     "ret_pct": -0.375
+    },
+    {
+     "symbol": "ANGELONE",
+     "date": "2026-10-15",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 308.5,
+     "stop": 306.2,
+     "exit_time": "09:40",
+     "exit": 310.1,
+     "reason": "target",
+     "qty": 525,
+     "pnl": 508.0,
+     "ret_pct": 0.313
+    },
+    {
+     "symbol": "ADANIPORTS",
+     "date": "2026-10-15",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1729.9,
+     "stop": 1749.55,
+     "exit_time": "10:35",
+     "exit": 1749.55,
+     "reason": "stop",
+     "qty": 93,
+     "pnl": -2078.0,
+     "ret_pct": -1.292
+    },
+    {
+     "symbol": "MARUTI",
+     "date": "2026-10-14",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 11284.0,
+     "stop": 11237.0,
+     "exit_time": "14:50",
+     "exit": 11237.0,
+     "reason": "stop",
+     "qty": 14,
+     "pnl": -903.0,
+     "ret_pct": -0.571
+    },
+    {
+     "symbol": "HINDPETRO",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 327.8,
+     "stop": 328.76,
+     "exit_time": "09:30",
+     "exit": 328.76,
+     "reason": "stop",
+     "qty": 495,
+     "pnl": -921.0,
+     "ret_pct": -0.568
+    },
+    {
+     "symbol": "HDFCLIFE",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 554.1,
+     "stop": 559.91,
+     "exit_time": "09:35",
+     "exit": 553.5,
+     "reason": "target",
+     "qty": 293,
+     "pnl": -26.0,
+     "ret_pct": -0.016
+    },
+    {
+     "symbol": "DIVISLAB",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 9196.0,
+     "stop": 9294.0,
+     "exit_time": "09:35",
+     "exit": 9158.5,
+     "reason": "target",
+     "qty": 17,
+     "pnl": 316.0,
+     "ret_pct": 0.203
+    },
+    {
+     "symbol": "AUROPHARMA",
+     "date": "2026-10-14",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1676.9,
+     "stop": 1686.2,
+     "exit_time": "09:55",
+     "exit": 1664.43,
+     "reason": "target",
+     "qty": 96,
+     "pnl": 868.0,
+     "ret_pct": 0.54
+    },
+    {
+     "symbol": "GLENMARK",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 2263.5,
+     "stop": 2279.65,
+     "exit_time": "12:40",
+     "exit": 2258.7,
+     "reason": "target",
+     "qty": 72,
+     "pnl": 13.0,
+     "ret_pct": 0.008
+    },
+    {
+     "symbol": "DLF",
+     "date": "2026-10-13",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 650.3,
+     "stop": 648.75,
+     "exit_time": "09:35",
+     "exit": 655.23,
+     "reason": "target",
+     "qty": 251,
+     "pnl": 903.0,
+     "ret_pct": 0.553
+    },
+    {
+     "symbol": "DELHIVERY",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 407.7,
+     "stop": 412.73,
+     "exit_time": "09:45",
+     "exit": 412.73,
+     "reason": "stop",
+     "qty": 384,
+     "pnl": -2364.0,
+     "ret_pct": -1.511
+    },
+    {
+     "symbol": "CGPOWER",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 842.0,
+     "stop": 868.48,
+     "exit_time": "09:35",
+     "exit": 845.25,
+     "reason": "target",
+     "qty": 75,
+     "pnl": -400.0,
+     "ret_pct": -0.633
+    },
+    {
+     "symbol": "AXISBANK",
+     "date": "2026-10-13",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 1253.0,
+     "stop": 1254.7,
+     "exit_time": "09:30",
+     "exit": 1254.7,
+     "reason": "stop",
+     "qty": 130,
+     "pnl": -473.0,
+     "ret_pct": -0.29
+    },
+    {
+     "symbol": "BAJFINANCE",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 971.5,
+     "stop": 959.35,
+     "exit_time": "09:35",
+     "exit": 968.43,
+     "reason": "target",
+     "qty": 165,
+     "pnl": -706.0,
+     "ret_pct": -0.44
+    },
+    {
+     "symbol": "AUBANK",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 985.6,
+     "stop": 982.45,
+     "exit_time": "10:40",
+     "exit": 982.45,
+     "reason": "stop",
+     "qty": 167,
+     "pnl": -976.0,
+     "ret_pct": -0.593
+    },
+    {
+     "symbol": "ASIANPAINT",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 2361.3,
+     "stop": 2340.25,
+     "exit_time": "11:00",
+     "exit": 2340.25,
+     "reason": "stop",
+     "qty": 69,
+     "pnl": -1703.0,
+     "ret_pct": -1.045
+    },
+    {
+     "symbol": "ANGELONE",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 300.15,
+     "stop": 292.28,
+     "exit_time": "09:35",
+     "exit": 300.6,
+     "reason": "target",
+     "qty": 254,
+     "pnl": -67.0,
+     "ret_pct": -0.088
+    },
+    {
+     "symbol": "ADANIGREEN",
+     "date": "2026-10-12",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1271.3,
+     "stop": 1256.1,
+     "exit_time": "12:30",
+     "exit": 1274.4,
+     "reason": "target",
+     "qty": 127,
+     "pnl": 63.0,
+     "ret_pct": 0.039
+    }
+   ],
+   "today": [
+    {
+     "symbol": "BANDHANBNK",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 156.24,
+     "stop": 158.52,
+     "exit_time": "09:35",
+     "exit": 155.74,
+     "reason": "target",
+     "qty": 1046,
+     "pnl": 189.0,
+     "ret_pct": 0.116,
+     "open_now": false
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-23",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 1911.3,
+     "stop": 1895.73,
+     "exit_time": "09:40",
+     "exit": 1906.3,
+     "reason": "square-off",
+     "qty": 104,
+     "pnl": -757.0,
+     "ret_pct": -0.381,
+     "open_now": false
+    },
+    {
+     "symbol": "DIXON",
+     "date": "2026-10-23",
+     "side": "LONG",
+     "entry_time": "09:30",
+     "entry": 11625.0,
+     "stop": 11600.33,
+     "exit_time": "09:30",
+     "exit": 11600.33,
+     "reason": "stop",
+     "qty": 17,
+     "pnl": -951.0,
+     "ret_pct": -0.481,
+     "open_now": false
+    },
+    {
+     "symbol": "DLF",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 662.35,
+     "stop": 663.14,
+     "exit_time": "09:40",
+     "exit": 661.7,
+     "reason": "square-off",
+     "qty": 302,
+     "pnl": -202.0,
+     "ret_pct": -0.101,
+     "open_now": false
+    },
+    {
+     "symbol": "GVT&D",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:30",
+     "entry": 3568.5,
+     "stop": 3747.05,
+     "exit_time": "09:35",
+     "exit": 3567.4,
+     "reason": "target",
+     "qty": 13,
+     "pnl": -100.0,
+     "ret_pct": -0.216,
+     "open_now": false
+    }
+   ]
+  },
+  {
+   "key": "orb5_inplay",
+   "name": "ORB-5 'stocks in play'",
+   "description": "Zarattini, Barbon & Aziz (2024): only stocks with unusual early volume; trade the direction of the first 5-minute candle, tight stop (10% of daily ATR), hold to the close.",
+   "evidence": "WEAK",
+   "horizon": "intraday",
+   "status": "not-working",
+   "metrics": {
+    "days": 59,
+    "trades": 498,
+    "trades_per_day": 8.44,
+    "return_pct": -28.37,
+    "after_tax_return_pct": -28.37,
+    "annualised_pct": -76.0,
+    "sharpe": -15.44,
+    "max_dd_pct": -28.37,
+    "win_rate": 11.2,
+    "avg_trade_pct": -0.316,
+    "profit_factor": 0.37,
+    "avg_day_pct": -0.562,
+    "ci95_day_pct": [
+     -0.71,
+     -0.415
+    ],
+    "t_stat": -7.47,
+    "significant": true,
+    "start": "2026-07-29",
+    "end": "2026-10-22"
+   },
+   "equity": [
+    [
+     "2026-07-29",
+     500000.0
+    ],
+    [
+     "2026-07-30",
+     500000.0
+    ],
+    [
+     "2026-07-31",
+     500000.0
+    ],
+    [
+     "2026-08-03",
+     500000.0
+    ],
+    [
+     "2026-08-04",
+     500000.0
+    ],
+    [
+     "2026-08-05",
+     494477.0
+    ],
+    [
+     "2026-08-06",
+     495195.0
+    ],
+    [
+     "2026-08-07",
+     492236.0
+    ],
+    [
+     "2026-08-10",
+     497618.0
+    ],
+    [
+     "2026-08-11",
+     492177.0
+    ],
+    [
+     "2026-08-12",
+     492860.0
+    ],
+    [
+     "2026-08-13",
+     488269.0
+    ],
+    [
+     "2026-08-14",
+     483243.0
+    ],
+    [
+     "2026-08-17",
+     478000.0
+    ],
+    [
+     "2026-08-18",
+     473144.0
+    ],
+    [
+     "2026-08-19",
+     472913.0
+    ],
+    [
+     "2026-08-20",
+     469810.0
+    ],
+    [
+     "2026-08-21",
+     466747.0
+    ],
+    [
+     "2026-08-24",
+     464734.0
+    ],
+    [
+     "2026-08-25",
+     462551.0
+    ],
+    [
+     "2026-08-26",
+     463138.0
+    ],
+    [
+     "2026-08-27",
+     458899.0
+    ],
+    [
+     "2026-08-28",
+     460121.0
+    ],
+    [
+     "2026-08-31",
+     460886.0
+    ],
+    [
+     "2026-09-01",
+     462438.0
+    ],
+    [
+     "2026-09-02",
+     458636.0
+    ],
+    [
+     "2026-09-03",
+     458317.0
+    ],
+    [
+     "2026-09-04",
+     457001.0
+    ],
+    [
+     "2026-09-07",
+     459052.0
+    ],
+    [
+     "2026-09-08",
+     453972.0
+    ],
+    [
+     "2026-09-09",
+     454975.0
+    ],
+    [
+     "2026-09-10",
+     450850.0
+    ],
+    [
+     "2026-09-11",
+     446285.0
+    ],
+    [
+     "2026-09-15",
+     441654.0
+    ],
+    [
+     "2026-09-16",
+     436654.0
+    ],
+    [
+     "2026-09-17",
+     433976.0
+    ],
+    [
+     "2026-09-18",
+     430122.0
+    ],
+    [
+     "2026-09-21",
+     425462.0
+    ],
+    [
+     "2026-09-22",
+     420376.0
+    ],
+    [
+     "2026-09-23",
+     420395.0
+    ],
+    [
+     "2026-09-24",
+     416428.0
+    ],
+    [
+     "2026-09-25",
+     412598.0
+    ],
+    [
+     "2026-09-28",
+     412122.0
+    ],
+    [
+     "2026-09-29",
+     409372.0
+    ],
+    [
+     "2026-09-30",
+     412584.0
+    ],
+    [
+     "2026-10-01",
+     408172.0
+    ],
+    [
+     "2026-10-05",
+     404730.0
+    ],
+    [
+     "2026-10-06",
+     401160.0
+    ],
+    [
+     "2026-10-07",
+     397145.0
+    ],
+    [
+     "2026-10-08",
+     394505.0
+    ],
+    [
+     "2026-10-09",
+     389929.0
+    ],
+    [
+     "2026-10-12",
+     386949.0
+    ],
+    [
+     "2026-10-13",
+     382397.0
+    ],
+    [
+     "2026-10-14",
+     378273.0
+    ],
+    [
+     "2026-10-15",
+     373836.0
+    ],
+    [
+     "2026-10-16",
+     369525.0
+    ],
+    [
+     "2026-10-19",
+     365396.0
+    ],
+    [
+     "2026-10-21",
+     361229.0
+    ],
+    [
+     "2026-10-22",
+     358153.0
+    ]
+   ],
+   "recent_trades": [
+    {
+     "symbol": "WAAREEENER",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 2395.1,
+     "stop": 2402.51,
+     "exit_time": "15:00",
+     "exit": 2360.9,
+     "reason": "square-off",
+     "qty": 30,
+     "pnl": 818.0,
+     "ret_pct": 1.139
+    },
+    {
+     "symbol": "POWERINDIA",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 27200.0,
+     "stop": 27298.06,
+     "exit_time": "10:20",
+     "exit": 27298.06,
+     "reason": "stop",
+     "qty": 2,
+     "pnl": -396.0,
+     "ret_pct": -0.728
+    },
+    {
+     "symbol": "LICI",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 385.8,
+     "stop": 386.66,
+     "exit_time": "09:20",
+     "exit": 386.66,
+     "reason": "stop",
+     "qty": 187,
+     "pnl": -422.0,
+     "ret_pct": -0.586
+    },
+    {
+     "symbol": "SWIGGY",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 213.7,
+     "stop": 214.55,
+     "exit_time": "09:20",
+     "exit": 214.55,
+     "reason": "stop",
+     "qty": 338,
+     "pnl": -547.0,
+     "ret_pct": -0.759
+    },
+    {
+     "symbol": "DRREDDY",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 1225.7,
+     "stop": 1228.25,
+     "exit_time": "09:20",
+     "exit": 1228.25,
+     "reason": "stop",
+     "qty": 58,
+     "pnl": -320.0,
+     "ret_pct": -0.45
+    },
+    {
+     "symbol": "KEI",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 3882.1,
+     "stop": 3896.95,
+     "exit_time": "09:20",
+     "exit": 3896.95,
+     "reason": "stop",
+     "qty": 18,
+     "pnl": -521.0,
+     "ret_pct": -0.747
+    },
+    {
+     "symbol": "MAZDOCK",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 1897.5,
+     "stop": 1903.16,
+     "exit_time": "09:40",
+     "exit": 1903.16,
+     "reason": "stop",
+     "qty": 38,
+     "pnl": -476.0,
+     "ret_pct": -0.661
+    },
+    {
+     "symbol": "DIVISLAB",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 9053.5,
+     "stop": 9076.0,
+     "exit_time": "09:40",
+     "exit": 9076.0,
+     "reason": "stop",
+     "qty": 7,
+     "pnl": -390.0,
+     "ret_pct": -0.616
+    },
+    {
+     "symbol": "ETERNAL",
+     "date": "2026-10-22",
+     "side": "SHORT",
+     "entry_time": "13:20",
+     "entry": 307.15,
+     "stop": 308.08,
+     "exit_time": "13:25",
+     "exit": 308.08,
+     "reason": "stop",
+     "qty": 235,
+     "pnl": -392.0,
+     "ret_pct": -0.543
+    },
+    {
+     "symbol": "INDHOTEL",
+     "date": "2026-10-22",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 772.1,
+     "stop": 770.26,
+     "exit_time": "09:20",
+     "exit": 770.26,
+     "reason": "stop",
+     "qty": 93,
+     "pnl": -430.0,
+     "ret_pct": -0.598
+    },
+    {
+     "symbol": "RELIANCE",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 1229.3,
+     "stop": 1226.87,
+     "exit_time": "09:20",
+     "exit": 1226.87,
+     "reason": "stop",
+     "qty": 59,
+     "pnl": -318.0,
+     "ret_pct": -0.438
+    },
+    {
+     "symbol": "KALYANKJIL",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 565.95,
+     "stop": 564.16,
+     "exit_time": "09:20",
+     "exit": 564.16,
+     "reason": "stop",
+     "qty": 128,
+     "pnl": -490.0,
+     "ret_pct": -0.676
+    },
+    {
+     "symbol": "WIPRO",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 188.96,
+     "stop": 188.48,
+     "exit_time": "09:20",
+     "exit": 188.48,
+     "reason": "stop",
+     "qty": 386,
+     "pnl": -447.0,
+     "ret_pct": -0.612
+    },
+    {
+     "symbol": "ULTRACEMCO",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 10912.0,
+     "stop": 10886.79,
+     "exit_time": "09:20",
+     "exit": 10886.79,
+     "reason": "stop",
+     "qty": 6,
+     "pnl": -312.0,
+     "ret_pct": -0.477
+    },
+    {
+     "symbol": "BAJFINANCE",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "11:05",
+     "entry": 930.05,
+     "stop": 932.65,
+     "exit_time": "11:05",
+     "exit": 932.65,
+     "reason": "stop",
+     "qty": 78,
+     "pnl": -377.0,
+     "ret_pct": -0.52
+    },
+    {
+     "symbol": "LTM",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 4260.1,
+     "stop": 4274.96,
+     "exit_time": "09:20",
+     "exit": 4274.96,
+     "reason": "stop",
+     "qty": 17,
+     "pnl": -514.0,
+     "ret_pct": -0.711
+    },
+    {
+     "symbol": "UNIONBANK",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 185.0,
+     "stop": 184.46,
+     "exit_time": "09:20",
+     "exit": 184.46,
+     "reason": "stop",
+     "qty": 394,
+     "pnl": -474.0,
+     "ret_pct": -0.649
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-21",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 1899.2,
+     "stop": 1895.03,
+     "exit_time": "09:20",
+     "exit": 1895.03,
+     "reason": "stop",
+     "qty": 38,
+     "pnl": -332.0,
+     "ret_pct": -0.46
+    },
+    {
+     "symbol": "HINDZINC",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 549.1,
+     "stop": 550.55,
+     "exit_time": "09:20",
+     "exit": 550.55,
+     "reason": "stop",
+     "qty": 133,
+     "pnl": -456.0,
+     "ret_pct": -0.626
+    },
+    {
+     "symbol": "ABB",
+     "date": "2026-10-21",
+     "side": "SHORT",
+     "entry_time": "11:10",
+     "entry": 6668.5,
+     "stop": 6688.73,
+     "exit_time": "11:10",
+     "exit": 6688.73,
+     "reason": "stop",
+     "qty": 10,
+     "pnl": -447.0,
+     "ret_pct": -0.671
+    },
+    {
+     "symbol": "ULTRACEMCO",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 11043.0,
+     "stop": 11020.99,
+     "exit_time": "09:20",
+     "exit": 11020.99,
+     "reason": "stop",
+     "qty": 6,
+     "pnl": -295.0,
+     "ret_pct": -0.445
+    },
+    {
+     "symbol": "AUROPHARMA",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 1676.6,
+     "stop": 1672.88,
+     "exit_time": "09:20",
+     "exit": 1672.88,
+     "reason": "stop",
+     "qty": 44,
+     "pnl": -429.0,
+     "ret_pct": -0.58
+    },
+    {
+     "symbol": "EICHERMOT",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 7381.0,
+     "stop": 7366.13,
+     "exit_time": "09:20",
+     "exit": 7366.13,
+     "reason": "stop",
+     "qty": 10,
+     "pnl": -325.0,
+     "ret_pct": -0.44
+    },
+    {
+     "symbol": "INDUSTOWER",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 390.5,
+     "stop": 389.54,
+     "exit_time": "09:20",
+     "exit": 389.54,
+     "reason": "stop",
+     "qty": 189,
+     "pnl": -445.0,
+     "ret_pct": -0.603
+    },
+    {
+     "symbol": "UNIONBANK",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 176.49,
+     "stop": 176.0,
+     "exit_time": "09:35",
+     "exit": 176.0,
+     "reason": "stop",
+     "qty": 418,
+     "pnl": -470.0,
+     "ret_pct": -0.636
+    },
+    {
+     "symbol": "PERSISTENT",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 5864.0,
+     "stop": 5845.57,
+     "exit_time": "09:25",
+     "exit": 5845.57,
+     "reason": "stop",
+     "qty": 12,
+     "pnl": -476.0,
+     "ret_pct": -0.675
+    },
+    {
+     "symbol": "AXISBANK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 1236.3,
+     "stop": 1238.89,
+     "exit_time": "09:20",
+     "exit": 1238.89,
+     "reason": "stop",
+     "qty": 59,
+     "pnl": -328.0,
+     "ret_pct": -0.45
+    },
+    {
+     "symbol": "MANKIND",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 2306.0,
+     "stop": 2299.52,
+     "exit_time": "09:20",
+     "exit": 2299.52,
+     "reason": "stop",
+     "qty": 32,
+     "pnl": -472.0,
+     "ret_pct": -0.639
+    },
+    {
+     "symbol": "FEDERALBNK",
+     "date": "2026-10-19",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 324.25,
+     "stop": 325.07,
+     "exit_time": "09:20",
+     "exit": 325.07,
+     "reason": "stop",
+     "qty": 228,
+     "pnl": -453.0,
+     "ret_pct": -0.613
+    },
+    {
+     "symbol": "PNB",
+     "date": "2026-10-19",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 124.36,
+     "stop": 124.07,
+     "exit_time": "09:20",
+     "exit": 124.07,
+     "reason": "stop",
+     "qty": 593,
+     "pnl": -436.0,
+     "ret_pct": -0.591
+    },
+    {
+     "symbol": "INDIANB",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 847.7,
+     "stop": 845.49,
+     "exit_time": "09:20",
+     "exit": 845.49,
+     "reason": "stop",
+     "qty": 88,
+     "pnl": -462.0,
+     "ret_pct": -0.619
+    },
+    {
+     "symbol": "HDFCLIFE",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:25",
+     "entry": 535.4,
+     "stop": 536.88,
+     "exit_time": "09:25",
+     "exit": 536.88,
+     "reason": "stop",
+     "qty": 139,
+     "pnl": -384.0,
+     "ret_pct": -0.516
+    },
+    {
+     "symbol": "CANBK",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 118.99,
+     "stop": 118.67,
+     "exit_time": "09:20",
+     "exit": 118.67,
+     "reason": "stop",
+     "qty": 627,
+     "pnl": -470.0,
+     "ret_pct": -0.629
+    },
+    {
+     "symbol": "FEDERALBNK",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 336.5,
+     "stop": 337.25,
+     "exit_time": "09:20",
+     "exit": 337.25,
+     "reason": "stop",
+     "qty": 222,
+     "pnl": -435.0,
+     "ret_pct": -0.584
+    },
+    {
+     "symbol": "BRITANNIA",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 4798.1,
+     "stop": 4808.18,
+     "exit_time": "09:25",
+     "exit": 4808.18,
+     "reason": "stop",
+     "qty": 15,
+     "pnl": -411.0,
+     "ret_pct": -0.572
+    },
+    {
+     "symbol": "WIPRO",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 177.83,
+     "stop": 177.43,
+     "exit_time": "09:20",
+     "exit": 177.43,
+     "reason": "stop",
+     "qty": 419,
+     "pnl": -433.0,
+     "ret_pct": -0.581
+    },
+    {
+     "symbol": "BHARTIARTL",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:45",
+     "entry": 1880.9,
+     "stop": 1877.03,
+     "exit_time": "09:45",
+     "exit": 1877.03,
+     "reason": "stop",
+     "qty": 39,
+     "pnl": -327.0,
+     "ret_pct": -0.445
+    },
+    {
+     "symbol": "ANGELONE",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 312.55,
+     "stop": 313.53,
+     "exit_time": "09:20",
+     "exit": 313.53,
+     "reason": "stop",
+     "qty": 239,
+     "pnl": -502.0,
+     "ret_pct": -0.673
+    },
+    {
+     "symbol": "LTF",
+     "date": "2026-10-16",
+     "side": "SHORT",
+     "entry_time": "09:25",
+     "entry": 247.15,
+     "stop": 247.98,
+     "exit_time": "09:25",
+     "exit": 247.98,
+     "reason": "stop",
+     "qty": 302,
+     "pnl": -519.0,
+     "ret_pct": -0.696
+    },
+    {
+     "symbol": "TECHM",
+     "date": "2026-10-16",
+     "side": "LONG",
+     "entry_time": "09:35",
+     "entry": 1737.5,
+     "stop": 1732.92,
+     "exit_time": "09:35",
+     "exit": 1732.92,
+     "reason": "stop",
+     "qty": 42,
+     "pnl": -368.0,
+     "ret_pct": -0.503
+    }
+   ],
+   "today": [
+    {
+     "symbol": "SWIGGY",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 192.8,
+     "stop": 193.7,
+     "exit_time": "09:20",
+     "exit": 193.7,
+     "reason": "stop",
+     "qty": 519,
+     "pnl": -811.0,
+     "ret_pct": -0.811,
+     "open_now": false
+    },
+    {
+     "symbol": "INDHOTEL",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:40",
+     "entry": 781.65,
+     "stop": 783.69,
+     "exit_time": "09:40",
+     "exit": 783.69,
+     "reason": "stop",
+     "qty": 128,
+     "pnl": -604.0,
+     "ret_pct": -0.605,
+     "open_now": false
+    },
+    {
+     "symbol": "ANANDRATHI",
+     "date": "2026-10-23",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 2233.5,
+     "stop": 2228.33,
+     "exit_time": "09:20",
+     "exit": 2228.33,
+     "reason": "stop",
+     "qty": 44,
+     "pnl": -565.0,
+     "ret_pct": -0.574,
+     "open_now": false
+    },
+    {
+     "symbol": "HINDPETRO",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 338.55,
+     "stop": 339.46,
+     "exit_time": "09:40",
+     "exit": 334.8,
+     "reason": "square-off",
+     "qty": 295,
+     "pnl": 835.0,
+     "ret_pct": 0.837,
+     "open_now": false
+    },
+    {
+     "symbol": "SBIN",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 965.25,
+     "stop": 967.04,
+     "exit_time": "09:20",
+     "exit": 967.04,
+     "reason": "stop",
+     "qty": 103,
+     "pnl": -407.0,
+     "ret_pct": -0.409,
+     "open_now": false
+    },
+    {
+     "symbol": "COFORGE",
+     "date": "2026-10-23",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 1987.9,
+     "stop": 1981.9,
+     "exit_time": "09:20",
+     "exit": 1981.9,
+     "reason": "stop",
+     "qty": 50,
+     "pnl": -640.0,
+     "ret_pct": -0.643,
+     "open_now": false
+    },
+    {
+     "symbol": "CHOLAFIN",
+     "date": "2026-10-23",
+     "side": "LONG",
+     "entry_time": "09:20",
+     "entry": 1487.8,
+     "stop": 1483.15,
+     "exit_time": "09:20",
+     "exit": 1483.15,
+     "reason": "stop",
+     "qty": 67,
+     "pnl": -653.0,
+     "ret_pct": -0.654,
+     "open_now": false
+    },
+    {
+     "symbol": "PATANJALI",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 352.9,
+     "stop": 353.99,
+     "exit_time": "09:20",
+     "exit": 353.99,
+     "reason": "stop",
+     "qty": 283,
+     "pnl": -653.0,
+     "ret_pct": -0.654,
+     "open_now": false
+    },
+    {
+     "symbol": "LTM",
+     "date": "2026-10-23",
+     "side": "LONG",
+     "entry_time": "09:25",
+     "entry": 4371.9,
+     "stop": 4357.6,
+     "exit_time": "09:25",
+     "exit": 4357.6,
+     "reason": "stop",
+     "qty": 22,
+     "pnl": -646.0,
+     "ret_pct": -0.67,
+     "open_now": false
+    },
+    {
+     "symbol": "KEI",
+     "date": "2026-10-23",
+     "side": "SHORT",
+     "entry_time": "09:20",
+     "entry": 3826.4,
+     "stop": 3843.66,
+     "exit_time": "09:40",
+     "exit": 3758.5,
+     "reason": "square-off",
+     "qty": 26,
+     "pnl": 1495.0,
+     "ret_pct": 1.505,
+     "open_now": false
+    }
+   ]
+  }
+ ]
+}

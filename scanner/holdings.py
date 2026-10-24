@@ -39,8 +39,12 @@ def save_holdings(df: pd.DataFrame) -> None:
     out["symbol"] = out["symbol"].astype(str).str.strip().str.upper()
     out = out[~out["symbol"].isin(["", "NAN", "NONE"])]
     out["buy_date"] = pd.to_datetime(out["buy_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    for c in ("qty", "buy_price", "stop_loss_pct", "target_pct"):
+        # whole numbers stay whole ("10", not "10.0"); everything else is written unchanged
+        v = pd.to_numeric(out[c], errors="coerce")
+        out[c] = [int(x) if pd.notna(x) and float(x).is_integer() else (None if pd.isna(x) else x) for x in v]
     tmp = HOLDINGS_FILE.with_suffix(".tmp")
-    out[HOLDING_COLS].to_csv(tmp, index=False)
+    out[HOLDING_COLS].to_csv(tmp, index=False, lineterminator="\n")   # LF on Windows too, like the example file
     tmp.replace(HOLDINGS_FILE)
 
 

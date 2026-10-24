@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 import traceback
@@ -52,10 +53,20 @@ def main() -> int:
             except OSError:
                 pass
 
+    # Progress 0..1: downloads take the first half of a full scan, testing the strategies the rest
+    # (a re-check without download is all testing). daily.py logs "Testing strategy i/n: name".
+    dl_share = 0.0 if args.no_update else 0.5
+    testing = re.compile(r"^Testing strategy (\d+)/(\d+)")
+
     def log(msg: str):
         print(msg, flush=True)
         lg.info(msg)
-        write_status(message=msg)
+        m = testing.match(msg)
+        if m:
+            i, n = int(m.group(1)), max(int(m.group(2)), 1)
+            write_status(message=msg, progress=round(dl_share + (1 - dl_share) * (i - 1) / n, 3))
+        else:
+            write_status(message=msg)
 
     last = [0.0]
 
@@ -63,11 +74,12 @@ def main() -> int:
         frac = done / max(total, 1)
         if frac - last[0] >= 0.02 or done == total:
             last[0] = frac
-            write_status(progress=round(frac, 3), message=f"Downloading {sym} ({done}/{total})")
+            write_status(progress=round(frac * dl_share, 3), message=f"Downloading {sym} ({done}/{total})")
 
     write_status()
-    cfg = load_config()
+    cfg: dict = {}
     try:
+        cfg = load_config()   # inside the try: a broken config.yaml must end as a logged, reported failure
         result = run_daily(cfg, update=not args.no_update, progress=progress, log=log, by=args.by)
     except ScanBusy as e:
         log(str(e))
@@ -81,7 +93,12 @@ def main() -> int:
             send_telegram(f"⚠️ NSE Scanner: scan FAILED at {time.strftime('%H:%M')}\n{e}\n"
                           "Details: data/logs/scanner.log")
         return 1
-    summary = format_daily(result, int((cfg.get("telegram") or {}).get("top_n", 10)))
+    try:
+        summary = format_daily(result, int((cfg.get("telegram") or {}).get("top_n", 10)))
+    except Exception as e:   # the scan finished and is saved: a summary problem must not leave it "running"
+        lg.error("Summary failed: %s\n%s", e, traceback.format_exc())
+        summary = (f"NSE Scanner: scan finished at {time.strftime('%H:%M')}, but the summary could not be "
+                   f"written ({type(e).__name__}). Open the dashboard. Details: data/logs/scanner.log")
     print("\n" + summary)
     if args.telegram:
         ok, msg = send_telegram(summary)

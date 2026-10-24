@@ -47,14 +47,36 @@ def _only(f: Factors, names) -> pd.DataFrame:
     return pd.DataFrame([row] * len(f.p.dates), index=f.p.dates, columns=f.p.close.columns)
 
 
-def build_strategies(cfg: dict) -> list:
+# Strategies that are off unless config.yaml turns them on: tested here and rejected. They are still
+# re-tested (cached) by the daily scan so the platform can show the evidence, but never produce orders.
+REJECTED_REASONS = {
+    "rsi2_pullback": "Lost money after realistic Indian delivery costs (short-term reversal works mostly in illiquid stocks).",
+    "near_high": "Never beat the average stock in our tests.",
+    "legacy_rules": "The old v1 rules lost about 12%/yr in testing; kept only as a 'what not to do' baseline.",
+}
+
+
+def strategy_lifecycle(cfg: dict, key: str) -> tuple[str, str | None]:
+    """('active' | 'disabled' | 'rejected', reason). Rejected = off by default here (REJECTED_REASONS) or
+    `enabled: false` with a `rejected_reason:` in config.yaml; disabled = switched off by the user."""
+    conf = (cfg.get("strategies") or {}).get(key) or {}
+    default_on = key not in REJECTED_REASONS
+    if bool(conf.get("enabled", default_on)):
+        return "active", None
+    reason = conf.get("rejected_reason") or REJECTED_REASONS.get(key)
+    return ("rejected", str(reason)) if reason else ("disabled", None)
+
+
+def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
+    """The enabled strategies (config.yaml `strategies:`). With include_disabled=True every strategy in
+    the library is returned (see strategy_lifecycle for which ones may trade)."""
     conf = cfg.get("strategies") or {}
 
     def opt(key: str, name: str, default):
         return (conf.get(key) or {}).get(name, default)
 
     def enabled(key: str, default: bool = True) -> bool:
-        return bool((conf.get(key) or {}).get("enabled", default))
+        return include_disabled or bool((conf.get(key) or {}).get("enabled", default))
 
     out: list = []
 
@@ -86,7 +108,9 @@ def build_strategies(cfg: dict) -> list:
                          "- the method behind NSE's Nifty100 Low Vol 30 index (17.7% vs 13.7%/yr for Nifty 100, "
                          "2005-18, and much smaller crash losses). Defensive: lags in strong rallies."),
             score=lambda f: -f.vol_ann,
-            eligible=lambda f: (f.turnover_avg20_cr.rank(axis=1, ascending=False) <= big) & f.vol_ann.notna(),
+            # "most traded" among STOCKS: heavily traded ETFs (NIFTYBEES, GOLDBEES...) must not take the slots
+            eligible=lambda f: (f._stocks_only(f.turnover_avg20_cr).rank(axis=1, ascending=False) <= big)
+                               & f.vol_ann.notna(),
             top_n=int(opt(k, "top_n", 20)), keep_rank=int(opt(k, "keep_rank", 40)),
             rebalance=opt(k, "rebalance", "quarterly"), use_regime=opt(k, "use_regime", False),
         ))

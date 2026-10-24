@@ -30,10 +30,14 @@ def format_daily(r: dict, top_n: int = 10) -> str:
     m = r["market"]
     when = datetime.fromisoformat(r["generated_at"]).strftime("%d %b %H:%M")
     price_note = (f"LIVE {r.get('live_source') or ''}".strip() if r.get("live") else "official NSE close")
+    # Index data can be missing (NSE/Yahoo hiccup): print "-" rather than crash after a finished scan.
+    nifty = f"{m['nifty']:,.0f}" if m.get("nifty") is not None else "-"
+    breadth = f"{m['breadth_50']:.0f}%" if m.get("breadth_50") is not None else "-"
+    min_pos = float(r.get("min_position") or 0)
     lines = [f"📈 NSE Scanner - {when} IST",
              f"Prices as of {r['data_date']} ({price_note})",
-             f"{MOOD.get(m['level'], '')} Market {m['label']}: Nifty {m['nifty']:,.0f} ({_pct(m['nifty_change_pct'], 2)}), "
-             f"VIX {m['vix']}, {m['breadth_50']:.0f}% of stocks above 50-DMA",
+             f"{MOOD.get(m['level'], '')} Market {m['label']}: Nifty {nifty} ({_pct(m.get('nifty_change_pct'), 2)}), "
+             f"VIX {m.get('vix') if m.get('vix') is not None else '-'}, {breadth} of stocks above 50-DMA",
              m["advice"]]
     for s in r["strategies"]:
         if s["status"] == "not-working" and s["key"] == "legacy_rules":
@@ -47,13 +51,20 @@ def format_daily(r: dict, top_n: int = 10) -> str:
         pp = (r.get("paper") or {}).get(s["key"])
         if pp:
             lines.append("  " + paper_line(pp))
-        buys = [a for a in s["actions"] if a["action"] == "BUY"][:top_n]
+        all_buys = [a for a in s["actions"] if a["action"] == "BUY"]
+        # The backtest skips a buy under one share or under account.min_position: so does this list.
+        small = [a for a in all_buys if not a.get("qty") or (a.get("amount") or 0) < min_pos]
+        buys = [a for a in all_buys if a not in small][:top_n]
         sells = [a for a in s["actions"] if a["action"] == "SELL"]
         if buys:
             lines.append("  BUY at next open: " + ", ".join(
-                f"{a['symbol']} x{a['qty']} (~₹{a['price']:,.0f}{', stop ₹' + format(a['stop'], ',.0f') if a.get('stop') else ''}"
+                f"{a['symbol']} x{a['qty']} ({'~₹' + format(a['price'], ',.0f') if a.get('price') else 'price n/a'}"
+                f"{', stop ₹' + format(a['stop'], ',.0f') if a.get('stop') else ''}"
                 f"{', ⚠ results ' + a['results_on'][5:] if a.get('results_warning') else ''})"
                 for a in buys))
+        if small:
+            lines.append(f"  Skipped (position under one share or under ₹{min_pos:,.0f}): "
+                         + ", ".join(a["symbol"] for a in small))
         if sells:
             lines.append("  SELL at next open: " + ", ".join(f"{a['symbol']} ({a['reason']})" for a in sells))
         if s["positions"]:

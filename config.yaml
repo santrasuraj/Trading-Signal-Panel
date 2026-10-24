@@ -10,7 +10,10 @@ account:
 # auto  = Fyers real-time live prices when logged in, otherwise Yahoo (~15 min delayed)
 # yahoo = never use Fyers
 data_source: auto
-fyers_plan: standard         # standard (free: 50 data calls/min) or prime - sets the request speed limit
+fyers_plan: standard         # standard (free) or prime. Sets the safe request rate for ALL FYERS calls:
+                             #   standard: data 4/s, 45/min, 4,500/day (limits 5, 50, 5,000)
+                             #   after 2 rate-limit warnings in a day FYERS is not used again that day
+                             #   (a 3rd breach would block your account for the day). See data/fyers_usage.json
 
 # Index ETFs for the long-term ETF strategies (trend timing, dual momentum)
 etfs: [NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES, MON100]
@@ -123,3 +126,27 @@ strategies:
 
 telegram:
   top_n: 10
+
+# Intraday (MIS) strategies on 5-minute bars. Data: FYERS first (history + live WebSocket), Yahoo fallback.
+intraday:
+  history_days: 365          # FYERS keeps ~1 year of intraday history (Standard plan); we archive daily
+  max_sync_calls_per_scan: 200   # a scan tops up at most this many FYERS calls; bigger backfills: 5_intraday_backfill.bat
+  min_price: 100             # liquid F&O stocks only (intraday is not allowed in trade-to-trade series)
+  min_turnover_cr: 100       # 20-day average traded value, Rs crore
+  max_symbols: 150
+  etfs: [NIFTYBEES]
+  risk_pct: 0.5              # % of capital lost if a trade's stop is hit
+  leverage: 2.0              # total intraday exposure cap (x capital); MIS allows ~5x - we stay well below
+  costs:
+    brokerage_pct: 0.03      # FYERS intraday: Rs 20 or 0.03% per order, whichever is lower
+    brokerage_max: 20
+    stt_sell_pct: 0.025
+    exchange_pct: 0.00307
+    stamp_buy_pct: 0.003
+    slippage_large_pct: 0.03 # Nifty 50 stocks, per side
+    slippage_other_pct: 0.07 # other F&O stocks, per side
+    tax_pct: 31.2            # intraday profit = speculative business income at YOUR slab rate (set yours)
+
+# Individual intraday strategies can be switched off, e.g.:
+# intraday_strategies:
+#   supertrend: {enabled: false}
