@@ -165,6 +165,16 @@ def test_notice_table_round_trip(monkeypatch, tmp_path):
     assert corporate.actions_on("BAJFINANCE", date(2025, 6, 16), [date(2025, 6, 16), date(2025, 6, 13)]) == ["BONUS 4:1"]
 
 
+def test_listed_on_skips_notices_without_an_ex_date(monkeypatch):
+    """A notice row with a blank ex-date ('NaT' / 'nan' once stored) must be skipped, not crash the scan."""
+    monkeypatch.setattr(corporate, "_bc_index", {})
+    monkeypatch.setattr(corporate, "fetch_bc", lambda d: pd.DataFrame({
+        "series": ["EQ", "EQ", "EQ"], "symbol": ["GOOD", "BLANK", "NAN"], "ex_date": ["2025-06-16", "NaT", "nan"],
+        "purpose": ["BONUS 1:1", "BONUS 1:1", "BONUS 1:1"]}))
+    assert corporate._parse_date("NaT") is None and corporate._parse_date("nan") is None
+    assert corporate.listed_on(date(2025, 6, 16), [date(2025, 6, 13)]) == {"GOOD": ["BONUS 1:1"]}
+
+
 def test_events_flag_small_bonus_gaps_but_not_normal_days():
     fr, prev = _raw_frames({"S": [100, 100, 90.5, 91, 92]}, opens={"S": [100, 100, 90.9, 91, 91.5]})
     ev = pit._events(fr, prev, set())

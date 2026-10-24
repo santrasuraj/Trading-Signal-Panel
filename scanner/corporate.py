@@ -28,9 +28,10 @@ def _parse_date(s) -> date | None:
     s = str(s).strip()
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%b-%Y", "%d-%m-%Y"):
         try:
-            return pd.to_datetime(s, format=fmt).date()
+            ts = pd.to_datetime(s, format=fmt)
         except (ValueError, TypeError):
             continue
+        return None if pd.isna(ts) else ts.date()     # 'NaT' / 'nan' (blank ex-date in a notice) parse to NaT
     return None
 
 
