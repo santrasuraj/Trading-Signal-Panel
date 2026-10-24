@@ -24,6 +24,13 @@ universe: nifty500
 # Days of price history (~8 years: covers the 2020 crash, 2021 boom, 2022 chop, 2025-26 fall)
 lookback_days: 3000
 
+# What the strategies are re-tested on (today's orders always come from `universe` above):
+#   point_in_time = on each past day, that day's 500 most-traded NSE stocks - including companies that
+#                   later crashed or were delisted. Honest (no survivorship bias). Build it once with
+#                   4_build_universe.bat (~20-30 min download); scans then keep it up to date.
+#   current       = today's list. Flattered: the companies that collapsed are missing.
+backtest_universe: point_in_time
+
 # Only trade liquid stocks
 filters:
   min_price: 50              # rupees

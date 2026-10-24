@@ -20,8 +20,11 @@ from .panel import Factors
 
 
 def tradable_mask(f: Factors, min_price: float, min_turnover_cr: float) -> pd.DataFrame:
-    """Instruments liquid enough to trade: price and average daily traded value filters."""
-    return (f.p.close >= min_price) & (f.turnover_avg20_cr >= min_turnover_cr) & f.p.close.notna()
+    """Instruments liquid enough to trade: price and average daily traded value filters - and, on a
+    point-in-time panel, only that day's universe members (ETFs are funds, never universe members:
+    they stay tradable for the ETF strategies)."""
+    ok = (f.p.close >= min_price) & (f.turnover_avg20_cr >= min_turnover_cr) & f.p.close.notna()
+    return ok if f.p.universe is None else ok & (f.p.universe | f.etf_mask)
 
 
 def _uptrend(f: Factors) -> pd.DataFrame:
@@ -108,9 +111,9 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
                          "- the method behind NSE's Nifty100 Low Vol 30 index (17.7% vs 13.7%/yr for Nifty 100, "
                          "2005-18, and much smaller crash losses). Defensive: lags in strong rallies."),
             score=lambda f: -f.vol_ann,
-            # "most traded" among STOCKS: heavily traded ETFs (NIFTYBEES, GOLDBEES...) must not take the slots
-            eligible=lambda f: (f._stocks_only(f.turnover_avg20_cr).rank(axis=1, ascending=False) <= big)
-                               & f.vol_ann.notna(),
+            # "most traded" among STOCKS (that day's universe members on a point-in-time panel): heavily
+            # traded ETFs (NIFTYBEES, GOLDBEES...) must not take the slots
+            eligible=lambda f: (f.turnover_rank <= big) & f.vol_ann.notna(),
             top_n=int(opt(k, "top_n", 20)), keep_rank=int(opt(k, "keep_rank", 40)),
             rebalance=opt(k, "rebalance", "quarterly"), use_regime=opt(k, "use_regime", False),
         ))

@@ -33,7 +33,8 @@ from .providers import INDEX_N500, INDEX_NIFTY
 from .settings import DATA_DIR
 
 JOURNAL_FILE = DATA_DIR / "journal.sqlite"
-SURVIVORSHIP_HAIRCUT_PCT = 8.0   # backtests on today's index list overstate returns by ~8%/yr (see README)
+SURVIVORSHIP_HAIRCUT_PCT = 8.0   # backtests on today's index list overstate returns by ~8%/yr (see README);
+                                 # not applied to point-in-time backtests, which have no survivorship bias
 MIN_DAYS_TO_JUDGE = 21           # under a month, any result is mostly noise
 NOT_IN_MODEL = "no longer in model portfolio"
 CATCH_UP = "in model portfolio (catch-up)"
@@ -54,7 +55,8 @@ CREATE TABLE IF NOT EXISTS positions (
     date TEXT NOT NULL, strategy TEXT NOT NULL, symbol TEXT NOT NULL, entry_date TEXT, entry_price REAL,
     last_price REAL, stop REAL, PRIMARY KEY (strategy, date, symbol));
 """
-_EXPECT_KEYS = ("cagr_pct", "cagr_range", "vol_pct", "max_dd_pct", "after_tax_cagr_pct", "te_n500_pct", "start", "end")
+_EXPECT_KEYS = ("cagr_pct", "cagr_range", "vol_pct", "max_dd_pct", "after_tax_cagr_pct", "te_n500_pct", "start", "end",
+                "backtest_universe")
 
 
 def _connect(path=None) -> sqlite3.Connection:
@@ -358,7 +360,8 @@ def summarize(rep: dict) -> dict:
         return ref + e if ref is not None and e is not None else pace(cagr)
 
     cagr = exp.get("cagr_pct")
-    haircut = cagr - SURVIVORSHIP_HAIRCUT_PCT if _ok(cagr) else None
+    cut = 0.0 if exp.get("backtest_universe") == "point_in_time" else SURVIVORSHIP_HAIRCUT_PCT
+    haircut = cagr - cut if _ok(cagr) else None
     exp_excess = excess(cagr)
     rng = exp.get("cagr_range")
     live_excess = live - ref if ref is not None else None
@@ -386,8 +389,9 @@ def summarize(rep: dict) -> dict:
         comparison = (
             f"Since {start} ({days} trading days) the paper portfolio is {_pct(live_excess)} against the {index}. "
             f"The backtest ({_pct(cagr, 1)}/yr vs the index's {_pct(exp.get('n500_cagr_pct'), 1)}/yr) implied "
-            f"{_pct(exp_excess)} for that many days - {_pct(excess(haircut))} after removing the "
-            f"~{SURVIVORSHIP_HAIRCUT_PCT:g}%/yr survivorship bias.")
+            f"{_pct(exp_excess)} for that many days"
+            + (f" - {_pct(excess(haircut))} after removing the ~{cut:g}%/yr survivorship bias." if cut else
+               " (a survivorship-free backtest, so there is no bias to remove)."))
         if band:
             comparison += (f" Luck alone typically moves the gap by up to ±{band:.1f}% over this period, so only a "
                            "bigger gap is real evidence.")

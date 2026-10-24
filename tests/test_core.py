@@ -34,6 +34,16 @@ def test_costs_override_from_config():
     (["CONSOLIDATION FROM RS 1 TO RS 10"], 10.0),
     (["DEMERGER"], None),
     (["ANNUAL GENERAL MEETING"], None),
+    (["BONUS- 1:2"], 2 / 3),                       # AJANTPHARM 2022: used to fall back to the opening price
+    (["BON 2:1/FVSPLIT RS2TORE1"], 1 / 6),
+    (["BONUS1:2/FVSPLIT10TO2"], 2 / 15),
+    (["FV SPLT FRM RS 10 TO 1"], 0.1),
+    (["FVSPLTFRM10TO1"], 0.1),
+    (["FV SPLT2503.61TO250.361"], 0.1),
+    (["CONSOLIDATION-RE1 TO RS10"], 10.0),
+    (["FV SPLT FRM RS 115.95 TO"], None),          # truncated by NSE: read from the market
+    (["SCH AGMT-BONUS NCRPS 3:1"], None),          # bonus preference shares: not an equity ratio
+    (["BONUS NCRPS1:116"], None),
 ])
 def test_purpose_factor(purposes, expected):
     got = corporate.purpose_factor(purposes)

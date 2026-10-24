@@ -129,18 +129,28 @@ def _period_ends(dates: pd.DatetimeIndex, how: str) -> np.ndarray:
     return out
 
 
+STALE_EXIT_DAYS = 20   # a holding with no trade for this many days is sold at its last price
+
+
 def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostModel,
              tradable: pd.DataFrame, capital: float = 1_000_000.0, warmup: int = TRADING_DAYS,
              min_position: float = 0.0, cash_rate: pd.Series | None = None) -> SimResult:
     """Run the strategy over the whole panel. `min_position` skips buys smaller than that many
     rupees (fixed charges make tiny positions expensive). `cash_rate` is a cash-return index (e.g. the
-    Nifty 1D Rate): idle cash grows with it, as it would parked in a liquid fund."""
+    Nifty 1D Rate): idle cash grows with it, as it would parked in a liquid fund.
+
+    A holding that stops trading (delisted, merged away, long suspension) keeps its last price; once
+    it has not traded for STALE_EXIT_DAYS days it is sold at that price so its money is freed. This
+    only matters on the point-in-time universe, which includes companies that later disappeared."""
     p = f.p
     idx, symbols = p.dates, p.symbols
     dates = list(idx)   # plain list: fast element access inside the loop
     O, H, L, C = (x.to_numpy(dtype=float) for x in (p.open, p.high, p.low, p.close))
     C_ffill = p.close.ffill().to_numpy(dtype=float)
     T, N = C.shape
+    seen = np.where(p.observed.reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool),
+                    np.arange(T)[:, None], -1)
+    last_seen = np.maximum.accumulate(seen, axis=0)   # row of each stock's latest real trade
     trad = tradable.reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
     is_etf = np.array([s in f.etfs for s in symbols], dtype=bool)
     trad = trad & (is_etf[None, :] if strategy.universe == "etfs" else ~is_etf[None, :])
@@ -199,6 +209,11 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
     for t in range(t0, T):
         if cash > 0 and t > t0:
             cash *= 1 + cash_growth[t]
+        # 0) Holdings that stopped trading: sold at their last traded price.
+        for c in [c for c in pos if t - last_seen[t, c] >= STALE_EXIT_DAYS and not math.isnan(C_ffill[t, c])]:
+            close_position(t, c, C_ffill[t, c], "stopped trading")
+            pending_sell.pop(c, None)
+
         # 1) Orders at today's open: sells first to free cash, then buys.
         for c, reason in list(pending_sell.items()):
             if c in pos and not math.isnan(O[t, c]):

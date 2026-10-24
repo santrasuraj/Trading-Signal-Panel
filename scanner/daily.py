@@ -16,7 +16,7 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
-from . import paper
+from . import paper, pit
 from .costs import CostModel, TaxModel
 from .engine import EventStrategy, _curve_stats, evaluate, equal_weight_index, simulate, working_status
 from .events import results_history, upcoming_results
@@ -235,11 +235,17 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     idx_hist = index_history([d.date() for d in p.dates if d <= done_upto], log=log).reindex(p.dates).ffill()
     cash_rate = idx_hist.get("Nifty 1D Rate Index")
     complete_upto = info.get("complete_upto") or p.dates[-1].date().isoformat()
+    # Backtest metrics come from `bt` (the point-in-time universe when configured); today's orders,
+    # model holdings and recent trades from the live panel (today's list).
+    bt = pit.backtest_setup(cfg, frames, info, list(uni["symbol"]), {"f": f, "trad": trad, "ew": ew, "n500": n500},
+                            log, etfs=etfs, industry=industry, results_dates=results_hist)
+    bf, btrad, bew, bn500 = bt["f"], bt["trad"], bt["ew"], bt["n500"]
     timing_cache = _load_json(TIMING_CACHE)
     rejected_cache = _load_json(REJECTED_CACHE)
     # Inputs that change results without changing the config (part of every cache signature).
     data_sig = [sorted(etfs), sum(len(v) for v in results_hist.values()),
-                _num(cash_rate.dropna().iloc[-1], 6) if cash_rate is not None and cash_rate.notna().any() else None]
+                _num(cash_rate.dropna().iloc[-1], 6) if cash_rate is not None and cash_rate.notna().any() else None,
+                bt["universe"], bt.get("last_day")]
     strat_out, rejected_out, curves, trade_rows = [], [], {}, []
     all_strats = build_strategies(cfg, include_disabled=True)
     for n_done, s in enumerate(all_strats, 1):
@@ -253,10 +259,11 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                               complete_upto, data_sig], sort_keys=True, default=str)
             hit = rejected_cache.get(s.key)
             if not (hit and hit.get("sig") == sig):
-                res = simulate(s, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate)
+                res = simulate(s, bf, costs, btrad, capital=capital, min_position=min_position, cash_rate=cash_rate)
                 factor = idx_hist.get(s.benchmark) if s.benchmark else None
-                m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500, factor_benchmark=factor)
+                m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor)
                 m["full"]["factor_benchmark_name"] = s.benchmark or None
+                m["full"]["backtest_universe"] = bt["universe"]
                 m["full"]["cagr_range"] = None
                 status, why = working_status(m)
                 eq = res.equity.dropna()
@@ -282,12 +289,15 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                                           index=pd.DatetimeIndex([d for d, _ in hit["curve"]], name="date"))
             trade_rows.extend(hit.get("trades") or [])
             continue
-        res = simulate(s, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate)
+        live_res = simulate(s, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate)
+        res = live_res if bf is f else simulate(s, bf, costs, btrad, capital=capital, min_position=min_position,
+                                                cash_rate=cash_rate)
         factor = idx_hist.get(s.benchmark) if s.benchmark else None
-        m = evaluate(res, p.index_close, ew, tax=tax, n500_benchmark=n500, factor_benchmark=factor)
+        m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor)
         m["full"]["factor_benchmark_name"] = s.benchmark or None
-        if n500 is not None:   # tracking error vs the real Nifty 500: how far luck alone moves the gap
-            gap = (res.equity.pct_change() - n500.reindex(res.equity.index).ffill().pct_change()).dropna()
+        m["full"]["backtest_universe"] = bt["universe"]
+        if bn500 is not None:   # tracking error vs the real Nifty 500: how far luck alone moves the gap
+            gap = (res.equity.pct_change() - bn500.reindex(res.equity.index).ffill().pct_change()).dropna()
             m["full"]["te_n500_pct"] = float(gap.std() * np.sqrt(252) * 100) if len(gap) > 20 else None
         # Timing luck: the same rules rebalanced a few days earlier (or started a few weeks later)
         # can give quite different results - report the spread, not just one number.
@@ -301,7 +311,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             variants = ([replace(s, rebalance_offset=k) for k in (5, 10, 15)] if s.kind == "rank" else [s, s, s])
             spread = [m["full"].get("cagr_pct")]
             for i, v in enumerate(variants):
-                alt = simulate(v, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate,
+                alt = simulate(v, bf, costs, btrad, capital=capital, min_position=min_position, cash_rate=cash_rate,
                                warmup=252 if s.kind == "rank" else 252 + 21 * (i + 1))
                 spread.append(_curve_stats(alt.equity)["cagr_pct"])
             spread = [x for x in spread if x is not None]
@@ -325,7 +335,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             return {"price": _num(px), "qty": qty, "amount": _num(qty * px, 0)}
 
         actions = []
-        for o in res.next_orders:
+        for o in live_res.next_orders:
             sym = o["symbol"]
             stop = None
             if o["action"] == "BUY" and getattr(s, "stop_pct", None):
@@ -338,7 +348,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         ranking = []
         if s.kind == "rank":
             ok = _rank_candidates(s, f, trad)
-            held = {pp["symbol"] for pp in res.open_positions}
+            held = {pp["symbol"] for pp in live_res.open_positions}
             for rank, (sym, val) in enumerate(ok.dropna().sort_values(ascending=False).head(40).items(), 1):
                 ranking.append({"rank": rank, "symbol": sym, **meta.get(sym, {}), "score": _num(val, 3),
                                 "price": _num(close_last.get(sym)), "ret_6m": _num(f.ret_6m[sym].iloc[-1] * 100, 1),
@@ -349,7 +359,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             "horizon": s.horizon, "evidence": s.evidence, "universe": s.universe, "benchmark": s.benchmark,
             "status": status, "status_reason": why, "metrics": _clean_metrics(m),
             "yearly": {str(k): _num(v, 1) for k, v in yearly.items()},
-            "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"])} for pp in res.open_positions],
+            "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"])} for pp in live_res.open_positions],
             "actions": actions, "ranking": ranking,
             "max_positions": s.max_positions, "per_position": _num(per_pos, 0),
             "lifecycle": "active", "rejected_reason": None,
@@ -357,7 +367,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             "next_rebalance": _next_rebalance(p.dates, s.rebalance) if s.kind == "rank" else None,
             "recent_trades": [{"symbol": t.symbol, "entry": t.entry_date.date().isoformat(),
                                "exit": t.exit_date.date().isoformat(), "ret_pct": _num(t.ret_pct, 1),
-                               "days": t.days, "reason": t.reason} for t in res.trades[-25:]][::-1],
+                               "days": t.days, "reason": t.reason} for t in live_res.trades[-25:]][::-1],
         })
     # Working now first; among those, strategies with long independent research behind them before
     # experimental ones; then recent performance.
@@ -466,12 +476,14 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     screener = _screener_frame(f, frames, p, stock_trad.iloc[-1], chg, fresh, mom_rank, meta)
     result = {
         "version": 2, "schema": SCHEMA, "producer": _producer(),
-        "backtest_universe": "current_list",   # B7: flips to point_in_time only when a PIT universe drives the scan
+        # B7: point_in_time when the point-in-time universe drove the backtests (config backtest_universe)
+        "backtest_universe": "point_in_time" if bt["universe"] == "point_in_time" else "current_list",
         "generated_at": started.isoformat(timespec="seconds"),
         "elapsed_s": round(time.perf_counter() - t_start, 1),
         "data_date": last.date().isoformat(), "live": live, "live_source": info.get("live_source"),
         "complete_upto": info.get("complete_upto"), "fyers_note": fyers_note, "nse_status": info.get("nse_status"),
         "universe": uni_note, "stocks": int(trad.iloc[-1].sum()), "stale_symbols": stale[:50],
+        "backtest": {k: v for k, v in bt.items() if k not in ("f", "trad", "ew", "n500")},
         "errors": info.get("errors", {}), "corporate_actions": info.get("corporate_actions", []),
         "capital": capital, "min_position": min_position,
         "costs_round_trip_pct": _num(costs.round_trip_pct(capital / 15), 3),
@@ -501,7 +513,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         log(f"Paper-trading journal problem: {type(e).__name__}: {e}")
         result["paper"] = {}
     trades_df = pd.DataFrame(trade_rows, columns=_TRADE_COLS)
-    _save(result, curves, p, ew, n500, started, trades=trades_df, screener=screener)
+    _save(result, curves, bf.p, bew, bn500, started, trades=trades_df, screener=screener)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
     return result
 
