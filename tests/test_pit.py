@@ -318,6 +318,9 @@ def test_point_in_time_backtest_keeps_etfs_and_live_factor_inputs(monkeypatch, f
     assert out["trad"]["NIFTYBEES"].iloc[-1] and out["trad"]["A"].iloc[-1]   # ETF tradable, not a member
     assert np.isnan(f.rs_rating.iloc[-1]["NIFTYBEES"])                        # never ranked against stocks
     assert f.industry == {"A": "IT", "B": "Banks"} and f.results_dates == {"A": ["2025-01-10"]}
+    assert out["industry_coverage_pct"] == 100.0
+    out = pit.backtest_setup(cfg, store_fr, {}, ["A"], {}, log=lambda *_: None, industry={"A": "IT"})
+    assert out["industry_coverage_pct"] == 50.0          # B's industry unknown: half of the member-days
 
 
 def test_paper_skips_survivorship_haircut_for_point_in_time_backtests(tmp_path):

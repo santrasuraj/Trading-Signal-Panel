@@ -28,12 +28,13 @@ from .providers import INDEX_N500, INDEX_NIFTY, INDEX_VIX, get_fyers
 from .settings import RESULTS_DIR, ROOT, SESSION_END, SESSION_START, ist_now, load_config
 from .store import _replace, load_store, refresh_store
 from .strategies import build_strategies, strategy_lifecycle, tradable_mask
-from .universe import get_universe
+from .universe import get_universe, industry_map
 
 LATEST_FILE = RESULTS_DIR / "latest.json"
 TIMING_CACHE = RESULTS_DIR / "timing_cache.json"
 REJECTED_CACHE = RESULTS_DIR / "rejected_cache.json"   # B4: re-test results of strategies that never trade
-ENGINE_VERSION = 4   # bump when simulation logic changes, so cached timing ranges are recomputed
+ENGINE_VERSION = 5   # bump when simulation logic changes, so cached timing ranges are recomputed
+NEEDS_INDUSTRY = {"sector_rotation"}   # strategies whose picks depend on each stock's industry
 # (4: ETF stray open prints cleaned, low-vol "most traded" among stocks only)
 CURVES_FILE = RESULTS_DIR / "curves.parquet"
 TRADES_FILE = RESULTS_DIR / "trades.parquet"       # B1: every closed trade of every strategy's backtest
@@ -201,7 +202,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
 
     log("Testing strategies and computing signals...")
     p = panel_from_wide(frames, symbols, etfs=set(etfs))   # ETF stray open prints cleaned (fills at the open)
-    industry = {s: v["industry"] for s, v in meta.items() if v.get("industry")}
+    # today's list first, then NSE's wider Total Market list (the point-in-time backtest needs past members too)
+    industry = {**industry_map(), **{s: v["industry"] for s, v in meta.items() if v.get("industry")}}
     first = p.dates[0].date()
     results_hist = results_history(first, ist_now().date(), log=log)
     f = Factors(p, etfs=set(etfs), industry=industry, results_dates=results_hist)
@@ -245,7 +247,13 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     # Inputs that change results without changing the config (part of every cache signature).
     data_sig = [sorted(etfs), sum(len(v) for v in results_hist.values()),
                 _num(cash_rate.dropna().iloc[-1], 6) if cash_rate is not None and cash_rate.notna().any() else None,
-                bt["universe"], bt.get("last_day")]
+                bt["universe"], bt.get("last_day"), len(industry)]
+    # Sector rotation needs each stock's industry. NSE lists industries only for today's index members, so on
+    # the point-in-time test companies that later dropped out of every index can never be picked: flattered.
+    ind_cov = bt.get("industry_coverage_pct")
+    ind_caveat = (f"Flattered: industries are known for only {ind_cov:.0f}% of the test's stock-days (NSE lists them "
+                  "only for today's index members), so companies that later dropped out can never be picked. "
+                  if ind_cov is not None and ind_cov < 99 else "")
     strat_out, rejected_out, curves, trade_rows = [], [], {}, []
     all_strats = build_strategies(cfg, include_disabled=True)
     for n_done, s in enumerate(all_strats, 1):
@@ -266,6 +274,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                 m["full"]["backtest_universe"] = bt["universe"]
                 m["full"]["cagr_range"] = None
                 status, why = working_status(m)
+                if s.key in NEEDS_INDUSTRY and ind_caveat:
+                    why, m["full"]["industry_coverage_pct"] = ind_caveat + why, ind_cov
                 eq = res.equity.dropna()
                 yearly = _calendar_yearly(eq)
                 hit = {"sig": sig, "entry": {
@@ -322,6 +332,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             m["full"]["cagr_range"] = [min(rng[0], base_cagr), max(rng[1], base_cagr)]
         trade_rows.extend(_trade_row(s.key, t) for t in res.trades)
         status, why = working_status(m)
+        if s.key in NEEDS_INDUSTRY and ind_caveat:
+            why, m["full"]["industry_coverage_pct"] = ind_caveat + why, ind_cov
         eq = res.equity.dropna()
         curves[s.key] = eq / eq.iloc[0]
         yearly = _calendar_yearly(eq)

@@ -320,6 +320,7 @@ def test_daily_result_keeps_refresh_info_when_a_strategy_has_actions(monkeypatch
     monkeypatch.setattr(daily, "get_fyers", lambda cfg: (None, "no fyers"))
     monkeypatch.setattr(daily, "get_universe", lambda name: (
         pd.DataFrame({"symbol": ["A", "B"], "company": ["A Ltd", "B Ltd"], "industry": ["X", "Y"]}), "test list"))
+    monkeypatch.setattr(daily, "industry_map", lambda: {})          # no NSE download from a test
     monkeypatch.setattr(daily, "load_holdings", lambda: pd.DataFrame(
         columns=["symbol", "qty", "buy_price", "buy_date", "stop_loss_pct", "target_pct"]))
     monkeypatch.setattr(daily, "refresh_store", lambda *a, **k: (fr, dict(info)))

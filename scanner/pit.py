@@ -719,6 +719,11 @@ def backtest_setup(cfg: dict, frames: dict, info: dict, current: list[str], live
         "members": len(data.members), "gone": data.info["members_no_longer_trading"],
         "last_day": data.info["last_day"],
     })
+    if industry:   # share of member-days whose industry is known (NSE lists industries only for today's members)
+        mem = data.universe.to_numpy(dtype=bool)
+        known = data.universe.columns.isin(list(industry))
+        total = mem.sum()
+        out["industry_coverage_pct"] = round(float(mem[:, known].sum() / total * 100), 1) if total else None
     return out
 
 
