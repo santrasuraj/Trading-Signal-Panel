@@ -7,6 +7,7 @@
               qty = min(floor(alloc * risk_pct / 100 / (price - stop)), floor(2 * per_pos / price))
   SELL    qty = what you hold (holdings.csv)                         -> qty_basis 'your_holding'
           else floor(alloc * model_weight_pct / 100 / price)          -> qty_basis 'model_weight'
+          (also, capped at your holding, when another strategy you allocate to still holds the stock)
           (the backtest compounds - ~11x by now - so its own share count is never a share count for you)
 With no allocations the BUY rows equal latest.json / Telegram exactly.
 """
@@ -99,11 +100,24 @@ def order(a: dict, s: dict, lt: dict, alloc: dict[str, float] | None, held: dict
                 qty = min(int(math.floor(a_cap * float(rules["risk_pct"]) / 100 / (price - stop))),
                           int(math.floor(2 * per_pos / price)))
     elif sym in held and you_hold:
-        qty, basis = int(math.floor(you_hold)), "your_holding"
+        # holdings.csv does not say which strategy a lot belongs to: when another strategy you follow (allocation
+        # > 0) still holds the stock and is not selling it, sell only this strategy's share, never the whole holding
+        others = [] if alloc is None else [
+            x for x in lt.get("strategies") or [] if x.get("key") != s["key"] and alloc.get(x.get("key"), 0) > 0
+            and x.get("status") != "not-working" and any(p.get("symbol") == sym for p in x.get("positions") or [])
+            and not any(b.get("symbol") == sym and b.get("action") == "SELL" for b in x.get("actions") or [])]
+        if others:
+            basis = "model_weight"
+            pos = next((p for p in s.get("positions") or [] if p.get("symbol") == sym), None)
+            w = st.model_weight(pos, s, capital, lt) if pos else None
+            if w is not None and price and price > 0:
+                qty = min(int(math.floor(a_cap * w / 100 / price)), int(math.floor(you_hold)))
+        else:
+            qty, basis = int(math.floor(you_hold)), "your_holding"
     else:
         basis = "model_weight"
         pos = next((p for p in s.get("positions") or [] if p.get("symbol") == sym), None)
-        w = st.model_weight(pos, s["key"], capital) if pos else None
+        w = st.model_weight(pos, s, capital, lt) if pos else None
         if w is not None and price and price > 0:
             qty = int(math.floor(a_cap * w / 100 / price))
     amount = round(qty * price, 2) if qty is not None and price else None

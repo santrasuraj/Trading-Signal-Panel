@@ -301,6 +301,46 @@ class Factors:
     @cached_property
     def momentum(self): return self.momentum_score()
 
+    def capm(self, n: int, min_count: int = 200) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """Rolling one-factor (CAPM) regression of each stock's daily return on Nifty 50's daily return over the
+        last `n` days, using data up to day t only: (alpha, beta, residual variance), alpha and variance per day.
+        A day where either return is missing is left out of both; the risk-free rate is ignored."""
+        r = self.daily_ret.to_numpy(dtype=float)
+        mkt = np.broadcast_to(self.p.index_close.ffill().pct_change().to_numpy(dtype=float)[:, None], r.shape)
+        ok = ~np.isnan(r) & ~np.isnan(mkt)
+        x, y = np.where(ok, r, np.nan), np.where(ok, mkt, np.nan)
+
+        def mean(a: np.ndarray) -> np.ndarray:
+            return bn.move_mean(a, n, min_count=min(min_count, n), axis=0)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ex, ey = mean(x), mean(y)
+            cov = mean(x * y) - ex * ey
+            var_m = mean(y * y) - ey * ey
+            beta = np.where(var_m > 0, cov / var_m, np.nan)
+            alpha = ex - beta * ey
+            var_e = (mean(x * x) - ex * ex) - beta * cov
+            var_e = np.where(var_e > 0, var_e, np.nan)
+
+        def frame(a: np.ndarray) -> pd.DataFrame:
+            return pd.DataFrame(a, index=self.p.dates, columns=self.p.close.columns)
+        return frame(alpha), frame(beta), frame(var_e)
+
+    @cached_property
+    def resid_mom(self) -> pd.DataFrame:
+        """Residual (beta-adjusted) momentum over months 12-1: the CAPM alpha against Nifty 50 over the 231 trading
+        days that end a month (21 days) before day t, divided by the residual volatility of the same window - an
+        'alpha t-stat' (Blitz, Huij & Martens 2011; here one factor on daily data). ETFs and non-members blank."""
+        alpha, _, var_e = self.capm(TRADING_DAYS - 21)
+        return self.members(self._stocks_only((alpha / np.sqrt(var_e)).shift(21)))
+
+    @cached_property
+    def alpha_1y(self) -> pd.DataFrame:
+        """Jensen's alpha over the past year, annualised: the average daily return not explained by Nifty 50
+        (CAPM over 252 days, risk-free rate ignored). ETFs and non-members blank."""
+        alpha, _, _ = self.capm(TRADING_DAYS)
+        return self.members(self._stocks_only(alpha * TRADING_DAYS))
+
     # ---------------------------------------------------------------- market regime (Nifty)
     @cached_property
     def index_sma200(self) -> pd.Series:
@@ -357,9 +397,10 @@ class Factors:
 
     @cached_property
     def nr7(self) -> pd.DataFrame:
-        """Today's high-low range is the narrowest of the last 7 days."""
+        """Today's high-low range is the narrowest of the last 7 days (only on real bars: a gap-filled day has
+        a made-up zero range)."""
         rng = self.p.high - self.p.low
-        return rng <= rolling(rng, "min", 7, 7)
+        return (rng <= rolling(rng, "min", 7, 7)) & self.p.observed
 
     @cached_property
     def gap_pct(self) -> pd.DataFrame:

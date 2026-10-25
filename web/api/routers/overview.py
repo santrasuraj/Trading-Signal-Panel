@@ -70,8 +70,11 @@ def overview():
         else:
             reviews = sorted(summaries[s["key"]]["next_rebalance"] for s in mine if summaries[s["key"]]["next_rebalance"])
             empty[h] = "No entry signals today." + (f" Next review {fmt_date(reviews[0], year=False)}." if reviews else "")
-    empty["intraday"] = ("Intraday strategies are research only: every one tested loses money after costs."
-                         if intraday_view.count() else "Intraday backtest not run yet.")
+    lost, n_intra = intraday_view.losing()
+    empty["intraday"] = ("Intraday backtest not run yet." if not n_intra
+                         else "Intraday strategies are research only: every one tested loses money after costs."
+                         if lost == n_intra
+                         else f"Intraday strategies are research only: {lost} of {n_intra} tested lose money after costs.")
     prev = alerts.previous_scan(lt)
     paper_list = list(papers.values())
     al = alerts.build(lt, as_of, clk, fyers_svc.status(lt=lt), scan_runner.status(), list(summaries.values()),
@@ -113,6 +116,15 @@ def signals(horizon: Horizon | None = None, allocations: str | None = None):
     acting = [o for g in groups if not g["strategy"]["comparison_only"] for o in g["orders"]]
     buys = [o for o in acting if o["action"] == "BUY"]
     sells = [o for o in acting if o["action"] == "SELL"]
+    # two followed strategies selling a stock you hold both size on your whole holding: count it once
+    seen: set = set()
+    sell_amts = []
+    for o in sells:
+        if o["qty_basis"] == "your_holding":
+            if o["symbol"] in seen:
+                continue
+            seen.add(o["symbol"])
+        sell_amts.append(o["amount"])
     regime_up = bool((lt.get("market") or {}).get("regime_up", True))
     return {
         "as_of": st.as_of(lt), "capital": capital, "min_position": st.min_position(lt),
@@ -124,8 +136,8 @@ def signals(horizon: Horizon | None = None, allocations: str | None = None):
         "groups": groups,
         "totals": {"buy_count": len(buys), "sell_count": len(sells),
                    "buy_amount": round(sum(o["amount"] or 0 for o in buys), 2),
-                   "sell_amount": (round(sum(o["amount"] for o in sells), 2)
-                                   if sells and all(o["amount"] is not None for o in sells) else (0.0 if not sells else None)),
+                   "sell_amount": (round(sum(sell_amts), 2)
+                                   if sell_amts and all(v is not None for v in sell_amts) else (0.0 if not sells else None)),
                    "risk_amount": round(sum(o["risk_amount"] or 0 for o in buys), 2),
                    "results_warnings": sum(1 for o in acting if o["results_warning"])},
     }

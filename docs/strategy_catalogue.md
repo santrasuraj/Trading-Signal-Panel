@@ -2,6 +2,26 @@
 
 *Prepared 2026-10-23 for the FYERS / Nifty-500 research platform (v2 codebase at `D:\New folder\stock_scanner`, read-only). Scratch work, including the parsed SEBI study and NSE file samples, is in `C:\Users\suraj\AppData\Local\Temp\claude\D--New-folder\8c8a39c7-06d8-4ca7-a5b2-5aeda1a9ef1f\scratchpad\strategy-catalogue\`.*
 
+**Status, 24 Oct 2026.** This is the research plan written before the strategies were built. Their honest
+(point-in-time, after-cost) results are on the dashboard and in README §2, not here. Built: L1 (`momentum`), L2
+(`low_vol`), L3 as the plain 200-DMA rule (`index_trend`), L4 as a 5-ETF rotation that holds the 2 best positive
+12-month returns (`dual_momentum`; the absolute test is "> 0", not "> cash"), S1 (`trend_breakout`, `vcp_breakout`),
+S3 System 2 only (`donchian`), S5 with the 21-day EMA (`pullback_leaders`), S6 (`earnings_gap`, results dates from
+NSE's event calendar via `events.results_history`, not the `bm` files), S7 from stock industries instead of sector
+indices (`sector_rotation`: flattered on the point-in-time test, because NSE lists industries only for today's index
+members), S8 (`bb_squeeze`), S9 as NR7 only (`nr7_breakout`), S10 (`rsi2_pullback`, rejected), and the eight
+intraday families I1–I8 (nine strategies). Built although this catalogue says SKIP: S11 golden cross on single
+stocks (`golden_cross`). Not built: L5, L6–L8 as strategies (the NSE factor indices are only shown as a gallery),
+L9, L10, S2, S4, S12. The MIS times below (15:05 F&O / 15:20 others) are FYERS' cut-offs; the intraday engine exits
+before them, at 15:00 and 15:15.
+
+**Update, 25 Oct 2026.** Added (tested from the next scan on, judged only by their own backtests): L1 as a literal
+NSE replica (`momentum_n200`), L11 residual momentum (`residual_momentum`), L12 alpha + low volatility
+(`alpha_low_vol`) and L13 the ETF trend basket (`etf_trend`); cards below. Retired with `enabled: false` and a
+`rejected_reason` in `config.yaml` (still re-tested and shown under "Tested & rejected"): S5 `pullback_leaders`
+(+8.5%/yr, profit factor 1.08), S8 `bb_squeeze` (+6.9%/yr, max drawdown −49%) and S9 `nr7_breakout` (−9.7%/yr),
+all from the 24 Oct 2026 point-in-time scan.
+
 **Evidence grades.** STRONG = peer-reviewed, replicated, has an out-of-sample or live record, and has Indian evidence. MODERATE = peer-reviewed abroad, with mixed or thin Indian evidence, or a live index record only. WEAK = working papers, the author's own backtests, or one market only. FOLKLORE = practitioner books or forums with no systematic test.
 
 **Data codes.**
@@ -292,6 +312,76 @@ Shared defaults for long-term cards:
 - **Rule:** 50% in L1 and 50% in L2, rebalanced quarterly. Variant: a single combined score of 0.5·rank(momentum) + 0.5·rank(−σ).
 - **Evidence:** Joshipura (2020) finds that adding momentum improves the low-risk strategy in India. NSE's Alpha Low-Volatility 30 index is stored as a benchmark.
 - **Why it matters:** the two factors are negatively correlated in crashes, which smooths L1's drawdowns.
+
+### L1-R. NSE momentum replica (`momentum_n200`, added 25 Oct 2026)
+
+**Horizon:** long-term (semi-annual). **Grade:** STRONG (the index method). **Data:** D. **Purpose:** a measurement
+tool more than a new edge.
+
+- **Rules:** eligible = turnover rank ≤ 200 among that day's point-in-time members (our stand-in for the Nifty 200;
+  NSE ranks by free-float market cap and also needs F&O eligibility, which we cannot check), with 1-year volatility
+  and 12-month return known. Score = `f.momentum` (the NMS above). Top 30, keep while in the top 60, reviewed on the
+  last trading day of June and December, filled at the next open. No 200-DMA filter, no regime filter, no stop.
+  Equal weight (NSE: score × free-float market cap, capped at 5%).
+- **Known deviations:** the z-scores are taken across all ~500 members, NSE takes them inside the eligible 200;
+  equal weight tilts toward the smaller of the 200. With ₹5 lakh, a slot is about ₹16.7k: if equity falls below
+  ₹4.5 lakh, buys under `min_position` (₹15k) are skipped and the money waits in cash until the next review.
+- **What to read from it:** compare its CAGR, drawdown and tracking error with the stored *Nifty200 Momentum 30*
+  over the same window (the index history starts 25 Aug 2020). Far above the live index = the engine or data
+  flatters every strategy. Close to it = most of `momentum`'s extra return comes from small/mid caps, 15-stock
+  concentration and monthly turnover in the 2020-23 bull market, which should not be projected forward.
+
+### L11. Residual momentum (`residual_momentum`, added 25 Oct 2026)
+
+**Horizon:** long-term (monthly). **Grade:** MODERATE. **Data:** D.
+
+- **Factor (`Factors.resid_mom`, data up to day t only):** daily stock returns regressed on Nifty 50 daily returns
+  over the 231 trading days ending 21 days before t (months 12-1); score = alpha / residual standard deviation (an
+  "alpha t-stat"). Days where either return is missing are dropped from both.
+- **Portfolio:** the same as `momentum` (close > 200-DMA, top 15, keep top 30, monthly, regime "hold"), so only the
+  score differs.
+- **Adaptation, stated before testing:** Blitz, Huij & Martens (2011) use 36-month Fama-French 3-factor residuals;
+  we use one factor (Nifty 50) on daily data over the 12-1 window, because our history starts Aug 2018.
+- **Evidence:** Blitz, Huij & Martens (2011, *Journal of Empirical Finance* 18(3)): risk-adjusted profits about
+  twice those of total-return momentum, more consistent over time ([repub.eur.nl](https://repub.eur.nl/pub/22252)).
+  Blitz, Hanauer & Vidojevic (2020), "The Idiosyncratic Momentum Anomaly": robust in developed and emerging markets.
+  No direct Indian test found.
+- **Failure modes:** lags beta-led rallies (2020-21, the 2023 small-cap boom); beta against Nifty 50 is noisy for
+  midcaps; gap-filled suspension days count as zero returns.
+
+### L12. Alpha + low volatility (`alpha_low_vol`, added 25 Oct 2026)
+
+**Horizon:** long-term (semi-annual). **Grade:** MODERATE. **Data:** D. **Benchmark:** the stored *NIFTY Alpha
+Low-Volatility 30*.
+
+- **Factor (`Factors.alpha_1y`):** Jensen's alpha against Nifty 50 over the past 252 days (risk-free rate ignored;
+  NSE uses 3-month MIBOR), annualised.
+- **Rules:** universe = the 150 most traded stocks with alpha and volatility known; score = 0.5 × percentile rank of
+  alpha + 0.5 × percentile rank of low volatility, inside that universe each day. Top 30, keep while in the top 60,
+  June and December reviews, no regime filter, no stop, equal weight (NSE: score weights capped at 5%).
+- **Evidence:** [NSE whitepaper (2020)](https://www.niftyindices.com/docs/default-source/indices/nifty-alpha-low-volatility-30/nifty-alpha-low-volatility-30-whitepaper_2020.pdf);
+  Joshipura (2020, IMFI 17(2), top-500 NSE stocks 2004-18): the low-risk effect is independent of size, value and
+  momentum, and adding momentum improves it. Practitioner caution: the combined index did not beat plain low
+  volatility for its first years and has a wider spread of rolling returns.
+- **Failure modes:** our own `low_vol` already trails its NSE index in this window; turnover rank is not market cap
+  (heavily traded stocks skew volatile); one-year alpha is noisy; FMCG/pharma/IT concentration; lags beta rallies.
+
+### L13. ETF trend basket (`etf_trend`, added 25 Oct 2026)
+
+**Horizon:** long-term (monthly). **Grade:** MODERATE. **Data:** X (ETF bhavcopy rows, open prints cleaned).
+
+- **Rules:** NIFTYBEES, JUNIORBEES, GOLDBEES and MON100 (BANKBEES left out: a sector bet overlapping NIFTYBEES).
+  At each month end every ETF above its 200-day average is held (bought with 1/4 of equity); one that closes the
+  month below it is sold at the next open and its slice earns the Nifty 1D Rate. The 12-month return only orders
+  the buys. No bond ETF series yet, so there is no fifth slice.
+- **Evidence:** Faber (2007/2013, [SSRN 962461](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=962461), ID from
+  memory); Moskowitz, Ooi & Pedersen (2012). **Against:** Sullivan, Timmermann & White (1999) on data snooping in
+  timing rules. Our own `index_trend` (one ETF, same filter) shows the real benefit is the smaller drawdown, over
+  very few trades.
+- **Failure modes:** returns are asset-class bets (gold and the Nasdaq had a strong 2019-26); very few independent
+  decisions, so wide confidence intervals; MON100 can trade at a premium to NAV; gold and international ETFs are not
+  taxed as equity, but the engine applies equity STCG/LTCG and stock STT (costs conservative, tax not exact);
+  a monthly check cannot react to a crash inside one month.
 
 ---
 

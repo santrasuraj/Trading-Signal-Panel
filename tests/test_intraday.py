@@ -10,9 +10,9 @@ import pytest
 
 from scanner.intraday import data as idata
 from scanner.intraday import fyers_sync, live
-from scanner.intraday.engine import (FLAT_FNO, FLAT_OTHER, SLOTS, Day, IntradayCosts, IntradayStrategy, run_intraday,
-                                     slot_of, stop_entry, walk_exit)
-from scanner.intraday.strategies import orb15
+from scanner.intraday.engine import (FLAT_FNO, FLAT_OTHER, SLOTS, Day, IntradayCosts, IntradayStrategy, Trade,
+                                     run_intraday, slot_of, stop_entry, walk_exit)
+from scanner.intraday.strategies import _trade, orb5_inplay, orb15
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -91,6 +91,88 @@ def test_costs_turn_zero_edge_into_loss():
     res = run_intraday(flat, days, IntradayCosts(), capital=500000)
     assert res.metrics["trades"] == 20 and res.metrics["return_pct"] < 0
     assert all(t.pnl < 0 for t in res.trades)
+
+
+def test_no_trade_when_entry_is_beyond_its_stop_or_target():
+    d = make_day()
+    assert _trade(d, -1, 5, 100.0, 99.9, 98.0) is None        # short opens below its buy-stop: cannot be placed
+    assert _trade(d, +1, 5, 100.0, 99.0, 99.5) is None        # long target already passed at entry
+    t = _trade(d, +1, 5, 100.0, 99.0, 102.0)
+    assert t is not None and t.reason == "square-off"
+
+
+def test_orb5_inplay_enters_only_once_the_early_volume_is_known():
+    d = make_day(ctx={"relvol": 3.0})
+    d.c[0], d.h[0] = 100.5, 100.6                             # green first candle, high 100.6
+    d.h[1] = 100.7                                            # crossed at 09:20 - relvol not known yet
+    d.o[4], d.h[4] = 100.2, 100.8                             # first bar from 09:30 trading through 100.6
+    t = orb5_inplay(d, {})[0]
+    assert t.side == 1 and t.entry_slot == 4 and t.entry_px == pytest.approx(100.6)
+
+
+def test_daily_selection_is_first_come_and_sized_on_a_fixed_share():
+    days = [make_day(symbol="EARLY"), make_day(symbol="LATE")]
+
+    def fn(d, p):
+        slot, pri = (5, 1.0) if d.symbol == "EARLY" else (30, 9.0)
+        return [Trade("", d.symbol, str(d.date.date()), 1, slot, 100.0, 60, 100.0, 99.0, "time", priority=pri)]
+    one = run_intraday(IntradayStrategy("x", "x", "", "TEST", fn, max_trades_per_day=1), days, IntradayCosts())
+    assert [t.symbol for t in one.trades] == ["EARLY"]        # a later, higher-priority trigger cannot displace it
+    res = run_intraday(IntradayStrategy("x", "x", "", "TEST", fn, max_trades_per_day=5), days[:1], IntradayCosts(),
+                       capital=500000, leverage=2.0)
+    assert res.trades[0].qty == int(500000 * 2.0 / 5 / (100.0 * (1 + 0.03 / 100)))   # 1/5 of the limit, not all
+
+
+def test_vwap_ignores_the_0915_volume():
+    d = make_day()
+    d.h[0], d.l[0], d.c[0], d.v[0] = 120.0, 118.0, 119.0, 1e9   # FYERS/live carry it, Yahoo history does not
+    vw = d.vwap()
+    assert vw[0] == pytest.approx(119.0) and vw[1] == pytest.approx(100.0) and d.v[0] == 1e9
+
+
+def test_live_trade_still_running_is_shown_open():
+    from scanner.intraday.run import _trade_dict
+    run_ = Trade("orb15", "X", "2026-10-23", 1, 5, 100.0, 20, 101.0, 99.0, "square-off")
+    assert _trade_dict(run_, 21, FLAT_FNO)["open_now"] and _trade_dict(run_, 21, FLAT_FNO)["reason"].startswith("open")
+    assert not _trade_dict(run_, FLAT_FNO, FLAT_FNO)["open_now"]                     # after the square-off
+    stopped = Trade("orb15", "X", "2026-10-23", 1, 5, 100.0, 12, 99.0, 99.0, "stop")
+    assert _trade_dict(stopped, 21, FLAT_FNO) == {**_trade_dict(stopped), "open_now": False}
+
+
+def _session(day, px, sym="AAA"):
+    ts = pd.Timestamp(day) + pd.Timedelta(hours=9, minutes=15) + pd.to_timedelta(np.arange(SLOTS) * 5, unit="m")
+    return pd.DataFrame({"ts": ts, "symbol": sym, "open": px, "high": px * 1.005, "low": px * 0.995,
+                         "close": px, "volume": 1000.0})
+
+
+def test_build_days_skips_unadjusted_days_missing_previous_session_and_illiquid_days():
+    from scanner.intraday.run import build_days
+    idx = pd.bdate_range("2026-09-01", periods=30)
+    store_idx = idx.delete(28)                                 # the daily store misses idx[28]
+    frames = {k: pd.DataFrame({"AAA": v}, index=store_idx)
+              for k, v in (("high", 101.0), ("low", 99.0), ("close", 100.0), ("volume", 2e6))}   # Rs 20 cr/day
+    bars = pd.concat([_session(idx[25], 100.0),
+                      _session(idx[26], 110.0),                # as traded before a 1:10 bonus: store is 10% off
+                      _session(idx[28], 100.0),                # no store row for it, previous session is there
+                      _session(idx[29], 100.0)], ignore_index=True)   # previous session missing in the store
+    info = {"fno": {"AAA"}, "etfs": set(), "min_turnover_cr": 10.0}
+    missing: set[str] = set()
+    out = build_days(bars, frames, info, set(), {}, missing)
+    assert [d.date for d in out["AAA"]] == [idx[25], idx[28]] and missing == {"AAA"}
+    assert out["AAA"][0].ctx["liquidity"] == pytest.approx(20.0)
+    assert build_days(bars, frames, {**info, "min_turnover_cr": 50.0}, set(), {})["AAA"] == []   # not liquid then
+    assert len(build_days(bars, frames, {**info, "min_turnover_cr": 50.0, "etfs": {"AAA"}}, set(), {})["AAA"]) == 2
+
+
+def test_incomplete_fno_list_is_never_cached(tmp_path, monkeypatch):
+    from scanner.intraday import run as irun
+    monkeypatch.setattr(irun, "INTRADAY_DIR", tmp_path)
+    monkeypatch.setattr(irun, "_get", lambda url: (200, "<html>blocked</html>"))
+    assert irun.fno_symbols() == [] and not (tmp_path / "fno.json").exists()
+    good = "UNDERLYING,SYMBOL    ,NOV-26\n" + "".join(f"Name {i},S{i:03d}  ,100\n" for i in range(120))
+    monkeypatch.setattr(irun, "_get", lambda url: (200, good))
+    syms = irun.fno_symbols()
+    assert len(syms) == 120 and syms[0] == "S000" and (tmp_path / "fno.json").exists()
 
 
 # ------------------------------------------------------------------------------------ FYERS sync bookkeeping

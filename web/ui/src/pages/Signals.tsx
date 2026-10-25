@@ -7,15 +7,15 @@ import { ChevronDown, Info, SlidersHorizontal, Undo2 } from 'lucide-react'
 import { useSignals } from '@/api/hooks'
 import { isFailure } from '@/api/client'
 import type { Horizon, SignalGroup, SignalsResponse } from '@/api/types'
-import { EvidenceChip, EtfChip, HorizonChip, StatusBadge } from '@/components/badges'
-import { BiasNote, OrdersTable, PageHeader } from '@/components/domain'
-import { Banner, ErrorState, Skeleton, SkeletonRows } from '@/components/feedback'
+import { EvidenceChip, EtfChip, HorizonChip, StatusBadge, WarnChip } from '@/components/badges'
+import { BiasNote, OrdersTable, PageHeader, flatteredNote } from '@/components/domain'
+import { Banner, ErrorState, RefreshFailed, Skeleton, SkeletonRows } from '@/components/feedback'
 import { Money } from '@/components/num'
 import { Button, Card, Popover, Tabs } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { date, keepDatesTogether, money, num, pct, qty } from '@/lib/format'
 import { allocationTotal, formatAllocations, parseAllocations } from '@/lib/sizing'
-import { HORIZON } from '@/lib/vocab'
+import { HORIZON, lostMoney } from '@/lib/vocab'
 
 const SEG_COLORS = ['bg-accent', 'bg-violet', 'bg-info', 'bg-warn', 'bg-profit', 'bg-muted']
 
@@ -104,9 +104,10 @@ function Group({ g, cmp }: { g: SignalGroup; cmp?: boolean }) {
       title={
         <span className="flex flex-wrap items-center gap-2">
           <Link to={`/strategies/${s.key}`} className="hover:underline">{s.name}</Link>
-          <StatusBadge status={s.status} />
+          <StatusBadge status={s.status} lost={lostMoney(s.headline)} />
           <HorizonChip horizon={s.horizon} />
           <EvidenceChip evidence={s.evidence} />
+          {flatteredNote(s) && <WarnChip title={flatteredNote(s) ?? undefined}>Flattered</WarnChip>}
           {s.universe === 'etfs' && <EtfChip />}
         </span>
       }
@@ -147,13 +148,22 @@ export default function Signals() {
   const [showCmp, setShowCmp] = useState(false)
   const count = (h: Horizon) => (d ? d.groups.filter((g) => g.strategy.horizon === h && !g.strategy.comparison_only).reduce((n, g) => n + g.orders.length, 0) : 0)
   const totals = useMemo(() => {
-    let buy = 0, buyAmt = 0, sell = 0, sellAmt = 0, risk = 0, warn = 0
+    let buy = 0, buyAmt = 0, sell = 0, sellAmt = 0, risk = 0, warn = 0, noStop = 0
     let sellUnknown = false                          // a SELL with no size (no holding, no model weight): total is a floor
+    const soldHolding = new Set<string>()            // two strategies selling a stock you hold: your holding counts once
     for (const g of main) for (const o of g.orders) {
-      if (o.action === 'BUY') { buy++; buyAmt += o.amount ?? 0; risk += o.risk_amount ?? 0 } else { sell++; if (o.amount == null) sellUnknown = true; else sellAmt += o.amount }
+      if (o.action === 'BUY') {
+        buy++; buyAmt += o.amount ?? 0; risk += o.risk_amount ?? 0
+        if (o.risk_amount == null) noStop++
+      } else {
+        sell++
+        const dup = o.qty_basis === 'your_holding' && soldHolding.has(o.symbol)
+        if (o.qty_basis === 'your_holding') soldHolding.add(o.symbol)
+        if (!dup) { if (o.amount == null) sellUnknown = true; else sellAmt += o.amount }
+      }
       if (o.results_warning) warn++
     }
-    return { buy, buyAmt, sell, sellAmt, sellUnknown, risk, warn }
+    return { buy, buyAmt, sell, sellAmt, sellUnknown, risk, noStop, warn }
   }, [main])
   const savedAlloc = useMemo<Record<string, number>>(() => Object.fromEntries((d?.allocations ?? []).map((a) => [a.strategy_key, a.pct] as const)), [d])
 
@@ -161,7 +171,7 @@ export default function Signals() {
     <div>
       <PageHeader
         title="Signals"
-        subtitle={d ? <>Orders for the next market open · sized for {money(d.capital)} · based on prices of <span className="whitespace-nowrap">{date(d.as_of.data_date, { year: false })}</span> ({d.as_of.live ? <span className="text-warn">live candle, provisional</span> : 'official close'})</> : <Skeleton className="h-3 w-72" />}
+        subtitle={d ? <>Orders for the next market open · sized for {money(d.capital)} · based on prices of <span className="whitespace-nowrap">{date(d.as_of.data_date, { year: false })}</span> ({d.as_of.stale ? <span className="text-warn">stale</span> : d.as_of.live ? <span className="text-warn">live candle, provisional</span> : 'official close'})</> : <Skeleton className="h-3 w-72" />}
       />
       {q.error && !d && allocParam && isFailure(q.error) && q.error.code === 'VALIDATION' ? (
         <div className="card p-4">
@@ -175,6 +185,7 @@ export default function Signals() {
         <div className="space-y-3"><Skeleton className="h-14" /><div className="card"><SkeletonRows rows={5} /></div></div>
       ) : (
         <div className="space-y-3">
+          {q.error && <RefreshFailed error={q.error} onRetry={() => void q.refetch()} />}
           <AllocationBar d={d} onWhatIf={<WhatIf groups={d.groups} base={savedAlloc} value={draft} onChange={setDraft} />} />
           {!d.regime.regime_up && d.regime.note && (
             <Banner tone="info" icon={<Info className="h-4 w-4 text-info" />}>{d.regime.note}</Banner>
@@ -198,7 +209,7 @@ export default function Signals() {
             <span className="eyebrow">Totals</span>
             <span><span className="text-muted">Buys </span>{totals.buy} · <Money v={totals.buyAmt} /></span>
             <span><span className="text-muted">Sells </span>{totals.sell}{totals.sell > 0 && <> · {totals.sellUnknown ? <span className="text-faint" title="Some sells cannot be sized (you don't hold them and the model weight is unknown)">≥ <Money v={totals.sellAmt} /></span> : <Money v={totals.sellAmt} />}</>}</span>
-            <span><span className="text-muted">Risk at stops </span><Money v={totals.risk} /></span>
+            <span><span className="text-muted">Risk at stops </span><Money v={totals.risk} />{totals.noStop > 0 && <span className="text-faint" title="BUY orders without a stop are not in this total"> (+{totals.noStop} with no stop)</span>}</span>
             <span className={cn(totals.warn > 0 && 'text-warn')}><span className="text-muted">Results warnings </span>{qty(totals.warn)}</span>
             {d.sized_like_scan && <span className="ml-auto text-2xs text-faint">Same sizes as the scan (and Telegram)</span>}
           </div>

@@ -55,9 +55,13 @@ def import_fyers():
 def paper_list():
     ji = data.journal_info()
     rep = paper_svc.report() if ji else None
-    strategies = [paper_svc.summary(k, v) for k, v in ((rep or {}).get("strategies") or {}).items()]
+    reps = (rep or {}).get("strategies") or {}
+    strategies = [paper_svc.summary(k, v) for k, v in reps.items()]
+    # scanner.paper applies no haircut to an expectation from a point-in-time (survivorship-free) backtest
+    unis = {(v.get("expect") or {}).get("backtest_universe") for v in reps.values()}
+    haircut = 0.0 if unis and unis <= {"point_in_time"} else paper_svc.survivorship_haircut()
     return {"available": bool(rep), "journal": ji if ji and ji.get("first") else None,
-            "survivorship_haircut_pct": paper_svc.survivorship_haircut(), "min_days_to_judge": paper_svc.min_days(),
+            "survivorship_haircut_pct": haircut, "min_days_to_judge": paper_svc.min_days(),
             "strategies": strategies}
 
 

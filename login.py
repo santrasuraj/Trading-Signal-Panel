@@ -34,10 +34,14 @@ def _replace(src, dst, tries: int = 10) -> None:
             time.sleep(0.2 * (i + 1))
 
 
-def _extract_code(text: str) -> str | None:
+def _extract_code(text: str, state: str | None = None) -> str | None:
     text = text.strip()
     if "auth_code=" in text:
-        return (parse_qs(urlparse(text).query).get("auth_code") or [None])[0]
+        q = parse_qs(urlparse(text).query)
+        if state and (q.get("state") or [state])[0] != state:   # same security check as the local listener
+            print("This address belongs to another login attempt (security check failed). Please log in again.")
+            return None
+        return (q.get("auth_code") or [None])[0]
     return text or None
 
 
@@ -70,8 +74,14 @@ def _wait_for_redirect(redirect: str, login_url: str, state: str) -> str | None:
         def log_message(self, *args):
             pass
 
+    class Server(HTTPServer):
+        # HTTPServer sets SO_REUSEADDR, which on Windows lets it bind a port another program (e.g. Docker on
+        # 8000) is already listening on: the redirect may then go to that program while this waits 5 minutes.
+        # Without it the bind fails at once and the copy-paste method starts straight away.
+        allow_reuse_address = False
+
     try:
-        server = HTTPServer((parsed.hostname, parsed.port or 80), Handler)
+        server = Server((parsed.hostname, parsed.port or 80), Handler)
     except OSError as e:
         print(f"Could not start local listener on {parsed.hostname}:{parsed.port} ({e}).\n"
               "Is another program using that port? Close it, or use the copy-paste method below.")
@@ -113,7 +123,7 @@ def main() -> int:
         print("3. Copy the FULL address from the browser's address bar (it contains 'auth_code=') and paste it here.\n")
         print(login_url, "\n")
         webbrowser.open(login_url)
-        code = _extract_code(input("Paste the address here and press Enter: "))
+        code = _extract_code(input("Paste the address here and press Enter: "), state)
     if not code:
         print("No auth code received. Login cancelled.")
         return 1

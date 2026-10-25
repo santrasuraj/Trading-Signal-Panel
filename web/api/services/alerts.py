@@ -109,6 +109,12 @@ def build(lt: dict, as_of: dict, clock: dict, fyers: dict, scan: dict, summaries
     nse = str(lt.get("nse_status") or "")
     if nse.startswith("NSE file not available"):
         out.append(_a("warn", "data", nse, href="/settings/data", rule="nse"))
+    # Yahoo-filled days stay provisional in the store until NSE's file replaces them (a --no-update re-scan says
+    # 'cached', so the NSE status alone would stop flagging them)
+    prov = sorted(str(d)[:10] for d in data.store_meta().get("provisional") or [])
+    if prov and not nse.startswith("NSE file not available"):
+        out.append(_a("warn", "data", f"Prices for {', '.join(fmt_date(d) for d in prov[-3:])} are provisional (Yahoo): "
+                      "NSE's official file was not available yet", href="/settings/data", rule="provisional"))
     # 7. market
     m = lt.get("market") or {}
     if prev is not None and (prev.get("market") or {}).get("regime_up") is not None \

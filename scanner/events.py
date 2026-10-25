@@ -56,14 +56,28 @@ def _get_json(path: str, params: dict | None = None):
     raise RuntimeError(f"NSE API {path} unavailable")
 
 
-def _cached(name: str, max_age_s: float, fetch):
+def _cached(name: str, max_age_s: float, fetch, expect=list):
+    """`fetch()`'s reply, cached in NSE_DIR/name for `max_age_s`. Only a reply of type `expect` is used or
+    cached (NSE sometimes answers with an error object); when NSE fails, an older cached copy beats nothing."""
     path = NSE_DIR / name
-    if path.exists() and time.time() - path.stat().st_mtime < max_age_s:
+    old = None
+    if path.exists():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            old = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            pass
-    data = fetch()
+            old = None
+        if not isinstance(old, expect):
+            old = None
+        elif time.time() - path.stat().st_mtime < max_age_s:
+            return old
+    try:
+        data = fetch()
+        if not isinstance(data, expect):
+            raise ValueError(f"unexpected NSE reply for {name}: {type(data).__name__}")
+    except Exception:
+        if old is not None:
+            return old
+        raise
     path.write_text(json.dumps(data), encoding="utf-8")
     return data
 
@@ -81,6 +95,8 @@ def upcoming_results(symbols, today: date, days: int = 14) -> tuple[dict[str, st
     wanted = set(symbols)
     out: dict[str, str] = {}
     for r in rows:
+        if not isinstance(r, dict):
+            continue
         sym = str(r.get("symbol", "")).strip()
         if sym not in wanted or "result" not in str(r.get("purpose", "")).lower():
             continue
@@ -106,15 +122,18 @@ def results_history(start: date, end: date, log=print) -> dict[str, list[str]]:
         last = nxt - timedelta(days=1)
         past = last < date.today() - timedelta(days=7)
 
-        def fetch(m=month, l=last):
-            return _get_json("event-calendar", {"index": "equities", "from_date": m.strftime("%d-%m-%Y"),
+        def fetch(m=month, l=last, past=past):
+            rows = _get_json("event-calendar", {"index": "equities", "from_date": m.strftime("%d-%m-%Y"),
                                                 "to_date": l.strftime("%d-%m-%Y")})
+            if past and not rows:   # every month has results: an empty past month is a glitch, never cached for good
+                raise ValueError("empty results calendar")
+            return rows
         try:
             rows = _cached(f"results_{month:%Y%m}.json", 10 ** 9 if past else 86400, fetch)
         except Exception:
             rows = []
         for r in rows:
-            if "result" not in str(r.get("purpose", "")).lower():
+            if not isinstance(r, dict) or "result" not in str(r.get("purpose", "")).lower():
                 continue
             try:
                 d = pd.to_datetime(str(r.get("date", "")).strip().title(), format="%d-%b-%Y").date()
@@ -128,11 +147,15 @@ def results_history(start: date, end: date, log=print) -> dict[str, list[str]]:
 def trading_holidays(year: int) -> set[str]:
     """Official NSE equity trading holidays for `year` as ISO dates (empty set if unavailable)."""
     try:
-        raw = _cached(f"holidays_{year}.json", 7 * 86400, lambda: _get_json("holiday-master", {"type": "trading"}))
+        raw = _cached(f"holidays_{year}.json", 7 * 86400, lambda: _get_json("holiday-master", {"type": "trading"}),
+                      expect=dict)
     except Exception:
         return set()
     out = set()
-    for r in raw.get("CM", []):
+    rows = raw.get("CM", [])
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
         try:
             d = pd.to_datetime(str(r.get("tradingDate", "")).strip().title(), format="%d-%b-%Y").date()
         except (ValueError, TypeError):

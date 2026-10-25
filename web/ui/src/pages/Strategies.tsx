@@ -8,17 +8,17 @@ import type { SortingState } from '@tanstack/react-table'
 import { ArrowRight, Ban, ChevronDown, LayoutGrid, Rows3 } from 'lucide-react'
 import { useIntraday, useStrategies } from '@/api/hooks'
 import type { Evidence, Horizon, IntradayStrategy, RejectedEntry, StrategyListResponse, StrategyStatus, StrategySummary } from '@/api/types'
-import { EdgeVerdict, EtfChip, EvidenceChip, HorizonChip, LifecycleBadge, StatusBadge, edgeVerdict } from '@/components/badges'
+import { EdgeVerdict, EtfChip, EvidenceChip, HorizonChip, LifecycleBadge, StatusBadge, WarnChip, edgeVerdict } from '@/components/badges'
 import { Sparkline, TimingRangeBar } from '@/components/charts/svg'
 import { ColumnChooser, DataTable, type Col } from '@/components/DataTable'
-import { BiasNote, Help, PageHeader } from '@/components/domain'
-import { ErrorState, Skeleton, SkeletonRows } from '@/components/feedback'
+import { BiasNote, Help, PageHeader, flatteredNote } from '@/components/domain'
+import { ErrorState, RefreshFailed, Skeleton, SkeletonRows } from '@/components/feedback'
 import { Pct, Pts, Ratio, Risk } from '@/components/num'
 import { Button, Card, MenuCheck, Popover, Segmented, SelectButton, Tabs } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { date, num, pct } from '@/lib/format'
 import { useWidth } from '@/lib/useWidth'
-import { EVIDENCE, HORIZON, HORIZONS, STATUS } from '@/lib/vocab'
+import { EVIDENCE, HORIZON, HORIZONS, STATUS, lostMoney } from '@/lib/vocab'
 
 type View = 'table' | 'cards'
 const STATUSES: StrategyStatus[] = ['working', 'mixed', 'not-working', 'unknown']
@@ -55,7 +55,7 @@ function EdgeValue({ s, className }: { s: StrategySummary; className?: string })
 // page line up column for column. `hideBelow`: low-priority columns step aside on narrower cards (column chooser).
 function columns(): Col<StrategySummary>[] {
   return [
-    { id: 'status', header: 'Status', value: (s) => STATUSES.indexOf(s.status), cell: (s) => <StatusBadge status={s.status} short />, width: 116, mobile: 'secondary', label: 'Status' },
+    { id: 'status', header: 'Status', value: (s) => STATUSES.indexOf(s.status), cell: (s) => <StatusBadge status={s.status} short lost={lostMoney(s.headline)} />, width: 116, mobile: 'secondary', label: 'Status' },
     {
       id: 'name', header: 'Strategy', label: 'Strategy', value: (s) => s.name, sticky: true, width: 256, mobile: 'primary',
       cell: (s) => (
@@ -65,6 +65,7 @@ function columns(): Col<StrategySummary>[] {
             <HorizonChip horizon={s.horizon} letter />
             <EvidenceChip evidence={s.evidence} />
             {s.universe === 'etfs' && <EtfChip />}
+            {flatteredNote(s) && <WarnChip title={flatteredNote(s) ?? undefined}>Flattered</WarnChip>}
             {s.blocked_by_regime && <span className="text-2xs text-muted" title="Regime filter on: no new buys while Nifty is below its 200-DMA">regime-blocked</span>}
           </span>
         </div>
@@ -77,7 +78,7 @@ function columns(): Col<StrategySummary>[] {
     },
     { id: 'tax', header: 'After tax', title: 'CAGR after Indian capital-gains tax', align: 'right', value: (s) => s.headline.after_tax_cagr_pct, cell: (s) => <Pct v={s.headline.after_tax_cagr_pct} signed={false} />, width: 96, hideBelow: 1300 },
     {
-      id: 'edge', header: 'Edge', label: 'Edge vs avg stock', title: 'CAGR minus the average stock in the same list (the fair test while backtests use today’s list). ETF strategies: vs Nifty 50 (*)',
+      id: 'edge', header: 'Edge', label: 'Edge vs avg stock', title: 'CAGR minus the equal-weight average stock of the same backtest universe. ETF strategies: vs Nifty 50 (*)',
       align: 'right', value: (s) => primaryEdge(s), mobile: 'change', width: 80,
       cell: (s) => <EdgeValue s={s} className="font-semibold" />,
     },
@@ -128,9 +129,9 @@ function StrategyCard({ s }: { s: StrategySummary }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="line-clamp-2 text-[14px] font-semibold" title={s.name}>{s.name}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-1"><HorizonChip horizon={s.horizon} /><EvidenceChip evidence={s.evidence} />{s.universe === 'etfs' && <EtfChip />}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-1"><HorizonChip horizon={s.horizon} /><EvidenceChip evidence={s.evidence} />{s.universe === 'etfs' && <EtfChip />}{flatteredNote(s) && <WarnChip title={flatteredNote(s) ?? undefined}>Flattered</WarnChip>}</div>
         </div>
-        <StatusBadge status={s.status} short />
+        <StatusBadge status={s.status} short lost={lostMoney(s.headline)} />
       </div>
       {/* mt-auto: cards in a row share one height, so a one-line name leaves its spare line above the numbers and the
           CAGR, timing bar and metric rows line up across the row */}
@@ -285,6 +286,7 @@ export default function Strategies() {
         <div className="card"><SkeletonRows rows={10} cols={8} /></div>
       ) : (
         <div ref={boxRef} className="space-y-3">
+          {q.error && <RefreshFailed error={q.error} onRetry={() => void q.refetch()} />}
           <div className="border-b border-line">
             <Tabs<'all' | Horizon>
               value={tab}
@@ -303,7 +305,9 @@ export default function Strategies() {
             <span>Nifty 50 <span className="font-semibold">{pct(b?.nifty50?.cagr_pct, { signed: false })}</span>/yr</span>
             <span>Nifty 500 <span className="font-semibold">{pct(b?.nifty500?.cagr_pct, { signed: false })}</span>/yr</span>
             <span>Average stock in this list <span className="font-semibold">{pct(b?.average_stock?.cagr_pct, { signed: false })}</span>/yr
-              <Help text="Equal-weight average of every stock in today's Nifty 500 list. It is inflated by survivorship bias, which is exactly why strategies are judged against it." />
+              <Help text={d.as_of.backtest_universe === 'point_in_time'
+                ? "Equal-weight average of the backtest universe (each day's point-in-time members), the fair benchmark for stock-picking strategies."
+                : "Equal-weight average of every stock in today's Nifty 500 list. It is inflated by survivorship bias, which is exactly why strategies are judged against it."} />
             </span>
           </div>
           <BiasNote asOf={d.as_of} gap={b?.survivorship_gap_pct} />

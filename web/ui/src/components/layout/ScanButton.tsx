@@ -106,7 +106,7 @@ export function ScanButton({ compact }: { compact?: boolean }) {
               {data?.latest && (
                 <div className="mt-1 border-t border-line px-2.5 pb-1.5 pt-2 text-2xs text-faint">
                   Last scan {timeIST(data.latest.generated_at)} ({relative(data.latest.generated_at)}), took {duration(data.latest.elapsed_s)}.
-                  Scheduled scans run at 15:40 and 19:15 on weekdays.
+                  Scheduled scans run at 08:30, 15:40 and 19:15 on weekdays.
                 </div>
               )}
             </>

@@ -29,7 +29,15 @@ def paper_line(p: dict) -> str:
 def format_daily(r: dict, top_n: int = 10) -> str:
     m = r["market"]
     when = datetime.fromisoformat(r["generated_at"]).strftime("%d %b %H:%M")
-    price_note = (f"LIVE {r.get('live_source') or ''}".strip() if r.get("live") else "official NSE close")
+    nse_status = str(r.get("nse_status") or "")
+    if r.get("live"):
+        price_note = f"LIVE {r.get('live_source') or ''}".strip()
+    elif nse_status == "cached":
+        price_note = "stored prices (no download this run)"
+    elif nse_status.startswith("NSE file not available"):
+        price_note = "official NSE close; some days from Yahoo until NSE publishes them"
+    else:
+        price_note = "official NSE close"
     # Index data can be missing (NSE/Yahoo hiccup): print "-" rather than crash after a finished scan.
     nifty = f"{m['nifty']:,.0f}" if m.get("nifty") is not None else "-"
     breadth = f"{m['breadth_50']:.0f}%" if m.get("breadth_50") is not None else "-"
@@ -39,22 +47,31 @@ def format_daily(r: dict, top_n: int = 10) -> str:
              f"{MOOD.get(m['level'], '')} Market {m['label']}: Nifty {nifty} ({_pct(m.get('nifty_change_pct'), 2)}), "
              f"VIX {m.get('vix') if m.get('vix') is not None else '-'}, {breadth} of stocks above 50-DMA",
              m["advice"]]
+    if "unavailable" in str(r.get("results_note") or ""):
+        lines.append("⚠ " + r["results_note"] + " - results warnings are missing today.")
+    held = {h.get("symbol") for h in r.get("holdings", [])}
     for s in r["strategies"]:
         if s["status"] == "not-working" and s["key"] == "legacy_rules":
             continue
         y1 = s["metrics"].get("12m") or {}
         full = s["metrics"]["full"]
         lines.append("")
-        lines.append(f"{ICON.get(s['status'], '')} {s['name']}: {_pct(full.get('cagr_pct'))}/yr over "
+        lines.append(f"{ICON.get(s['status'], '')} {s['name']}: backtest {_pct(full.get('cagr_pct'))}/yr over "
                      f"{full['start'][:4]}-{full['end'][:4]}, last 12m {_pct(y1.get('return_pct'))} "
                      f"(Nifty {_pct((y1.get('benchmark') or {}).get('return_pct'))})")
         pp = (r.get("paper") or {}).get(s["key"])
         if pp:
             lines.append("  " + paper_line(pp))
         all_buys = [a for a in s["actions"] if a["action"] == "BUY"]
+        if s["status"] == "not-working":   # as the dashboard: comparison only, its new buys are not orders
+            if all_buys:
+                lines.append("  Comparison only (not working now): its new BUY signals are left out, as on the "
+                             "dashboard.")
+            all_buys = []
         # The backtest skips a buy under one share or under account.min_position: so does this list.
         small = [a for a in all_buys if not a.get("qty") or (a.get("amount") or 0) < min_pos]
-        buys = [a for a in all_buys if a not in small][:top_n]
+        buys_all = [a for a in all_buys if a not in small]
+        buys = buys_all[:top_n]
         sells = [a for a in s["actions"] if a["action"] == "SELL"]
         if buys:
             lines.append("  BUY at next open: " + ", ".join(
@@ -62,15 +79,24 @@ def format_daily(r: dict, top_n: int = 10) -> str:
                 f"{', stop ₹' + format(a['stop'], ',.0f') if a.get('stop') else ''}"
                 f"{', ⚠ results ' + a['results_on'][5:] if a.get('results_warning') else ''})"
                 for a in buys))
+            if len(buys_all) > len(buys):
+                lines[-1] += f" (+{len(buys_all) - len(buys)} more on the dashboard)"
         if small:
             lines.append(f"  Skipped (position under one share or under ₹{min_pos:,.0f}): "
                          + ", ".join(a["symbol"] for a in small))
         if sells:
-            lines.append("  SELL at next open: " + ", ".join(f"{a['symbol']} ({a['reason']})" for a in sells))
+            lines.append("  SELL at next open (model portfolio - only if you hold it): " + ", ".join(
+                f"{a['symbol']}{' - you hold it' if a['symbol'] in held else ''} ({a['reason']})" for a in sells))
         if s["positions"]:
             lines.append("  Holding: " + ", ".join(f"{p['symbol']} {_pct(p['ret_pct'], 0)}" for p in s["positions"][:15]))
         if s.get("next_rebalance"):
             lines.append(f"  Next review: {s['next_rebalance']}")
+    n_buying = sum(1 for s in r["strategies"] if s["status"] != "not-working"
+                   and any(a["action"] == "BUY" for a in s["actions"]))
+    if n_buying > 1:
+        lines.append("")
+        lines.append(f"ℹ Quantities size each strategy on your full capital (₹{float(r.get('capital') or 0):,.0f}). "
+                     "Following several? Split it - the dashboard applies `allocations:` from config.yaml.")
     alerts = [h for h in r.get("holdings", []) if h.get("alerts")]
     if alerts:
         lines.append("")
@@ -80,7 +106,8 @@ def format_daily(r: dict, top_n: int = 10) -> str:
             lines.append(f"  {h['symbol']}{pnl}: " + "; ".join(h["alerts"]))
     if any(a.get("provisional") for s in r["strategies"] for a in s["actions"]):
         lines.append("")
-        lines.append("⏱ Orders are provisional: the market is open and today's candle can still change.")
+        lines.append("⏱ Orders are provisional: based on live/delayed quotes, not NSE's official close (published "
+                     "after ~6 PM) - re-check after the evening scan.")
     lines.append("")
     lines.append("Rule-based signals tested on history - not investment advice. Decide yourself; always use a stop-loss.")
     return "\n".join(lines)

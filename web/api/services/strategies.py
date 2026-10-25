@@ -13,6 +13,8 @@ from datetime import date
 
 import pandas as pd
 
+from scanner.costs import CostModel
+
 from . import catalog, clock, data, paper_svc
 from ..caches import KeyedCache, file_key, register
 from ..errors import no_scan, not_found
@@ -53,7 +55,9 @@ def as_of(lt: dict | None = None, clk: dict | None = None) -> dict:
         "scan_id": str(lt.get("generated_at")), "generated_at": str(lt.get("generated_at")),
         "elapsed_s": num(lt.get("elapsed_s")) or 0.0, "data_date": data_date, "live": bool(lt.get("live")),
         "live_source": lt.get("live_source"), "complete_upto": lt.get("complete_upto"),
-        "stale": bool(data_date) and data_date < clk["last_completed_day"],
+        # a live (intraday) snapshot of day D is stale once D's official close exists
+        "stale": bool(data_date) and (data_date < clk["last_completed_day"]
+                                      or (bool(lt.get("live")) and data_date <= clk["last_completed_day"])),
         "legacy_producer": is_legacy(lt),
         "backtest_universe": lt.get("backtest_universe") if lt.get("backtest_universe") in ("current_list", "point_in_time") else "current_list",
         "universe_note": str(lt.get("universe") or ""), "tradable": int(lt.get("stocks") or 0),
@@ -200,7 +204,11 @@ def rules_view(s: dict) -> dict:
         "regime_action": r.get("regime_action") if r.get("regime_action") in ("hold", "cash") else None,
         "params": json.loads(json.dumps(r.get("params") or {}, default=str)), "source": source,
     }
-    out["plain_rules"] = catalog.plain_rules(s["key"], out)
+    try:
+        costs = CostModel.from_config(data.config().get("costs"))
+    except Exception:      # a bad costs block in config.yaml must not hide the rules
+        costs = None
+    out["plain_rules"] = catalog.plain_rules(s["key"], out, costs)
     return out
 
 
@@ -290,13 +298,23 @@ def benchmark_strip(lt: dict) -> tuple[dict, dict]:
 
 
 # ------------------------------------------------------------------ positions / ranking / trades
-def model_weight(pos: dict, key: str, capital: float) -> float | None:
-    """qty * last / (capital * curves[key].last) * 100: the position's share of the model portfolio."""
-    cl = curve_last(key)
+def model_weight(pos: dict, s: dict, capital: float, lt: dict | None = None) -> float | None:
+    """The position's share of the model portfolio that holds it (the simulation on today's list), in %.
+
+    Order of sources: the scan's own position weight_pct, else qty * last / the scan's model_equity, else
+    qty * last / (capital * curves[key].last). The curve is that model only when the backtest also ran on today's
+    list: a point-in-time backtest is a different simulation, so its curve is never used as the denominator."""
+    w = num(pos.get("weight_pct"))
+    if w is not None:
+        return round(w, 2)
     qty, last = num(pos.get("qty")), num(pos.get("last_price"))
-    if not cl or not capital or qty is None or last is None:
+    eq = num(s.get("model_equity"))
+    if eq is None and (lt or {}).get("backtest_universe") != "point_in_time":
+        cl = curve_last(s["key"])
+        eq = capital * cl if cl and capital else None
+    if not eq or eq <= 0 or qty is None or last is None:
         return None
-    return round(qty * last / (capital * cl) * 100, 2)
+    return round(qty * last / eq * 100, 2)
 
 
 def positions(s: dict, lt: dict, today: date | None = None) -> list[dict]:
@@ -310,7 +328,7 @@ def positions(s: dict, lt: dict, today: date | None = None) -> list[dict]:
                     "industry": p.get("industry") or m.get("industry"),
                     "entry_date": str(p.get("entry_date") or ""), "entry_price": num(p.get("entry_price")) or 0.0,
                     "last_price": num(p.get("last_price")), "ret_pct": num(p.get("ret_pct")), "stop": num(p.get("stop")),
-                    "days": int(p.get("days") or 0), "weight_pct": model_weight(p, s["key"], capital),
+                    "days": int(p.get("days") or 0), "weight_pct": model_weight(p, s, capital, lt),
                     "results_on": p.get("results_on"), "results_in_days": days_until(p.get("results_on"), today)})
     return out
 
@@ -347,8 +365,8 @@ def artifact_trades(key: str) -> pd.DataFrame | None:
 # ------------------------------------------------------------------ yearly / monthly (curves.parquet)
 def _calendar_years(v: pd.Series) -> dict[int, float]:
     """Calendar-year returns in %: year-end over the PREVIOUS year-end (the first year over the first value), so a
-    year includes its first trading day and equals the monthly table's year total. latest.yearly uses the year's
-    first close as the base instead, which drops each first trading day (dual_momentum 2022: -20.2% vs -13.8%)."""
+    year includes its first trading day and equals the monthly table's year total. (latest.yearly uses the same rule
+    since daily._calendar_yearly; scans written before that used the year's first close and drop each first day.)"""
     v = v.dropna()
     if len(v) < 2:
         return {}

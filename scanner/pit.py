@@ -119,7 +119,11 @@ def update_raw(days: list[date], download: bool = True, log=print) -> pd.DataFra
     for i, d in enumerate(need):
         path = nse.NSE_DIR / f"stocks_{d:%Y%m%d}.parquet"
         if path.exists():
-            parts.append(_day_rows(d, pd.read_parquet(path)))
+            try:
+                parts.append(_day_rows(d, pd.read_parquet(path)))
+            except Exception:   # a damaged cache file: removed, so the next download fetches the day again
+                log(f"  NSE day file for {d.isoformat()} is damaged - removed (it is downloaded again next time)")
+                nse._unlink(path)
         if len(need) > 200 and (i + 1) % 250 == 0:
             log(f"  read {i + 1}/{len(need)} day files ({time.perf_counter() - t0:.0f}s)")
     if parts:
@@ -345,9 +349,17 @@ def _adjust(fr: dict[str, pd.DataFrame], prev_close: pd.DataFrame, after_missing
     if reuse is not None:
         last, before = pd.Timestamp(reuse.info["last_day"]), set(reuse.universe.columns)
         cols = set(fr["close"].columns)
-        done = [a for a in reuse.info["adjustments"]
-                if pd.Timestamp(a["date"]) <= last and a["symbol"] in before and a["symbol"] in cols]
-        checked = lambda d, s: d <= last and s in before          # noqa: E731
+        # A rename learned since that build moved an old symbol's history into a stock it already had: that
+        # stock's earlier days are new to it, so it is checked again in full (the previous build still had
+        # the old symbol's rows from before the change date under the old symbol).
+        old_close = reuse.frames.get("close")
+        restitched = {new for new, olds in corporate.renames().items() if new in cols and old_close is not None
+                      and any(old in before and old in old_close.columns
+                              and old_close[old].loc[:pd.Timestamp(eff) - pd.Timedelta(days=1)].notna().any()
+                              for old, eff in olds)}
+        done = [a for a in reuse.info["adjustments"] if pd.Timestamp(a["date"]) <= last and a["symbol"] in before
+                and a["symbol"] in cols and a["symbol"] not in restitched]
+        checked = lambda d, s: d <= last and s in before and s not in restitched   # noqa: E731
         events = [e for e in events if not checked(e[0], e[1])]
     # Notices: the ex-date's own file (many first appear there), the trading day before it, the next
     # one (a few are listed only after the ex-date); big jumps also look two more days each way.
@@ -652,9 +664,14 @@ def update(days: list[date], keep_symbols: list[str] = (), log=print,
     newer = [d for d in days if d > last]
     if any((nse.NSE_DIR / f"stocks_{d:%Y%m%d}.parquet").exists() for d in newer):
         log("Updating the point-in-time universe with new NSE days...")
-        data = build([d for d in days if d >= date.fromisoformat(data.info["first_day"])],
-                     keep_symbols, download=False, log=log, size=data.info["rule"]["size"], reference=reference,
-                     reuse=data)
+        first, size = date.fromisoformat(data.info["first_day"]), data.info["rule"]["size"]
+        try:
+            data = build([d for d in days if d >= first], keep_symbols, download=False, log=log, size=size,
+                         reference=reference, reuse=data)
+        except Exception as e:   # keep the last good build rather than falling back to today's (biased) list
+            data.info["update_error"] = f"{type(e).__name__}: {e}"     # in memory only (see backtest_setup)
+            log(f"Point-in-time update failed ({data.info['update_error']}) - backtests use the last good build "
+                f"(data to {data.info['last_day']}).")
     return data
 
 
@@ -700,8 +717,10 @@ def backtest_setup(cfg: dict, frames: dict, info: dict, current: list[str], live
         data = None
         log(f"Point-in-time universe problem ({type(e).__name__}: {e}) - backtesting on today's list instead.")
     if data is None:
-        out["note"] = ("Point-in-time universe not available (build it with 4_build_universe.bat) - backtests use "
-                       "today's list, so they are flattered.")
+        why = ("its saved build could not be read - run 4_build_universe.bat if this repeats"
+               if (PIT_DIR / "CURRENT").exists() else "build it with 4_build_universe.bat")
+        out["note"] = (f"Point-in-time universe not available ({why}) - backtests use today's list, so they are "
+                       "FLATTERED by survivorship bias.")
         log(out["note"])
         return out
     flt = cfg.get("filters") or {}
@@ -718,7 +737,10 @@ def backtest_setup(cfg: dict, frames: dict, info: dict, current: list[str], live
                  f"{data.info['members_no_longer_trading']} of which no longer trade)."),
         "members": len(data.members), "gone": data.info["members_no_longer_trading"],
         "last_day": data.info["last_day"],
+        "update_error": data.info.get("update_error"),     # set when today's update failed (see update)
     })
+    if out["update_error"]:
+        out["note"] += f" Today's update failed ({out['update_error']}): the last good build, data to {out['last_day']}."
     if industry:   # share of member-days whose industry is known (NSE lists industries only for today's members)
         mem = data.universe.to_numpy(dtype=bool)
         known = data.universe.columns.isin(list(industry))
@@ -863,10 +885,16 @@ def main(argv: list[str]) -> int:
 
     cmd = argv[0] if argv else "build"
     if cmd == "build":
-        cfg = load_config()
-        current = list(get_universe(cfg.get("universe", "nifty500"))[0]["symbol"])
-        sfr = store.load_store()
-        build(store_days(sfr), current, reference=sfr["close"])
+        from .lock import ScanBusy, scan_lock
+        try:   # a scan updates the same files: one at a time (scans started meanwhile are skipped as busy)
+            with scan_lock("universe build"):
+                cfg = load_config()
+                current = list(get_universe(cfg.get("universe", "nifty500"))[0]["symbol"])
+                sfr = store.load_store()
+                build(store_days(sfr), current, reference=sfr["close"])
+        except ScanBusy as e:
+            print(f"{e} Then run 4_build_universe.bat again.")
+            return 2
     elif cmd == "compare":
         df = compare()
         df.to_csv(COMPARISON_FILE, index=False)

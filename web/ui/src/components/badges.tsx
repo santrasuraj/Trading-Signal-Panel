@@ -5,12 +5,13 @@ import { AlertTriangle, CalendarClock, Hourglass } from 'lucide-react'
 import type { Evidence, HoldingLevel, Horizon, IntradayStrategy, Lifecycle, Side, StrategyStatus, Tone } from '@/api/types'
 import { cn } from '@/lib/csv'
 import { daysUntil, date } from '@/lib/format'
-import { EVIDENCE, EVIDENCE_ICON, HORIZON, LIFECYCLE, STATUS, TONE_DOT, TONE_TEXT, TONE_TINT } from '@/lib/vocab'
+import { EVIDENCE, EVIDENCE_ICON, FELL_LESS, HORIZON, LIFECYCLE, STATUS, TONE_DOT, TONE_TEXT, TONE_TINT } from '@/lib/vocab'
 
 const pill = 'inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-2xs font-medium leading-none'
 
-export function StatusBadge({ status, short, className }: { status: StrategyStatus; short?: boolean; className?: string }) {
-  const m = STATUS[status] ?? STATUS.unknown
+/** `lost`: a 'working' strategy that still lost money over 12 or 6 months shows 'Fell less' (amber), not a green tick. */
+export function StatusBadge({ status, short, className, lost }: { status: StrategyStatus; short?: boolean; className?: string; lost?: boolean }) {
+  const m = status === 'working' && lost ? FELL_LESS : (STATUS[status] ?? STATUS.unknown)
   const Icon = m.icon
   return (
     <span title={m.help} className={cn(pill, TONE_TINT[m.tone], TONE_TEXT[m.tone], className)}>
@@ -21,8 +22,8 @@ export function StatusBadge({ status, short, className }: { status: StrategyStat
 }
 
 /** Compact status glyph for dense lists (dot + icon tooltip). */
-export function StatusDot({ status, className }: { status: StrategyStatus; className?: string }) {
-  const m = STATUS[status] ?? STATUS.unknown
+export function StatusDot({ status, className, lost }: { status: StrategyStatus; className?: string; lost?: boolean }) {
+  const m = status === 'working' && lost ? FELL_LESS : (STATUS[status] ?? STATUS.unknown)
   const Icon = m.icon
   return (
     <span title={m.label} className={cn('inline-flex shrink-0', TONE_TEXT[m.tone], className)}>

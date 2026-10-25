@@ -9,7 +9,7 @@ import { ResultsChip } from '@/components/badges'
 import { Sparkline } from '@/components/charts/svg'
 import { DataTable, SymbolCell, type Col } from '@/components/DataTable'
 import { PageHeader } from '@/components/domain'
-import { ErrorState, FeatureUnavailable, Skeleton, SkeletonRows } from '@/components/feedback'
+import { ErrorState, FeatureUnavailable, RefreshFailed, Skeleton, SkeletonRows } from '@/components/feedback'
 import { Pct, Price } from '@/components/num'
 import { Card, Chip, MenuCheck, Popover, Segmented, SelectButton, Switch } from '@/components/ui'
 import { daysBetween, date, num, todayIST } from '@/lib/format'
@@ -83,6 +83,7 @@ export default function Screener() {
         subtitle={q.data ? <>{q.data.total} stocks · prices {date(q.data.source_date)} · liquid stocks of the scan universe</> : <Skeleton className="h-3 w-56" />}
         right={<Segmented<ScreenerPreset> ariaLabel="Preset" value={preset} onChange={(v) => set('preset', v === 'momentum' ? null : v)} items={PRESETS.map((p) => ({ id: p.id, label: p.label, title: p.help }))} className="scroll-x no-scrollbar max-w-full" />}
       />
+      {q.error && q.data && !unavailable && <div className="mb-3"><RefreshFailed error={q.error} onRetry={() => void q.refetch()} /></div>}
       <Card flush>
         {unavailable ? (
           <FeatureUnavailable title="The screener appears after the next scan." hint="It reads screener.parquet, which the scan writes with the same prices as the orders (including a live candle). Run a scan from the top bar." />
@@ -119,7 +120,7 @@ export default function Screener() {
           />
         )}
       </Card>
-      <p className="mt-2 text-2xs text-faint">Rankings use stored daily closes from the last scan. Click a row for the chart; j/k to move, Enter to open, / to filter.</p>
+      <p className="mt-2 text-2xs text-faint">Rankings use the last scan's prices{q.data?.as_of.live ? ", including today's still-forming (provisional) candle" : ' (official closes)'}. Click a row for the chart; j/k to move, Enter to open, / to filter.</p>
     </div>
   )
 }

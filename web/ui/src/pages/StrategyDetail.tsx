@@ -6,12 +6,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, Ban, ChevronLeft, ChevronRight, ExternalLink, FlaskConical, NotebookPen } from 'lucide-react'
 import { useCurve, useStrategies, useStrategy, useTrades } from '@/api/hooks'
 import type { CurveRange, ModelPosition, PerfStats, RankingRow, StrategyDetail as Detail, TradeRow, WindowMetrics } from '@/api/types'
-import { EtfChip, EvidenceChip, HorizonChip, LifecycleBadge, ResultsChip, StatusBadge } from '@/components/badges'
+import { EtfChip, EvidenceChip, HorizonChip, LifecycleBadge, ResultsChip, StatusBadge, WarnChip } from '@/components/badges'
 import { EquityChart } from '@/components/charts/EquityChart'
 import { MonthlyHeatmap, ReturnHistogram, TimingRangeBar, YearlyHeatmap } from '@/components/charts/svg'
 import { DataTable, SymbolCell, type Col } from '@/components/DataTable'
-import { BiasNote, Help, KpiStrip, KpiTile, OrdersTable } from '@/components/domain'
-import { EmptyState, ErrorState, FeatureUnavailable, Skeleton, SkeletonChart, SkeletonKpis, SkeletonRows } from '@/components/feedback'
+import { BiasNote, Help, KpiStrip, KpiTile, OrdersTable, flatteredNote } from '@/components/domain'
+import { EmptyState, ErrorState, FeatureUnavailable, RefreshFailed, Skeleton, SkeletonChart, SkeletonKpis, SkeletonRows } from '@/components/feedback'
 import { PaperDetailView } from '@/components/PaperDetail'
 import { Pct, Price } from '@/components/num'
 import { Card, Chip, IconButton, Segmented, Tabs } from '@/components/ui'
@@ -19,7 +19,7 @@ import type { CurveMode } from '@/lib/chartMappers'
 import { cn } from '@/lib/csv'
 import { date, num, pct, pts, ratio } from '@/lib/format'
 import { typingTarget } from '@/lib/useMedia'
-import { EVIDENCE, HORIZONS, kindLabel } from '@/lib/vocab'
+import { EVIDENCE, HORIZONS, kindLabel, lostMoney } from '@/lib/vocab'
 
 type Tab = 'performance' | 'trades' | 'holdings' | 'rules' | 'paper'
 
@@ -170,9 +170,13 @@ function Trades({ d }: { d: Detail }) {
   useEffect(() => { const t = setTimeout(() => { setDebounced(symbol); setPage(1) }, 250); return () => clearTimeout(t) }, [symbol])
   const pickOutcome = (v: 'all' | 'win' | 'loss') => { setOutcome(v); setPage(1) }
   const pickReason = (v: string) => { setReason(v); setPage(1) }
-  const q = useTrades(d.strategy.key, { outcome, reason: reason || undefined, symbol: debounced || undefined, page, page_size: 500 })
+  // more trades than one server page: the server sorts (a client sort would only reorder the 500 loaded)
+  const [sort, setSort] = useState('-exit_date')
+  const pickSort = (v: string) => { setSort(v); setPage(1) }
+  const q = useTrades(d.strategy.key, { outcome, reason: reason || undefined, symbol: debounced || undefined, sort, page, page_size: 500 })
   const nav = useNavigate()
   const t = q.data
+  const paged = !!t && t.total > t.page_size
   const cols: Col<TradeRow>[] = [
     { id: 'sym', header: 'Symbol', value: (r) => r.symbol, cell: (r) => <SymbolCell symbol={r.symbol} />, sticky: true, mobile: 'primary' },
     { id: 'in', header: 'Bought', value: (r) => r.entry_date, cell: (r) => <span className="num text-muted">{date(r.entry_date)}</span> },
@@ -224,15 +228,19 @@ function Trades({ d }: { d: Detail }) {
           <Card
             title="Trades"
             flush
-            right={t.total > t.page_size ? (
-              <span className="num flex items-center gap-1 text-xs text-muted">
+            right={paged ? (
+              <span className="num flex flex-wrap items-center gap-1 text-xs text-muted">
+                <Segmented size="sm" ariaLabel="Sort all trades" value={sort} onChange={pickSort} items={[
+                  { id: '-exit_date', label: 'Newest' }, { id: '-ret_pct', label: 'Best' }, { id: 'ret_pct', label: 'Worst' }, { id: '-days', label: 'Longest' },
+                ]} />
                 {(t.page - 1) * t.page_size + 1}–{Math.min(t.total, t.page * t.page_size)} of {t.total}
                 <IconButton size="sm" label="Previous 500 trades" disabled={t.page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}><ChevronLeft className="h-4 w-4" /></IconButton>
                 <IconButton size="sm" label="Next 500 trades" disabled={t.page * t.page_size >= t.total} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-4 w-4" /></IconButton>
               </span>
             ) : undefined}
           >
-            <DataTable id="strategy.trades" data={t.rows} columns={cols} rowKey={(r) => `${r.symbol}:${r.entry_date}:${r.exit_date}`} pageSize={50} exportName={`${d.strategy.key}-trades`} onRowClick={(r) => nav(`/chart/${r.symbol}?s=${d.strategy.key}`)} initialSort={[{ id: 'out', desc: true }]} keyboard />
+            <DataTable id="strategy.trades" data={t.rows} columns={cols} rowKey={(r) => `${r.symbol}:${r.entry_date}:${r.exit_date}`} pageSize={50} exportName={`${d.strategy.key}-trades`} onRowClick={(r) => nav(`/chart/${r.symbol}?s=${d.strategy.key}`)} initialSort={[{ id: 'out', desc: true }]} sortable={!paged} keyboard
+              footer={paged ? <div className="border-t border-line px-4 py-2 text-2xs text-faint">Sorting (the buttons above) covers all {t.total} trades; the CSV export covers the {t.rows.length} trades of this page.</div> : undefined} />
           </Card>
         </>
       )}
@@ -271,7 +279,9 @@ function Holdings({ d }: { d: Detail }) {
       <Card title="Orders for the next open" subtitle="Same rows as Signals for the same allocations" flush>
         {d.orders.length ? <OrdersTable id={`detail.${d.strategy.key}`} orders={d.orders} /> : <div className="px-4 py-3 text-[13px] text-muted">No orders. {d.regime_note ?? (d.strategy.next_rebalance ? `Next review ${date(d.strategy.next_rebalance)}.` : 'No entry signals today.')}</div>}
       </Card>
-      <Card title={`Model holdings (${d.positions.length} of ${d.strategy.max_positions})`} subtitle="Weights, not share counts: the backtest compounds its capital" flush>
+      <Card title={`Model holdings (${d.positions.length} of ${d.strategy.max_positions})`} subtitle={d.positions.length > 0 && d.positions.every((p) => p.weight_pct == null)
+        ? 'Weights unknown for this scan: it did not record the equity of the model on today’s list (the point-in-time backtest is a different simulation)'
+        : 'Weights in the model on today’s list (the one the orders come from), not share counts'} flush>
         <DataTable id="strategy.positions" data={d.positions} columns={posCols} rowKey={(r) => r.symbol} onRowClick={(r) => nav(`/chart/${r.symbol}?s=${d.strategy.key}`)} exportName={`${d.strategy.key}-holdings`} empty={<EmptyState compact title="The model holds nothing right now" />} keyboard
           footer={d.positions.length > 1 ? <div className="border-t border-line px-4 py-2 text-2xs text-faint">Weights drift by design: held positions are never trimmed back, so winners grow, and a new entry gets at most an equal slot (equity / {d.strategy.max_positions}), less when the cash freed by the sale is smaller.</div> : undefined} />
       </Card>
@@ -308,7 +318,7 @@ function Rules({ d }: { d: Detail }) {
                 ['Stop', r.stop_pct != null ? `${num(r.stop_pct, 1)}%` : r.stop_atr != null ? `${num(r.stop_atr, 1)} × ATR` : 'none'], ['Target', r.target_pct != null ? `${num(r.target_pct, 1)}%` : 'none'],
                 ['Trailing stop', r.trail_pct ? `${num(r.trail_pct, 1)}%` : 'none'], ['Max hold', r.max_hold ? `${r.max_hold} days` : '—'],
                 ['Sizing', r.sizing === 'risk' ? `risk ${num(r.risk_pct, 1)}% per trade` : 'equal weight'], ['Regime filter', r.use_regime ? `on (${r.regime_action ?? 'hold'})` : 'off'],
-                ['Costs', `≈ ${num(d.as_of.costs_round_trip_pct, 2)}% round trip incl. slippage`],
+                ['Costs', `≈ ${num(d.as_of.costs_round_trip_pct, 2)}% round trip incl. slippage (liquid stocks; more for illiquid)`],
               ].filter(([, v]) => v != null).map(([k, v]) => (
                 <tr key={String(k)} className="border-b border-line/60 last:border-0"><td className="px-4 py-1.5 text-muted">{k}</td><td className="num px-4 py-1.5 text-right">{String(v)}</td></tr>
               ))}
@@ -388,10 +398,12 @@ export default function StrategyDetail() {
         <div className="space-y-3"><Skeleton className="h-14 w-full" /><SkeletonKpis n={10} /><div className="card"><SkeletonChart height={420} /></div></div>
       ) : (
         <div className="space-y-3">
+          {q.error && <RefreshFailed error={q.error} onRetry={() => void q.refetch()} />}
           <div className={cn(s.comparison_only && 'opacity-90')}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <h1 className="text-xl font-semibold tracking-[-0.01em]">{s.name}</h1>
-              {s.lifecycle === 'active' ? <StatusBadge status={s.status} /> : <LifecycleBadge lifecycle={s.lifecycle} />}
+              {s.lifecycle === 'active' ? <StatusBadge status={s.status} lost={lostMoney(s.headline)} /> : <LifecycleBadge lifecycle={s.lifecycle} />}
+              {flatteredNote(s) && <WarnChip title={flatteredNote(s) ?? undefined}>Flattered backtest</WarnChip>}
               {d.paper && <Link to={`/strategies/${s.key}/paper`} className="link ml-auto inline-flex items-center gap-1 text-xs"><NotebookPen className="h-3.5 w-3.5" />Paper <Pct v={d.paper.return_pct} /> · {d.paper.days} d</Link>}
             </div>
             {s.lifecycle === 'active' ? <p className="mt-1 text-[13px] text-muted">{s.status_reason}</p> : (

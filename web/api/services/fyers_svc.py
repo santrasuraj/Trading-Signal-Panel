@@ -23,7 +23,7 @@ from scanner.settings import env
 from . import data
 from ..errors import ApiException
 from ..paths import P
-from ..util import now_ist, today_ist
+from ..util import now_ist
 
 DEFAULT_REDIRECT = "http://127.0.0.1:8000/api/v1/auth/callback"   # login.DEFAULT_REDIRECT
 VERIFY_TTL = 300
@@ -54,7 +54,8 @@ def status(verify: bool = False, lt: dict | None = None) -> dict:
     cid, secret = env("FYERS_CLIENT_ID"), env("FYERS_SECRET_KEY")
     tok = token()
     created = tok.get("created") if tok else None
-    today_tok = bool(created and str(created)[:10] == today_ist().isoformat())
+    # the scanner's own rule (providers.token_expired): a token made before the latest 06:00 IST is dead
+    today_tok = bool(tok and created and not providers.token_expired(tok))
     plan = "prime" if str(cfg.get("fyers_plan", "standard")).lower() == "prime" else "standard"
     source = "yahoo" if str(cfg.get("data_source", "auto")).lower() == "yahoo" else "auto"
     out = {"configured": bool(cid and secret), "client_id_masked": _mask(cid), "plan": plan, "data_source": source,
@@ -231,7 +232,7 @@ def get_client():
     if not cid or not secret:
         raise ApiException("FYERS_NOT_CONFIGURED", "FYERS_CLIENT_ID / FYERS_SECRET_KEY are missing in .env.")
     tok = token()
-    if not tok or str(tok.get("created", ""))[:10] != today_ist().isoformat():
+    if not tok or not tok.get("created") or providers.token_expired(tok):
         raise ApiException("FYERS_LOGIN_REQUIRED", "Log in to Fyers first (tokens expire every morning).",
                            "Settings > Fyers > Log in.")
     if running_scan():

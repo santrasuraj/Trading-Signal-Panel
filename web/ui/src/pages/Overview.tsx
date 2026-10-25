@@ -6,17 +6,18 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AlertOctagon, AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Info, Minus, TrendingDown, TrendingUp } from 'lucide-react'
 import { useBreadth, useOverview, usePaper, useStrategies } from '@/api/hooks'
 import type { Alert, Horizon, IndexTile, Mover, OverviewResponse, ResultsEvent, StrategySummary } from '@/api/types'
-import { EvidenceChip, HorizonChip, StatusDot, TonePill } from '@/components/badges'
+import { EvidenceChip, HorizonChip, StatusDot, TonePill, WarnChip } from '@/components/badges'
 import { LinesChart, type LineDef } from '@/components/charts/LinesChart'
 import { AdBar, Sparkline } from '@/components/charts/svg'
-import { AsOfLine, BiasNote, MoreLink, OrdersTable, PageHeader, ResultsWhy } from '@/components/domain'
-import { Banner, EmptyState, ErrorState, Skeleton, SkeletonChart, SkeletonRows } from '@/components/feedback'
+import { AsOfLine, BiasNote, MoreLink, OrdersTable, PageHeader, ResultsWhy, flatteredNote } from '@/components/domain'
+import { Banner, EmptyState, ErrorState, RefreshFailed, Skeleton, SkeletonChart, SkeletonRows } from '@/components/feedback'
 import { verdictLabel } from '@/components/PaperDetail'
 import { Pct, Price, Pts } from '@/components/num'
 import { Card, Chip, Tabs } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { date, daysUntil, keepDatesTogether, money, num, pct } from '@/lib/format'
 import { useIsMobile } from '@/lib/useMedia'
+import { lostMoney } from '@/lib/vocab'
 
 function RegimeCard({ o }: { o: OverviewResponse }) {
   const m = o.market
@@ -196,7 +197,7 @@ function AlertsCard({ alerts }: { alerts: Alert[] }) {
   )
 }
 
-function PulseCard({ items }: { items: StrategySummary[] }) {
+function PulseCard({ items, pit }: { items: StrategySummary[]; pit: boolean }) {
   const nav = useNavigate()
   const all = useStrategies()
   const total = all.data?.strategies.length
@@ -212,8 +213,9 @@ function PulseCard({ items }: { items: StrategySummary[] }) {
             <li key={s.key}>
               <Link to={`/strategies/${s.key}`} className={cn('flex flex-col gap-0.5 px-4 py-2 text-[13px] active:bg-raised', s.status === 'not-working' && 'opacity-60')}>
                 <span className="flex min-w-0 items-center gap-2">
-                  <StatusDot status={s.status} />
+                  <StatusDot status={s.status} lost={lostMoney(s.headline)} />
                   <span className="min-w-0 flex-1 truncate font-medium" title={s.name}>{s.name}</span>
+                  {flatteredNote(s) && <WarnChip title={flatteredNote(s) ?? undefined}>Flattered</WarnChip>}
                   <HorizonChip horizon={s.horizon} letter />
                 </span>
                 <span className="num flex flex-wrap gap-x-3 pl-[22px] text-xs text-muted">
@@ -232,7 +234,7 @@ function PulseCard({ items }: { items: StrategySummary[] }) {
           <tr className="whitespace-nowrap text-2xs font-semibold uppercase tracking-[0.04em] text-muted">
             <th className="px-4 py-2 text-left font-semibold">Strategy</th>
             <th className="px-2 py-2 text-right font-semibold">CAGR</th>
-            <th className="py-2 pl-2 pr-1 text-right font-semibold" title="CAGR minus the average stock in the same (biased) list; ETFs vs Nifty 50">Edge<span className="inline-block w-2" /></th>
+            <th className="py-2 pl-2 pr-1 text-right font-semibold" title="CAGR minus the equal-weight average stock of the same backtest universe; ETFs vs Nifty 50">Edge<span className="inline-block w-2" /></th>
             <th className="px-4 py-2 text-right font-semibold" title="12-month return minus Nifty 500's">12m vs N500</th>
           </tr>
         </thead>
@@ -244,8 +246,9 @@ function PulseCard({ items }: { items: StrategySummary[] }) {
                 {/* the name column takes what the number columns leave (min 170 px) and truncates, never them */}
                 <td className="w-full min-w-[170px] max-w-0 px-4 py-2">
                   <div className="flex min-w-0 items-center gap-2">
-                    <StatusDot status={s.status} />
+                    <StatusDot status={s.status} lost={lostMoney(s.headline)} />
                     <span className="truncate font-medium" title={s.name}>{s.name}</span>
+                    {flatteredNote(s) && <WarnChip title={flatteredNote(s) ?? undefined}>Flattered</WarnChip>}
                     <HorizonChip horizon={s.horizon} letter />
                     {/* the evidence chip steps aside where the card is narrow (below lg, and the half-width card at
                         1280-1399), so the name is not cut ("Volatility contraction (VCP) brea…") */}
@@ -263,7 +266,7 @@ function PulseCard({ items }: { items: StrategySummary[] }) {
       </table>
       </div>
       )}
-      <div className="border-t border-line px-4 py-2 text-2xs text-faint">* ETF strategies are compared with Nifty 50. Backtest numbers, before survivorship correction.</div>
+      <div className="border-t border-line px-4 py-2 text-2xs text-faint">* ETF strategies are compared with Nifty 50. Backtest numbers{pit ? ' (point-in-time universe)' : ', before survivorship correction'}.</div>
     </Card>
   )
 }
@@ -377,6 +380,7 @@ export default function Overview() {
   return (
     <div>
       <PageHeader title="Overview" subtitle={o ? <AsOfLine a={o.as_of} /> : <Skeleton className="h-3 w-48" />} />
+      {q.error && o && <div className="mb-3"><RefreshFailed error={q.error} onRetry={() => void q.refetch()} /></div>}
       {o?.as_of.stale && (
         <div className="mb-3"><Banner tone="warn">Prices are from {date(o.as_of.data_date)}. Run a scan to update orders and alerts.</Banner></div>
       )}
@@ -400,7 +404,7 @@ export default function Overview() {
           </div>
           <div className="min-w-0 xl:col-span-12"><OrdersCard o={o} /></div>
           <div className="min-w-0 xl:col-span-6"><AlertsCard alerts={o.alerts} /></div>
-          <div className="min-w-0 xl:col-span-6"><PulseCard items={o.strategy_pulse} /></div>
+          <div className="min-w-0 xl:col-span-6"><PulseCard items={o.strategy_pulse} pit={o.as_of.backtest_universe === 'point_in_time'} /></div>
           {/* items-start: a 5-row list is not stretched to the height of its taller neighbour */}
           <div className="grid min-w-0 grid-cols-1 items-start gap-3 sm:grid-cols-2 xl:col-span-12 xl:grid-cols-4">
             <ChangesCard c={o.changes} />

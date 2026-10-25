@@ -1,5 +1,11 @@
 # Intraday bars for the NSE platform: what Yahoo and FYERS actually give, plus a tested loader
 
+> **Status, 24 Oct 2026.** This note was written on 23 Oct 2026, before the loader joined the project. It is now
+> `scanner/intraday/`, run by `intraday_sync.py` and the scheduled tasks: a 15:45 FYERS archive (not a Yahoo job),
+> the 09:14 FYERS WebSocket feed, and `5_intraday_backfill.bat` for the one-year backfill. The backtests square off
+> at 15:00 for F&O stocks and 15:15 for others, before FYERS' MIS cut-offs of 15:05 and 15:20
+> (`docs/strategy_catalogue.md` §3a), not at the 15:10/15:15 bar suggested in §3 below.
+
 **Short answer.** Yahoo is free and fast, but it only goes back about 3 months for 5-minute bars. That is too short for an honest intraday backtest, and its first and last 15 minutes of each day can't be trusted. FYERS Standard gives at least a year of 1-minute to 5-minute bars, and a full Nifty 100 backfill takes about 15 minutes of API calls. The plan:
 - **Now:** run a daily job that saves Yahoo 5-minute bars. Every day saved stays saved, so the store keeps growing past Yahoo's 3-month window.
 - **On the first FYERS login:** do a one-time backfill.
@@ -130,5 +136,54 @@ The loader module is written and all 10 of its tests pass. Nothing under `D:\New
 - **Entry point:** `intraday_sync.py` (`--backfill`, `--archive`, `--live`, `--run`, `--usage`). Its `--run` and the web app's re-run share `data/results/.intraday.lock`.
 - **Tests:** `tests/test_intraday.py` and `tests/test_fyers_limits.py`. They use fake providers and `tmp_path`, so they make no network calls and don't touch the real data folder.
 - The first measurement scripts and raw outputs were kept in this session's scratchpad. They're not part of the project.
+
+## 5. Three pre-registered intraday research tests (added 25 Oct 2026)
+
+**Read this first.** These are tests, not strategies to fund. At Indian MIS costs a round trip is about 0.05% for
+NIFTYBEES and 0.12–0.32% for stocks, which is as large as or larger than every documented intraday edge. None of the
+three is expected to be clearly profitable. They are in the platform so that the honest answer can be measured. They
+have **not been run yet** (no results exist for them as of 25 Oct 2026). The code is in `scanner/intraday/strategies.py`
+and the tests are in `tests/test_intraday_new.py`. Their settings are fixed in advance (`PRE_REGISTERED`). Any other
+value is refused with an error, because choosing a setting after seeing the results would make the test worthless.
+
+| key | what it does (all decisions use only prices known at the decision time) | primary spec | the only other pre-registered settings |
+|---|---|---|---|
+| `gap_fade_largecap` | At 09:15, take the 100 most-traded F&O stocks (20-day value to the previous day, price ≥ Rs 100). Drop results days and the day after, ADR stocks (INFY, WIPRO, HDFCBANK, ICICIBANK, DRREDDY) and raw gaps above 10%. Idiosyncratic gap = stock gap − NIFTYBEES gap. Short the 3 largest ≥ +threshold and buy the 3 most negative ≤ −threshold. Enter at the **09:20 bar open** (an auction fill is not assumed). Stop 1 × daily ATR; exit at the 15:00 bar open. Equal notional legs of 2 × equity / 6 (about market-neutral). | `threshold_pct: 1.5` | `1.0`, `2.0` |
+| `inplay_orb15` | At 09:30, rank F&O stocks by 09:20–09:30 volume against their previous 14 sessions (≥ 1.0×; build_days' `relvol`, bars 1–2 for both Yahoo and FYERS). Keep the top 2 and never revise. Direction = price at 09:30 vs the 09:15 open. A buy-stop at the 09:15–09:30 high (sell-stop at the low) works 09:30–14:55. A pick that never triggers stays an empty slot; no lower-ranked stock replaces it. Exit at the stop or the 15:00 bar open. Risk 0.5% of equity, at most 1× equity per trade. | `stop: atr10` (10% of daily ATR), `filter: rvol`, `entry_bar: stop_first` | `stop: range` (other side of the range); `filter: rvol_news` (results day or \|gap\| ≥ 2%); `entry_bar: entry_first` |
+| `niftybees_eod_momentum` | NIFTYBEES only. If it is up from yesterday's close at 09:45, buy at the 14:45 bar open (short if down) and exit at the 15:15 bar open. Emergency stop 1%. One trade a day, 1× equity, slippage 0.02% a side. | `rule: sign` | `rule: agree` (14:15→14:45 must agree), `rule: rod` (yesterday's close → 14:45) |
+
+**Running the variants.** Each variant is one line in `config.yaml`, for example
+`intraday_strategies: {gap_fade_largecap: {threshold_pct: 1.0}}`. Report **every** variant you run, not just the best
+one. For NIFTYBEES, also run `{niftybees_eod_momentum: {slippage_pct: 0.07}}` as a robustness check. For the ORB, run
+both `entry_bar` settings: 5-minute bars cannot show whether a 0.2–0.3% stop was hit before or after the entry, so the
+truth lies between them. The intraday page applies a Bonferroni correction over all enabled strategies (now 12), so
+a variant has to clear about |t| ≥ 3 to count as significant.
+
+**Gap fade on daily data first.** `gap_fade_daily(frames, universe=..., results=...)` in the same module runs the
+same picks open → official close on the daily store: about 1,800 sessions from 2019, instead of 60 intraday ones.
+Entry is at the open × (1 ± 0.05%) and exit at the close ∓ 0.03%, with the intraday charges. Membership on day t
+comes from the point-in-time universe row t−1, and there is no stop. It returns overall metrics plus the periods
+before 3 Aug 2026 (closing auction), from 3 Aug to 6 Sep, and from 7 Sep 2026 (new pre-open). It is **not wired into
+the scan yet**. To run it by hand: `pit.load()` gives `.frames` and `.universe`; add the store's NIFTYBEES columns
+(`pit.backtest_frames(data, load_store(), ["NIFTYBEES"])`); pass `events.results_history(...)` as `results`. The
+daily test exits at the close, not at 15:00, and the last half hour can flatter it, so any positive result still
+needs the 5-minute check.
+
+**Engine hooks they use** (`scanner/intraday/engine.py`, all optional, so the older nine strategies behave exactly as
+before):
+- `prepare(days, params)` makes the day's cross-sectional picks once, from decision-time data.
+- `notional_x` sizes trades at a multiple of equity instead of by risk.
+- `slippage_pct` replaces the Nifty 50 / other slippage tiers, e.g. for NIFTYBEES.
+- Every trade now records `gross_pct` (fill to fill, before slippage and charges), and the metrics include
+  `avg_trade_gross_pct`. This shows whether a strategy has no edge or whether costs eat it.
+
+**Still not modelled for these tests:**
+- The 5-minute run does not split at 3 Aug / 7 Sep 2026; only the daily gap-fade test does.
+- F&O membership is today's list.
+- There is no news filter beyond the results calendar.
+- There is no volume-participation cap.
+- Yahoo's 09:15 open is the first continuous trade, not the official auction open.
+- Whether FYERS accepts MIS orders in the pre-open, and MIS shorting of NIFTYBEES, needs confirming with FYERS.
+- Profits are taxed as speculative income at the slab rate.
 
 Sources: [FYERS historical data](https://fyers.in/api-docs/v3/api/market-data/historical-data/), [FYERS plans and limits](https://fyers.in/api-docs/v3/getting-started/plans-and-limits/), [FYERS data socket](https://fyers.in/api-docs/v3/api/websockets/data-socket/data-socket-symbol-update/), [FYERS History API delay](https://support.fyers.in/portal/en/kb/articles/is-there-any-delay-in-the-data-provided-by-the-history-api), [FYERS community: adjusted history](https://fyers.in/community/t/how-can-we-retrieve-historical-stock-data-from-fyers-api-with-all-corporate-actions-adjusted-splits-bonus-merger-demerger-etc/22650)

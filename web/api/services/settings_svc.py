@@ -159,8 +159,11 @@ def data_health() -> dict:
         "results_calendar": {"note": lt.get("results_note"), "cached_on": cached_on},
         "universe": {"name": data.universe_name(), "note": str(lt.get("universe") or ""), "size": int(len(uni))},
         "pit": {"built": pit_built,
-                "note": ("A point-in-time universe has been built, but backtests still use today's index list "
-                         "(survivorship bias) until it drives the scan." if pit_built else
+                "note": ("Backtests use the point-in-time universe: on each past day that day's 500 most-traded NSE "
+                         "stocks, so no survivorship bias." if lt.get("backtest_universe") == "point_in_time" else
+                         "A point-in-time universe has been built, but the last scan's backtests used today's index "
+                         "list (survivorship bias): set backtest_universe: point_in_time and run a scan."
+                         if pit_built else
                          "No point-in-time universe yet: backtests use today's index list (survivorship bias).")},
         "journal": {"exists": P.journal.exists(), "days": ji["days"] if ji else None,
                     "size_kb": round(P.journal.stat().st_size / 1024, 1) if P.journal.exists() else None},

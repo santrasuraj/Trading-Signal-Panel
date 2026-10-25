@@ -97,13 +97,16 @@ class SimResult:
     open_positions: list[dict]           # model portfolio at the last date
     next_orders: list[dict]              # orders that would be placed at the next open
     start_index: int
+    cash_income: dict[int, float] = field(default_factory=dict)   # financial year -> rupees earned on idle cash
 
 
-def rebalance_days(dates: pd.DatetimeIndex, how: str, offset: int = 0) -> np.ndarray:
+def rebalance_days(dates: pd.DatetimeIndex, how: str, offset: int = 0,
+                   next_session: pd.Timestamp | None = None) -> np.ndarray:
     """True on the last trading day of each period (decide at close, trade next open), or `offset`
     trading days before it. Results swing a lot with the rebalance day ("timing luck"), so the
-    dashboard reports a range over several offsets. The final row is never a rebalance day."""
-    base = _period_ends(dates, how)
+    dashboard reports a range over several offsets. The final row is a rebalance day only when
+    `next_session` (the trading day after it, known in a live run) starts a new period."""
+    base = _period_ends(dates, how, next_session)
     if offset <= 0:
         return base
     out = np.zeros(len(dates), dtype=bool)
@@ -112,20 +115,27 @@ def rebalance_days(dates: pd.DatetimeIndex, how: str, offset: int = 0) -> np.nda
     return out
 
 
-def _period_ends(dates: pd.DatetimeIndex, how: str) -> np.ndarray:
-    year = dates.year.to_numpy() * 100
-    if how == "weekly":
-        key = dates.isocalendar().week.to_numpy() + year
-    elif how == "biweekly":
-        key = (dates.isocalendar().week.to_numpy() // 2) + year
-    elif how == "quarterly":
-        key = (dates.month.to_numpy() - 1) // 3 + year
-    elif how == "semiannual":
-        key = (dates.month.to_numpy() - 1) // 6 + year
-    else:
-        key = dates.month.to_numpy() + year
+def _period_keys(dates: pd.DatetimeIndex, how: str) -> np.ndarray:
+    """One number per row that changes when a new rebalance period starts. Weeks are ISO weeks of the ISO
+    year (29-31 Dec can belong to week 1 of the next year)."""
+    if how in ("weekly", "biweekly"):
+        iso = dates.isocalendar()
+        week = iso["week"].to_numpy(dtype=np.int64)
+        return iso["year"].to_numpy(dtype=np.int64) * 100 + (week if how == "weekly" else week // 2)
+    year = dates.year.to_numpy().astype(np.int64) * 100
+    if how == "quarterly":
+        return (dates.month.to_numpy() - 1) // 3 + year
+    if how == "semiannual":
+        return (dates.month.to_numpy() - 1) // 6 + year
+    return dates.month.to_numpy() + year
+
+
+def _period_ends(dates: pd.DatetimeIndex, how: str, next_session: pd.Timestamp | None = None) -> np.ndarray:
+    key = _period_keys(dates, how)
     out = np.zeros(len(dates), dtype=bool)
     out[:-1] = key[:-1] != key[1:]
+    if next_session is not None and len(dates):
+        out[-1] = _period_keys(pd.DatetimeIndex([pd.Timestamp(next_session)]), how)[0] != key[-1]
     return out
 
 
@@ -134,10 +144,18 @@ STALE_EXIT_DAYS = 20   # a holding with no trade for this many days is sold at i
 
 def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostModel,
              tradable: pd.DataFrame, capital: float = 1_000_000.0, warmup: int = TRADING_DAYS,
-             min_position: float = 0.0, cash_rate: pd.Series | None = None) -> SimResult:
+             min_position: float = 0.0, cash_rate: pd.Series | None = None,
+             next_session: pd.Timestamp | None = None) -> SimResult:
     """Run the strategy over the whole panel. `min_position` skips buys smaller than that many
     rupees (fixed charges make tiny positions expensive). `cash_rate` is a cash-return index (e.g. the
-    Nifty 1D Rate): idle cash grows with it, as it would parked in a liquid fund.
+    Nifty 1D Rate): idle cash grows with it less `costs.cash_fee_pct` a year, as it would parked in a
+    liquid fund (the income is kept per financial year in `cash_income` for the after-tax curve).
+    `next_session`: the trading day after the last row (live run only), so a rank strategy whose
+    review day is today decides its orders at today's close - it changes next_orders, never the past.
+
+    Orders fill only on real bars: never on a gap-filled day (no trade printed), never a buy at an
+    upper-circuit lock or a sell at a lower-circuit lock (one price all day on real volume: the order
+    would sit unfilled in the queue). A sell or stop then waits for the next tradable day.
 
     A holding that stops trading (delisted, merged away, long suspension) keeps its last price; once
     it has not traded for STALE_EXIT_DAYS days it is sold at that price so its money is freed. This
@@ -148,9 +166,14 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
     O, H, L, C = (x.to_numpy(dtype=float) for x in (p.open, p.high, p.low, p.close))
     C_ffill = p.close.ffill().to_numpy(dtype=float)
     T, N = C.shape
-    seen = np.where(p.observed.reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool),
-                    np.arange(T)[:, None], -1)
+    obs = p.observed.reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
+    seen = np.where(obs, np.arange(T)[:, None], -1)
     last_seen = np.maximum.accumulate(seen, axis=0)   # row of each stock's latest real trade
+    V = p.volume.to_numpy(dtype=float)
+    prev_c = np.vstack([np.full((1, N), np.nan), C[:-1]])
+    locked = (H == L) & (V > 0) & obs                 # one price all day on real volume: locked at a band
+    up_lock = locked & (C > prev_c)
+    dn_lock = locked & (C < prev_c)
     trad = tradable.reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
     is_etf = np.array([s in f.etfs for s in symbols], dtype=bool)
     trad = trad & (is_etf[None, :] if strategy.universe == "etfs" else ~is_etf[None, :])
@@ -172,7 +195,7 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
         elig = (strategy.eligible(f).reindex(index=idx, columns=symbols).fillna(False).to_numpy(dtype=bool)
                 if strategy.eligible else np.ones((T, N), dtype=bool))
         score_np = np.where(elig & trad, score.to_numpy(dtype=float), np.nan)
-        rebal = rebalance_days(idx, strategy.rebalance, strategy.rebalance_offset)
+        rebal = rebalance_days(idx, strategy.rebalance, strategy.rebalance_offset, next_session)
         prio_src = None
     prio = (prio_src.reindex(index=idx, columns=symbols).to_numpy(dtype=float)
             if prio_src is not None else np.zeros((T, N)))
@@ -181,6 +204,9 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
     cash = capital
     cash_growth = (cash_rate.reindex(idx).ffill().pct_change().fillna(0.0).clip(-0.01, 0.01).to_numpy()
                    if cash_rate is not None else np.zeros(len(idx)))
+    # the fund's yearly fee, accrued over the calendar days since the previous row (weekends and holidays too)
+    cash_fee = idx.to_series().diff().dt.days.fillna(0).to_numpy(dtype=float) / 365.25 * costs.cash_fee_pct / 100
+    cash_income: dict[int, float] = {}
     pos: dict[int, dict] = {}            # col -> position
     pending_sell: dict[int, str] = {}    # col -> reason
     pending_buy: list[int] = []
@@ -207,16 +233,20 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                             pnl / ps["cost"] * 100, t - ps["t"], reason))
 
     for t in range(t0, T):
-        if cash > 0 and t > t0:
-            cash *= 1 + cash_growth[t]
+        if cash > 0 and t > t0 and cash_rate is not None:
+            earned = cash * (cash_growth[t] - cash_fee[t])
+            cash += earned
+            fy = dates[t].year if dates[t].month >= 4 else dates[t].year - 1
+            cash_income[fy] = cash_income.get(fy, 0.0) + earned
         # 0) Holdings that stopped trading: sold at their last traded price.
         for c in [c for c in pos if t - last_seen[t, c] >= STALE_EXIT_DAYS and not math.isnan(C_ffill[t, c])]:
             close_position(t, c, C_ffill[t, c], "stopped trading")
             pending_sell.pop(c, None)
 
-        # 1) Orders at today's open: sells first to free cash, then buys.
+        # 1) Orders at today's open: sells first to free cash, then buys (only on real, unlocked bars;
+        #    an unfilled sell waits for the next day).
         for c, reason in list(pending_sell.items()):
-            if c in pos and not math.isnan(O[t, c]):
+            if c in pos and obs[t, c] and not math.isnan(O[t, c]) and not dn_lock[t, c]:
                 close_position(t, c, O[t, c], reason)
                 del pending_sell[c]
             elif c not in pos:
@@ -228,7 +258,7 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                 if slots <= 0:
                     break
                 px = O[t, c]
-                if c in pos or math.isnan(px) or px <= 0:
+                if c in pos or not obs[t, c] or math.isnan(px) or px <= 0 or up_lock[t, c]:
                     continue
                 fill = px * (1 + slip_arr[t, c])
                 stop = None
@@ -255,10 +285,11 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                 slots -= 1
             pending_buy = []
 
-        # 2) Intraday stop / target.
+        # 2) Intraday stop / target (not on a gap-filled day or at a lower-circuit lock: the next tradable
+        #    day's open, or the stop if it trades above it, is the fill).
         for c in list(pos):
             ps = pos[c]
-            if math.isnan(L[t, c]):
+            if math.isnan(L[t, c]) or not obs[t, c] or dn_lock[t, c]:
                 continue
             if ps["stop"] is not None and L[t, c] <= ps["stop"]:
                 close_position(t, c, min(O[t, c], ps["stop"]) if not math.isnan(O[t, c]) else ps["stop"], "stop-loss")
@@ -321,24 +352,29 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                    [{"action": "BUY", "symbol": symbols[c], "reason": "entry signal" if is_event else "enters top ranks"}
                     for c in pending_buy])
     return SimResult(strategy.key, pd.Series(equity[t0:], index=idx[t0:]),
-                     pd.Series(invested[t0:], index=idx[t0:]), trades, open_positions, next_orders, t0)
+                     pd.Series(invested[t0:], index=idx[t0:]), trades, open_positions, next_orders, t0, cash_income)
 
 
 # ------------------------------------------------------------------------------------- metrics
-def _curve_stats(eq: pd.Series) -> dict:
+def _curve_stats(eq: pd.Series, rf: pd.Series | None = None) -> dict:
+    """Return, CAGR (over calendar years: NSE has ~248 sessions a year, not 252), max drawdown, volatility and
+    Sharpe ratio. `rf`: daily cash returns - the Sharpe ratio is then of the return over cash. A curve with
+    almost no volatility (a window spent in cash) has no meaningful Sharpe ratio: None."""
     eq = eq.dropna()
     if len(eq) < 2 or eq.iloc[0] <= 0:
         return {"return_pct": None, "cagr_pct": None, "max_dd_pct": None, "sharpe": None, "vol_pct": None}
-    years = len(eq) / TRADING_DAYS
+    years = (eq.index[-1] - eq.index[0]).days / 365.25
     total = eq.iloc[-1] / eq.iloc[0] - 1
     daily = eq.pct_change().dropna()
     sd = daily.std()
+    vol = sd * np.sqrt(TRADING_DAYS)
+    excess = daily - rf.reindex(daily.index).fillna(0.0) if rf is not None else daily
     return {
         "return_pct": total * 100,
-        "cagr_pct": ((1 + total) ** (1 / years) - 1) * 100 if years >= 0.5 and total > -1 else None,
+        "cagr_pct": ((1 + total) ** (1 / years) - 1) * 100 if years >= 0.45 and total > -1 else None,
         "max_dd_pct": float((eq / eq.cummax() - 1).min() * 100),
-        "sharpe": float(daily.mean() / sd * np.sqrt(TRADING_DAYS)) if sd > 0 else None,
-        "vol_pct": float(sd * np.sqrt(TRADING_DAYS) * 100),
+        "sharpe": float(excess.mean() / sd * np.sqrt(TRADING_DAYS)) if sd > 0 and vol >= 0.01 else None,
+        "vol_pct": float(vol * 100),
     }
 
 
@@ -361,12 +397,16 @@ def _trade_stats(trades: list[Trade]) -> dict:
     }
 
 
-def after_tax_equity(res: SimResult, tax: TaxModel) -> pd.Series:
+def after_tax_equity(res: SimResult, tax: TaxModel, stt_pct: float = 0.0) -> pd.Series:
     """Equity curve after paying capital-gains tax on each financial year's realised gains
     (paid on the first trading day of the next April; the current year's accrued tax is deducted at
     the last date). Short-term losses offset short- and long-term gains, long-term losses only
     long-term gains, and unused losses carry forward. Paying tax shrinks the portfolio, so later
-    gains - and taxes - are scaled down with it."""
+    gains - and taxes - are scaled down with it.
+
+    Like the buy-and-hold benchmarks, positions still open at the last date are taxed as if sold then.
+    STT (`stt_pct` of each side's value) is not deductible from the gain (s.48), so it is added back to
+    each trade's P&L for the tax base. Income on idle cash (res.cash_income) is taxed at the slab rate."""
     eq = res.equity.dropna()
     if eq.empty:
         return eq
@@ -374,11 +414,19 @@ def after_tax_equity(res: SimResult, tax: TaxModel) -> pd.Series:
     for t in res.trades:
         fy = t.exit_date.year if t.exit_date.month >= 4 else t.exit_date.year - 1
         is_long = (t.exit_date - t.entry_date).days > 365
-        by_fy.setdefault(fy, [0.0, 0.0])[1 if is_long else 0] += t.pnl
+        gain = t.pnl + t.qty * (t.entry_price + t.exit_price) * stt_pct / 100
+        by_fy.setdefault(fy, [0.0, 0.0])[1 if is_long else 0] += gain
+    last = eq.index[-1]
+    fy_last = last.year if last.month >= 4 else last.year - 1
+    for ps in res.open_positions:
+        gain = ps["qty"] * (ps["last_price"] - ps["entry_price"])
+        if math.isfinite(gain):
+            is_long = (last - pd.Timestamp(ps["entry_date"])).days > 365
+            by_fy.setdefault(fy_last, [0.0, 0.0])[1 if is_long else 0] += gain
     factor = pd.Series(1.0, index=eq.index)
     scale, st_pool, lt_pool = 1.0, 0.0, 0.0
-    for fy in sorted(by_fy):
-        st, lt = (g * scale for g in by_fy[fy])
+    for fy in sorted(set(by_fy) | set(res.cash_income)):
+        st, lt = (g * scale for g in by_fy.get(fy, (0.0, 0.0)))
         if st < 0:
             st_pool, st = st_pool - st, 0.0
         if lt < 0:
@@ -387,6 +435,7 @@ def after_tax_equity(res: SimResult, tax: TaxModel) -> pd.Series:
         used = min(lt, lt_pool); lt -= used; lt_pool -= used
         used = min(lt, st_pool); lt -= used; st_pool -= used
         due = st * tax.stcg_pct / 100 + max(0.0, lt - tax.ltcg_exempt) * tax.ltcg_pct / 100
+        due += max(0.0, res.cash_income.get(fy, 0.0) * scale) * tax.interest_pct / 100
         if due <= 0:
             continue
         later = eq.index[eq.index >= pd.Timestamp(fy + 1, 4, 1)]
@@ -399,11 +448,17 @@ def after_tax_equity(res: SimResult, tax: TaxModel) -> pd.Series:
 
 def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | None = None,
              windows: dict[str, int] | None = None, tax: TaxModel | None = None,
-             n500_benchmark: pd.Series | None = None, factor_benchmark: pd.Series | None = None) -> dict:
-    """Metrics for the full period and for recent windows (by trading days)."""
+             n500_benchmark: pd.Series | None = None, factor_benchmark: pd.Series | None = None,
+             cash_rate: pd.Series | None = None, stt_pct: float = 0.0) -> dict:
+    """Metrics for the full period and for recent windows (by trading days). `cash_rate`: the cash-return
+    index the simulation used - Sharpe ratios are then of the return over cash. `stt_pct`: see after_tax_equity.
+    A benchmark whose data starts later than the strategy is measured from its own start ('start', 'days'),
+    with the strategy's CAGR over that same period ('strategy_cagr_same_period_pct')."""
     windows = windows or {"12m": 252, "6m": 126, "3m": 63}
     eq = res.equity.dropna()
-    out = {"full": {**_curve_stats(eq), **_trade_stats(res.trades),
+    rf = (cash_rate.reindex(eq.index).ffill().pct_change().fillna(0.0).clip(-0.01, 0.01)
+          if cash_rate is not None else None)   # the same daily cash return as engine.simulate
+    out = {"full": {**_curve_stats(eq, rf), **_trade_stats(res.trades),
                     "exposure_pct": float(res.invested.mean() * 100),
                     "start": eq.index[0].date().isoformat(), "end": eq.index[-1].date().isoformat()}}
 
@@ -411,53 +466,74 @@ def evaluate(res: SimResult, benchmark: pd.Series, ew_benchmark: pd.Series | Non
         if series is None:
             return {}
         b = series.reindex(idx).ffill().dropna()
-        return _curve_stats(b) if len(b) > 1 else {}
+        if len(b) <= 1:
+            return {}
+        r = {**_curve_stats(b, rf), "start": b.index[0].date().isoformat(), "days": len(b)}
+        if b.index[0] > idx[0] + pd.Timedelta(days=7):   # e.g. an NSE index whose history starts later
+            r["strategy_cagr_same_period_pct"] = _curve_stats(eq.loc[b.index[0]:], rf)["cagr_pct"]
+        return r
 
     out["full"]["benchmark"] = bench(benchmark, eq.index)
     out["full"]["ew_benchmark"] = bench(ew_benchmark, eq.index)
     out["full"]["n500_benchmark"] = bench(n500_benchmark, eq.index)
     out["full"]["factor_benchmark"] = bench(factor_benchmark, eq.index)
     if tax is not None:
-        at = _curve_stats(after_tax_equity(res, tax))
+        at = _curve_stats(after_tax_equity(res, tax, stt_pct), rf)
         out["full"]["after_tax_cagr_pct"] = at["cagr_pct"]
         out["full"]["after_tax_return_pct"] = at["return_pct"]
         for key in ("benchmark", "ew_benchmark", "n500_benchmark", "factor_benchmark"):  # buy & hold: taxed at the end
             b = out["full"][key]
             if b.get("return_pct") is not None:
-                years = len(eq) / TRADING_DAYS
+                years = (eq.index[-1] - pd.Timestamp(b.get("start") or eq.index[0])).days / 365.25   # its own span
                 net = b["return_pct"] / 100 * (1 - tax.ltcg_pct / 100) if b["return_pct"] > 0 else b["return_pct"] / 100
-                b["after_tax_cagr_pct"] = ((1 + net) ** (1 / years) - 1) * 100 if years >= 0.5 else None
+                b["after_tax_cagr_pct"] = ((1 + net) ** (1 / years) - 1) * 100 if years >= 0.45 else None
     for name, n in windows.items():
         if len(eq) <= n:
             continue
         w = eq.iloc[-n - 1:]
         start = w.index[0]
         tw = [t for t in res.trades if t.exit_date > start]
-        out[name] = {**_curve_stats(w), **_trade_stats(tw),
+        out[name] = {**_curve_stats(w, rf), **_trade_stats(tw),
+                     "exposure_pct": float(res.invested.reindex(w.index).mean() * 100),
                      "benchmark": bench(benchmark, w.index), "ew_benchmark": bench(ew_benchmark, w.index),
                      "n500_benchmark": bench(n500_benchmark, w.index),
                      "factor_benchmark": bench(factor_benchmark, w.index)}
     return out
 
 
+IDLE_EXPOSURE_PCT = 25.0   # invested less than this on average: a window's result is mostly the cash yield
+
+
 def working_status(metrics: dict) -> tuple[str, str]:
-    """Is the strategy working *now*? Compares recent results with Nifty and the average stock."""
-    checks = []
+    """Is the strategy working *now*? Compares the last 12 and 6 months with the Nifty 50 index and the
+    average stock. A strategy that lost money over the whole backtest is never 'working'; one that was mostly
+    in cash in a recent window (regime filter, no signals) is 'unknown': that result is the cash yield, not
+    evidence about its rules."""
+    full_cagr = (metrics.get("full") or {}).get("cagr_pct")
+    if full_cagr is not None and full_cagr < 0:
+        return "not-working", f"Lost money over the whole backtest after costs ({full_cagr:+.1f}%/yr)."
+    checks, idle = [], []
     for w in ("12m", "6m"):
         m = metrics.get(w)
         if not m or m.get("return_pct") is None:
+            continue
+        if m.get("exposure_pct") is not None and m["exposure_pct"] < IDLE_EXPOSURE_PCT:
+            idle.append(w)
             continue
         b = (m.get("benchmark") or {}).get("return_pct")
         ew = (m.get("ew_benchmark") or {}).get("return_pct")
         ref = max(x for x in (b, ew) if x is not None) if (b is not None or ew is not None) else 0
         checks.append(m["return_pct"] - ref)
+    if idle:
+        return "unknown", (f"Mostly in cash over the last {' and '.join(idle)} (regime filter or no signals): "
+                           "recent results say nothing about the rules.")
     if not checks:
         return "unknown", "Not enough history yet."
     if all(c > 0 for c in checks):
-        return "working", "Beat both Nifty and the average stock over the last 12 and 6 months."
+        return "working", "Beat both the Nifty 50 and the average stock over the last 12 and 6 months."
     if any(c > 0 for c in checks):
         return "mixed", "Beat the market in one recent window but not the other."
-    return "not-working", "Did worse than Nifty / the average stock over the last 12 and 6 months."
+    return "not-working", "Did worse than the Nifty 50 / the average stock over the last 12 and 6 months."
 
 
 def equal_weight_index(f: Factors, tradable: pd.DataFrame) -> pd.Series:

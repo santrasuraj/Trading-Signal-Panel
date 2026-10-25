@@ -116,18 +116,48 @@ strategies:
     enabled: true
     etfs: [NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES, MON100]
     hold: 2
+  # --- New on 25 Oct 2026: tested from the next scan on. Judge each by its own backtest, not by the papers.
+  momentum_n200:
+    enabled: true            # NSE Nifty200 Momentum 30 rules: a check on 'momentum' and on the engine
+    universe_size: 200       # the 200 most traded stocks (stand-in for the Nifty 200)
+    top_n: 30                # with Rs 5 lakh a slot is ~Rs 16.7k: below Rs 4.5 lakh equity, buys under
+    keep_rank: 60            #   min_position (Rs 15k) are skipped and that money waits in cash
+    rebalance: semiannual    # last trading day of June and December, like NSE
+    use_regime: false
+  residual_momentum:
+    enabled: true            # momentum on the return NOT explained by Nifty 50 (CAPM alpha / residual vol)
+    top_n: 15
+    keep_rank: 30
+    rebalance: monthly
+    require_uptrend: true
+    use_regime: true
+    regime_action: hold
+  alpha_low_vol:
+    enabled: true            # NSE Alpha Low-Volatility 30 method: half 1-year alpha, half low volatility
+    universe_size: 150
+    top_n: 30                # same Rs 15k minimum-position caveat as momentum_n200
+    keep_rank: 60
+    rebalance: semiannual
+    use_regime: false        # defensive by design: stays invested
+  etf_trend:
+    enabled: true            # each ETF gets 1/4 of the money while it is above its 200-day average
+    etfs: [NIFTYBEES, JUNIORBEES, GOLDBEES, MON100]   # each must also be in the `etfs:` list at the top
+    rebalance: monthly
   vcp_breakout:
     enabled: true
   donchian:
     enabled: true
   pullback_leaders:
-    enabled: true
+    enabled: false           # retired 25 Oct 2026 (still re-tested and shown under "Tested & rejected")
+    rejected_reason: "8.5%/yr after costs in the point-in-time test (Aug 2019 - Oct 2026), below the Nifty 500 (13.1%) and the average stock (19.1%); max drawdown -38%, profit factor 1.08 over 1,188 trades; the average trade nets only +0.6% after costs."
   earnings_gap:
     enabled: true
   bb_squeeze:
-    enabled: true
+    enabled: false           # retired 25 Oct 2026 (still re-tested and shown under "Tested & rejected")
+    rejected_reason: "6.9%/yr after costs in the point-in-time test (Aug 2019 - Oct 2026), below Nifty 50 (10.6%) and little above the cash rate; max drawdown -49%, profit factor 1.08 over 883 trades."
   nr7_breakout:
-    enabled: true
+    enabled: false           # retired 25 Oct 2026 (still re-tested and shown under "Tested & rejected")
+    rejected_reason: "Lost money: -9.7%/yr after costs in the point-in-time test (Aug 2019 - Oct 2026), max drawdown -62%, profit factor 0.89 over 2,632 trades - costs of very frequent short trades eat any edge."
   legacy_rules:
     enabled: false           # the old v1 rules (-12%/yr); enable only to compare
 

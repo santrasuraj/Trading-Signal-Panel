@@ -77,9 +77,10 @@ export function PaperDetailView({ k }: { k: string }) {
         <div className="mt-4">
           <div className="mb-2 flex flex-wrap justify-between gap-2 text-xs text-muted">
             <span>Gap vs Nifty 500: <span className="num font-medium text-fg">{pts(s.excess_pct)} pts</span></span>
-            <span>Expected {pts(s.expected_excess_pct)} · after bias haircut {pts(s.haircut_excess_pct)} · noise ±{pct(s.noise_pct, { signed: false })}</span>
+            {/* point-in-time expectations get no haircut (it equals 'expected'): no second marker then */}
+            <span>Expected {pts(s.expected_excess_pct)}{s.haircut_excess_pct !== s.expected_excess_pct && <> · after bias haircut {pts(s.haircut_excess_pct)}</>} · noise ±{pct(s.noise_pct, { signed: false })}</span>
           </div>
-          <EvidenceMeter excess={s.excess_pct} expected={s.expected_excess_pct} haircut={s.haircut_excess_pct} noise={s.noise_pct} />
+          <EvidenceMeter excess={s.excess_pct} expected={s.expected_excess_pct} haircut={s.haircut_excess_pct !== s.expected_excess_pct ? s.haircut_excess_pct : null} noise={s.noise_pct} />
         </div>
       </Card>
       <Card title="Paper equity (₹)" subtitle="Paper portfolio vs Nifty 50 and Nifty 500 scaled to the same capital" flush>

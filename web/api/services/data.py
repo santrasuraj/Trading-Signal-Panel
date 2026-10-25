@@ -73,7 +73,16 @@ _index_hist = register(FileCache(lambda p: pd.read_parquet(p)))
 
 
 def curves() -> pd.DataFrame | None:
-    return _curves.get(P.curves)
+    """curves.parquet, unless it carries a scan_id (df.attrs) from another scan than latest.json. Files without
+    the attr (older scans, test fixtures) are still accepted."""
+    df = _curves.get(P.curves)
+    if df is None:
+        return None
+    sid = df.attrs.get("scan_id")
+    lt = latest() if sid is not None else None
+    if sid is not None and lt is not None and str(sid) != str(lt.get("generated_at")):
+        return None
+    return df
 
 
 def _artifact(cache: FileCache, path: Path) -> pd.DataFrame | None:

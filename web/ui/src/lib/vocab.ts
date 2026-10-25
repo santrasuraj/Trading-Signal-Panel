@@ -8,11 +8,19 @@ import type { Evidence, Horizon, Lifecycle, StrategyStatus } from '@/api/types'
 export type ToneName = 'profit' | 'loss' | 'warn' | 'info' | 'accent' | 'muted' | 'faint'
 
 export const STATUS: Record<StrategyStatus, { label: string; short: string; tone: ToneName; icon: LucideIcon; help: string }> = {
-  working: { label: 'Working now', short: 'Working', tone: 'profit', icon: CheckCircle2, help: 'Beat both Nifty 500 and the average stock over the last 12 and 6 months.' },
-  mixed: { label: 'Mixed', short: 'Mixed', tone: 'warn', icon: CircleDashed, help: 'Beat one benchmark or one window but not both.' },
-  'not-working': { label: 'Not working', short: 'Not working', tone: 'loss', icon: XCircle, help: 'Behind the benchmarks recently. Shown for comparison only; its orders are not counted.' },
+  working: { label: 'Working now', short: 'Working', tone: 'profit', icon: CheckCircle2, help: 'Beat both Nifty 50 and the average stock over the last 12 and 6 months. Relative only: in a falling market it can still have lost money.' },
+  mixed: { label: 'Mixed', short: 'Mixed', tone: 'warn', icon: CircleDashed, help: 'Beat the better of Nifty 50 and the average stock in one of the last two windows (12 and 6 months) but not in the other.' },
+  'not-working': { label: 'Not working', short: 'Not working', tone: 'loss', icon: XCircle, help: 'Behind Nifty 50 / the average stock over the last 12 and 6 months. Shown for comparison only; its orders are not counted.' },
   unknown: { label: 'Too new', short: 'Too new', tone: 'faint', icon: Clock, help: 'Not enough history to judge.' },
 }
+
+/** 'working' (it beat the market) but still lost money over 12 or 6 months: amber, not a green tick. */
+export const FELL_LESS: (typeof STATUS)[StrategyStatus] = {
+  label: 'Beat a falling market', short: 'Fell less', tone: 'warn', icon: CircleDashed,
+  help: 'Beat Nifty 50 and the average stock over the last 12 and 6 months, but still lost money in at least one of them: it only fell less than the market.',
+}
+export const lostMoney = (h: { ret_12m_pct: number | null; ret_6m_pct: number | null }) =>
+  (h.ret_12m_pct ?? 0) < 0 || (h.ret_6m_pct ?? 0) < 0
 
 export const LIFECYCLE: Record<Lifecycle, { label: string; icon: LucideIcon }> = {
   active: { label: 'Active', icon: CheckCircle2 },

@@ -26,7 +26,7 @@ export function StatusBar() {
   const full = l
     ? [
         `Last scan ${timeIST(l.generated_at)} (${duration(l.elapsed_s)})`,
-        `Prices ${date(l.data_date, { year: false })} (${l.live ? 'live, provisional' : l.stale ? 'stale' : 'official close'})`,
+        `Prices ${date(l.data_date, { year: false })} (${l.stale ? 'stale' : l.live ? 'live, provisional' : 'official close'})`,
         l.universe_note, `${l.tradable} liquid`, `Capital ${money(l.capital)}`,
         `Backtests: ${biased ? "today's list (survivorship bias)" : 'point-in-time universe'}`,
         s?.config_changed_since_scan ? 'config changed: needs re-scan' : '',
@@ -42,7 +42,7 @@ export function StatusBar() {
             <Fact first><Link to="/settings/scan" className="hover:text-fg">Last scan {timeIST(l.generated_at)} ({duration(l.elapsed_s)})</Link></Fact>
             <Fact>
               <span className={cn((l.live || l.stale) && 'text-warn')}>
-                Prices {date(l.data_date, { year: false })} ({l.live ? 'live, provisional' : l.stale ? 'stale' : 'official close'})
+                Prices {date(l.data_date, { year: false })} ({l.stale ? 'stale' : l.live ? 'live, provisional' : 'official close'})
               </span>
             </Fact>
             {s?.config_changed_since_scan && <Fact><Link to="/settings/strategies" className="text-warn hover:underline">config changed: needs re-scan</Link></Fact>}

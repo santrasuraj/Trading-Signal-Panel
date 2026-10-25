@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from .nse import HEADERS, NSE_DIR, _get, _session
+from .nse import HEADERS, NSE_DIR, _get, _session, _unlink, _write_parquet
 
 PR_URL = "https://nsearchives.nseindia.com/archives/equities/bhavcopy/pr/PR{d}.zip"
 SYMBOL_CHANGE_URL = "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
@@ -45,8 +45,11 @@ def fetch_bc(day: date) -> pd.DataFrame | None:
     cache = NSE_DIR / f"bc_{day:%Y%m%d}.parquet"
     miss = NSE_DIR / f"bc_{day:%Y%m%d}.none"
     if cache.exists():
-        _bc_memo[day] = pd.read_parquet(cache)
-        return _bc_memo[day]
+        try:
+            _bc_memo[day] = pd.read_parquet(cache)
+            return _bc_memo[day]
+        except Exception:   # a damaged cache file (killed process, full disk): download it again
+            _unlink(cache)
     if miss.exists():
         _bc_memo[day] = None
         return None
@@ -55,7 +58,9 @@ def fetch_bc(day: date) -> pd.DataFrame | None:
     except Exception:
         return None
     if r.status_code == 404:
-        if (date.today() - day).days > 3:
+        # A definite "no file" only for a day without trading: on a trading day NSE publishes one, so a
+        # 404 is temporary (or the archive moved) and the day is asked again next time.
+        if (date.today() - day).days > 3 and not (NSE_DIR / f"stocks_{day:%Y%m%d}.parquet").exists():
             miss.touch()
         return None
     if not r.ok:
@@ -75,7 +80,7 @@ def fetch_bc(day: date) -> pd.DataFrame | None:
         "ex_date": df["EX_DT"].map(_parse_date).astype(str), "purpose": df["PURPOSE"].astype(str).str.strip().str.upper(),
     })
     out = out[out["series"].isin(EQUITY_SERIES) & out["purpose"].str.contains(PRICE_ACTIONS)].drop_duplicates()
-    out.to_parquet(cache)
+    _write_parquet(out, cache)
     return out
 
 
@@ -176,14 +181,28 @@ def renames() -> dict[str, list[tuple[str, date]]]:
     if not path.exists() or time.time() - path.stat().st_mtime > 7 * 86400:
         code, text = _get(SYMBOL_CHANGE_URL)
         if code == 200 and text:
-            path.write_text(text, encoding="utf-8")
+            try:     # an HTML error page or a changed format must not replace the good file
+                chk = pd.read_csv(io.StringIO(text), header=None, skiprows=1, dtype=str, on_bad_lines="skip")
+                good = chk.shape[1] >= 4 and len(chk) >= 100
+            except Exception:
+                good = False
+            if good:
+                tmp = path.with_suffix(".tmp")
+                try:
+                    tmp.write_text(text, encoding="utf-8")
+                    tmp.replace(path)
+                except OSError:      # another process has the file open: keep the current one
+                    _unlink(tmp)
     out: dict[str, list[tuple[str, date]]] = {}
     if path.exists():
-        df = pd.read_csv(path, header=None, skiprows=1, dtype=str, encoding="utf-8", on_bad_lines="skip")
-        for _, r in df.iterrows():
-            old, new, eff = str(r[1]).strip(), str(r[2]).strip(), _parse_date(r[3])
-            if old and new and eff:
-                out.setdefault(new, []).append((old, eff))
+        try:
+            df = pd.read_csv(path, header=None, skiprows=1, dtype=str, encoding="utf-8", on_bad_lines="skip")
+            for _, r in df.iterrows():
+                old, new, eff = str(r[1]).strip(), str(r[2]).strip(), _parse_date(r[3])
+                if old and new and eff:
+                    out.setdefault(new, []).append((old, eff))
+        except Exception:   # unreadable file: no renames rather than a crashed scan (refetched after 7 days)
+            out = {}
     _renames = out
     return out
 

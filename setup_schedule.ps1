@@ -1,4 +1,6 @@
 # Creates Windows scheduled tasks that run the scan on weekdays and send the summary to Telegram:
+#   08:30  before the open (yesterday's official NSE data, final signals) - a second chance on days NSE's
+#          file came out after 19:15; it finishes well before the 09:14 intraday task
 #   15:40  right after the close (uses Fyers live prices if you logged in today)
 #   19:15  after NSE publishes its official end-of-day files (final data)
 # Run once:  right-click this file -> "Run with PowerShell"
@@ -26,13 +28,17 @@ if (-not (Test-Path $pythonw)) {
 $pythonw = (Resolve-Path $pythonw).Path
 $days = "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"
 
-# Laptop friendly: run on battery, catch up after sleep, never hang for more than 20 minutes.
+# Laptop friendly: run on battery, catch up after sleep, never hang for more than 45 minutes (a first run after
+# an update re-downloads and repairs the history and re-tests every strategy; a task killed at the limit sends
+# no Telegram message, so the limit is generous).
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 20) -MultipleInstances IgnoreNew
+    -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45) -MultipleInstances IgnoreNew
 
-foreach ($t in @("15:40", "19:15")) {
-    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "run_scan.py --telegram --by scheduled" `
-        -WorkingDirectory $root
+foreach ($t in @("08:30", "15:40", "19:15")) {
+    # --status: the dashboards (Quant Desk and the old Streamlit app) follow a scheduled scan's progress and see
+    # whether it failed, from the same status file their own scans write
+    $action = New-ScheduledTaskAction -Execute $pythonw `
+        -Argument "run_scan.py --telegram --by scheduled --status data\results\status.json" -WorkingDirectory $root
     $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At $t
     $name = "NSE Scanner $($t.Replace(':', ''))"
     Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -Force `

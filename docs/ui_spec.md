@@ -590,7 +590,7 @@ Widgets:
   - **Log in** button (paste flow, §6.9)
   - "Open login window (legacy)" button
   - help text on redirect URL / callback mode
-- **Scan:** Run full scan / Re-check without download; progress with message stream; last 60 scans list (time, elapsed, data date, live); "Scheduled scans: 15:40 and 19:15 weekdays (setup_schedule.ps1)".
+- **Scan:** Run full scan / Re-check without download; progress with message stream; last 60 scans list (time, elapsed, data date, live); "Scheduled scans: 08:30, 15:40 and 19:15 weekdays (setup_schedule.ps1)".
 - **Capital & allocations:** capital, min position, allocation % per active strategy (sum ≤ 100, "cash" remainder shown).
 - **Strategies:** enable/disable toggles and parameter forms (numbers with min/max) for each key; "needs re-scan" badge after save.
 - **Costs & tax:** the cost fields with a live breakdown table for an order value (`/api/costs/preview`); tax fields; the intraday profile shown read-only (P3).

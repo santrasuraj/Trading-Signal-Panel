@@ -26,7 +26,7 @@ export function RegimePill({ label }: { label: 'Bullish' | 'Mixed' | 'Bearish' }
 export function FreshnessPill({ s, compact }: { s: AppStatus; compact?: boolean }) {
   const l = s.latest
   if (!l) return <span className="inline-flex h-6 items-center rounded-full border border-line px-2 text-2xs font-medium text-muted">No scan yet</span>
-  const live = l.live
+  const live = l.live && !l.stale          // a live snapshot is stale once that day's official close exists
   const stale = l.stale
   const text = compact ? (live ? 'LIVE' : stale ? 'STALE' : 'EOD')
     : live ? `LIVE · ${l.live_source?.split(' ')[0] ?? 'intraday'} · provisional` : stale ? `STALE · ${date(l.data_date, { year: false })}` : `EOD ${date(l.data_date, { year: false })} · NSE`

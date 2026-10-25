@@ -75,7 +75,10 @@ export default function Paper() {
       </Card>
       {d?.available && (
         <p className="mt-2 text-2xs text-faint">
-          Expected = the backtest's pace for the same number of days, minus a survivorship haircut of {pct(d.survivorship_haircut_pct, { signed: false, dp: 0 })}/yr. Verdicts stay “Too early” for the first {minDays} trading days.
+          Expected = what the backtest implies for the same days, given what the Nifty 500 actually did
+          {d.strategies.some((r) => r.haircut_excess_pct != null && r.haircut_excess_pct !== r.expected_excess_pct)
+            ? <> (expectations from backtests on today's list are also shown after a ~{pct(d.survivorship_haircut_pct, { signed: false, dp: 0 })}/yr survivorship haircut)</>
+            : null}. Verdicts stay “Too early” for the first {minDays} trading days.
         </p>
       )}
     </div>

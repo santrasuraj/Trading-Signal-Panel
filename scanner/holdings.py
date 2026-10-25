@@ -30,7 +30,12 @@ def load_holdings() -> pd.DataFrame:
     df = df[df["symbol"] != ""]
     for c in ("qty", "buy_price", "stop_loss_pct", "target_pct"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df["buy_date"] = pd.to_datetime(df["buy_date"], errors="coerce").dt.date
+    # ISO dates (what the web editor and save_holdings write) first; anything else day-first, as Excel with an
+    # Indian locale saves it (05-10-2026 = 5 Oct). One inferred format for the whole column would read it as 10 May.
+    s = df["buy_date"].astype(str).str.strip()
+    iso = pd.to_datetime(s, format="ISO8601", errors="coerce")
+    dmy = pd.to_datetime(s, format="mixed", dayfirst=True, errors="coerce")
+    df["buy_date"] = iso.fillna(dmy).dt.date
     return df[HOLDING_COLS].reset_index(drop=True)
 
 

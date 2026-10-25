@@ -349,6 +349,7 @@ def test_daily_update_reuses_checked_days(monkeypatch, tmp_path):
                            opens={"BON": [980, 985, 990, 1000, 500, 505], "NEW": [100, 100, 100, 100, 100, 90]})
     looked_up = []
     monkeypatch.setattr(corporate, "symbol_on", lambda s, d: s)
+    monkeypatch.setattr(corporate, "renames", lambda: {})
     monkeypatch.setattr(corporate, "actions_on", lambda s, d, prior: looked_up.append((s, d)) or [])
     monkeypatch.setattr(corporate, "fetch_bc", lambda d: None)
     monkeypatch.setattr(pit, "NOTICES_FILE", tmp_path / "notices.parquet")
@@ -359,6 +360,45 @@ def test_daily_update_reuses_checked_days(monkeypatch, tmp_path):
     assert [a["symbol"] for a in done] == ["BON"]                     # re-applied without a new lookup
     assert fr["close"]["BON"].tolist() == pytest.approx([490, 492.5, 495, 500, 505, 510])
     assert {s for s, _ in looked_up} == {"NEW"}                       # only the stock new to the universe
+
+
+def test_daily_update_rechecks_a_stock_after_a_newly_learned_rename(monkeypatch, tmp_path):
+    """X was renamed Y, learned only after the last build: X's history (with its 1:1 bonus) is now stitched into
+    Y, so Y's older days are checked again instead of being skipped as already checked."""
+    fr, prev = _raw_frames({"Y": [1000, 1010, 505, 510, 515, 520]})   # X's rows until 6 Jan, then Y's
+    eff = date(2025, 1, 7)
+    monkeypatch.setattr(corporate, "renames", lambda: {"Y": [("X", eff)]})
+    monkeypatch.setattr(corporate, "symbol_on", lambda s, d: "X" if s == "Y" and d < eff else s)
+    monkeypatch.setattr(corporate, "actions_on",
+                        lambda s, d, prior: ["BONUS 1:1"] if (s, d) == ("X", date(2025, 1, 3)) else [])
+    monkeypatch.setattr(corporate, "fetch_bc", lambda d: None)
+    monkeypatch.setattr(corporate, "_bc_memo", {})
+    monkeypatch.setattr(nse, "NSE_DIR", tmp_path)
+    monkeypatch.setattr(pit, "NOTICES_FILE", tmp_path / "notices.parquet")
+    idx = fr["close"].index
+    old_close = pd.DataFrame({"X": [500, 505, 505, 510, np.nan, np.nan], "Y": [np.nan] * 4 + [515, np.nan]},
+                             index=idx)                                # the last build: X's rows still under X
+    old = pit.PitData({"close": old_close}, pd.DataFrame(True, index=idx, columns=["X", "Y"]),
+                      {"last_day": "2025-01-07", "adjustments": [
+                          {"symbol": "X", "date": "2025-01-03", "factor": 0.5, "reason": "BONUS 1:1"}]})
+    done = pit._adjust(fr, prev, set(), log=lambda *_: None, reuse=old)
+    assert [(a["symbol"], a["date"], a["factor"]) for a in done] == [("Y", "2025-01-03", 0.5)]
+    assert fr["close"]["Y"].tolist() == pytest.approx([500, 505, 505, 510, 515, 520])   # no fake 50% crash
+
+
+def test_failed_update_keeps_the_last_good_build(monkeypatch, tmp_path):
+    old = pit.PitData({}, pd.DataFrame(), {"first_day": "2025-01-01", "last_day": "2025-01-06", "rule": {"size": 500}})
+    monkeypatch.setattr(pit, "load", lambda: old)
+    monkeypatch.setattr(nse, "NSE_DIR", tmp_path)
+    (tmp_path / "stocks_20250107.parquet").write_bytes(b"")          # a newer NSE day is available
+
+    def broken(*a, **k):
+        raise ValueError("bad file")
+    monkeypatch.setattr(pit, "build", broken)
+    logs = []
+    got = pit.update([date(2025, 1, d) for d in (1, 2, 3, 6, 7)], log=logs.append)
+    assert got is old and got.info["update_error"] == "ValueError: bad file"
+    assert any("update failed" in m for m in logs)                    # not a silent switch to today's list
 
 
 def test_listed_bonus_with_a_small_price_move_is_adjusted(monkeypatch, tmp_path):

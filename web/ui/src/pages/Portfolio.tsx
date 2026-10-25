@@ -9,14 +9,14 @@ import type { HoldingInput, HoldingRow, HoldingsResponse } from '@/api/types'
 import { LevelPill, ResultsChip } from '@/components/badges'
 import { WeightBars } from '@/components/charts/svg'
 import { DataTable, SymbolCell, type Col } from '@/components/DataTable'
-import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
-import { Banner, EmptyState, ErrorState, SkeletonKpis, SkeletonRows } from '@/components/feedback'
+import { AsOfLine, KpiStrip, KpiTile, PageHeader } from '@/components/domain'
+import { Banner, EmptyState, ErrorState, RefreshFailed, SkeletonKpis, SkeletonRows } from '@/components/feedback'
 import { useRunScan } from '@/components/layout/ScanButton'
 import { Money, Pct, Price, Qty } from '@/components/num'
 import { Button, Card, Dialog, Drawer, IconButton, Segmented } from '@/components/ui'
 import { useToast } from '@/components/toast'
 import { cn } from '@/lib/csv'
-import { daysBetween, pct, todayIST } from '@/lib/format'
+import { date, daysBetween, pct, todayIST } from '@/lib/format'
 
 const distPct = (target: number | null, price: number | null) => (target != null && price ? (target / price - 1) * 100 : null)
 
@@ -28,7 +28,7 @@ function columns(): Col<HoldingRow>[] {
     { id: 'qty', header: 'Qty', align: 'right', value: (r) => r.qty, cell: (r) => <Qty v={r.qty} /> },
     { id: 'avg', header: 'Avg ₹', align: 'right', value: (r) => r.buy_price, cell: (r) => <Price v={r.buy_price} /> },
     { id: 'ltp', header: 'LTP ₹', align: 'right', value: (r) => r.price, cell: (r) => <Price v={r.price} />, mobile: 'value' },
-    { id: 'day', header: 'Today', align: 'right', value: (r) => r.change_pct, cell: (r) => <Pct v={r.change_pct} dp={2} /> },
+    { id: 'day', header: 'Day', title: "Change on the last scan's price day", align: 'right', value: (r) => r.change_pct, cell: (r) => <Pct v={r.change_pct} dp={2} /> },
     { id: 'pnl', header: 'P&L ₹', align: 'right', value: (r) => r.pnl_amount, cell: (r) => <Money v={r.pnl_amount} signed color />, mobile: 'secondary', label: 'P&L' },
     { id: 'pnlp', header: 'P&L %', align: 'right', value: (r) => r.pnl_pct, cell: (r) => <Pct v={r.pnl_pct} />, mobile: 'change' },
     { id: 'stop', header: 'Stop ₹ (dist)', align: 'right', value: (r) => r.stop_price, cell: (r) => <span className="num"><Price v={r.stop_price} /> <span className="text-2xs text-faint">{pct(distPct(r.stop_price, r.price))}</span></span> },
@@ -194,7 +194,7 @@ export default function Portfolio() {
     <div>
       <PageHeader
         title="Portfolio"
-        subtitle="Your own holdings (holdings.csv): stop-loss, target, trend and results alerts from each scan"
+        subtitle={<>Your own holdings (holdings.csv): stop-loss, target, trend and results alerts from each scan · {h?.as_of ? <AsOfLine a={h.as_of} /> : 'no scan yet'}</>}
         right={h && <Button variant="primary" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEdit(true)}>Edit holdings</Button>}
       />
       {q.error && !h ? <div className="card"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div> : !h || !t ? (
@@ -207,11 +207,12 @@ export default function Portfolio() {
         </div>
       ) : (
         <div className="space-y-3">
+          {q.error && <RefreshFailed error={q.error} onRetry={() => void q.refetch()} />}
           <KpiStrip min={120}>
             <KpiTile label="Invested" value={<Money compact v={t.invested} />} />
             <KpiTile label="Value" value={<Money compact v={t.value} />} />
             <KpiTile label="P&L" value={<Money compact signed v={t.pnl} />} tone={t.pnl == null ? undefined : t.pnl >= 0 ? 'text-profit' : 'text-loss'} sub={<Pct v={t.pnl_pct} />} />
-            <KpiTile label="Today" value={<Money compact signed v={t.day_pnl} />} tone={t.day_pnl == null ? undefined : t.day_pnl >= 0 ? 'text-profit' : 'text-loss'} />
+            <KpiTile label={h.as_of ? `Day (${date(h.as_of.data_date, { year: false })})` : 'Day'} title="Move of the last scan's price day (not necessarily today)" value={<Money compact signed v={t.day_pnl} />} tone={t.day_pnl == null ? undefined : t.day_pnl >= 0 ? 'text-profit' : 'text-loss'} />
             <KpiTile label="Holdings" value={t.count} />
             <KpiTile label="Danger" value={t.danger} tone={t.danger ? 'text-loss' : 'text-muted'} />
             <KpiTile label="Watch" value={t.watch} tone={t.watch ? 'text-warn' : 'text-muted'} />

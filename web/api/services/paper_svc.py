@@ -1,7 +1,7 @@
 """Paper trading: a thin, cached wrapper over scanner.paper.paper_report().
 
-Cached by (store generation, journal file identity, costs config) - the report is rebuilt from the
-journal and the stored prices, exactly as the scan and the old dashboard do. Reads files only.
+Cached by (store generation, journal file identity, costs config, NSE index history) - the report is rebuilt
+from the journal, the stored prices and the cash-rate index, exactly as the scan does. Reads files only.
 """
 from __future__ import annotations
 
@@ -12,10 +12,12 @@ from scanner.costs import CostModel
 
 from . import data
 from ..caches import KeyedCache, file_key, register
+from ..errors import log
 from ..paths import P
 from ..util import num
 
 _report = register(KeyedCache(2))
+CASH_RATE_INDEX = "Nifty 1D Rate Index"     # the cash-return index daily.py passes to the paper journal
 
 
 def report() -> dict | None:
@@ -25,14 +27,23 @@ def report() -> dict | None:
     cfg = data.config()
     costs_cfg = cfg.get("costs") or {}
     etfs = [str(e).upper() for e in (cfg.get("etfs") or [])]
-    key = (data.store_version(), file_key(P.journal), json.dumps(costs_cfg, sort_keys=True, default=str), tuple(etfs))
+    key = (data.store_version(), file_key(P.journal), json.dumps(costs_cfg, sort_keys=True, default=str), tuple(etfs),
+           file_key(P.index_history))
 
     def build():
         frames = data.store()
         if frames["close"].empty:
             return None
-        return paper.paper_report(frames=frames, costs=CostModel.from_config(costs_cfg), path=P.journal, etfs=etfs)
-    return _report.get(key, build)
+        # idle cash earns the Nifty 1D Rate less the fund fee, as in the scan's paper summaries and the backtest
+        ih = data.index_history()
+        cash_rate = ih[CASH_RATE_INDEX] if ih is not None and CASH_RATE_INDEX in ih.columns else None
+        return paper.paper_report(frames=frames, costs=CostModel.from_config(costs_cfg), path=P.journal, etfs=etfs,
+                                  cash_rate=cash_rate)
+    try:
+        return _report.get(key, build)
+    except Exception:      # the journal must never take down the pages that only show a paper panel
+        log.exception("Paper-trading report failed")
+        return None
 
 
 def summary(key: str, rep: dict) -> dict:

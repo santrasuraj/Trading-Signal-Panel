@@ -134,6 +134,47 @@ CATALOG: dict[str, dict] = {
         "expect": "Loses money after costs.",
         "sources": [], "fails": ["Fixed small target/stop ratio with costs on every trade."],
     },
+    # added 25 Oct 2026 (docs/strategy_catalogue.md L1-R, L11-L13): judged only by their own backtests
+    "momentum_n200": {
+        "id": "L1-R", "summary": "A literal replica of NSE's Nifty200 Momentum 30 rules: a check on 'Momentum leaders' "
+        "and on the engine more than a new edge.",
+        "expect": "Compare it with the real Nifty200 Momentum 30 over the same years: far above the live index means the "
+        "backtest flatters every strategy.",
+        "sources": [S("Nifty200 Momentum 30 whitepaper", "https://www.niftyindices.com/docs/default-source/indices/nifty200-momentum-30/nifty200_momentum_30_index_whitepaper_sep_20.pdf")],
+        "fails": ["Momentum crashes on sharp market reversals.",
+                  "Turnover rank is our stand-in for free-float market cap; F&O eligibility is not checked.",
+                  "Equal weight tilts toward the smaller of the 200 stocks (NSE weights by score x market cap)."],
+    },
+    "residual_momentum": {
+        "id": "L11", "summary": "Residual (beta-adjusted) momentum: Blitz, Huij & Martens (2011) found about twice the "
+        "risk-adjusted profit of plain momentum abroad. No Indian test found.",
+        "expect": "Lags rallies led by high-beta stocks; otherwise the same portfolio rules as Momentum leaders.",
+        "sources": [S("Blitz, Huij & Martens (2011)", "https://repub.eur.nl/pub/22252"),
+                    S("Blitz, Hanauer & Vidojevic (2020), The Idiosyncratic Momentum Anomaly")],
+        "fails": ["Lags beta-led rallies (2020-21, the 2023 small-cap boom).", "Beta against Nifty 50 is noisy for midcaps.",
+                  "One factor on daily data, not the paper's 36-month three-factor residuals."],
+    },
+    "alpha_low_vol": {
+        "id": "L12", "summary": "NSE's Alpha Low-Volatility 30 method: half 1-year alpha, half low volatility. Joshipura "
+        "(2020) finds the low-risk effect in India independent of size, value and momentum.",
+        "expect": "Mainly smaller drawdowns, not a higher return; lags strong rallies.",
+        "sources": [S("NSE whitepaper (2020)", "https://www.niftyindices.com/docs/default-source/indices/nifty-alpha-low-volatility-30/nifty-alpha-low-volatility-30-whitepaper_2020.pdf"),
+                    S("Joshipura et al. (IMFI 2020)", "https://www.businessperspectives.org/images/pdf/applications/publishing/templates/article/assets/13547/IMFI_2020_02_Joshipura.pdf")],
+        "fails": ["Turnover rank is not market cap (heavily traded stocks skew volatile).", "One-year alpha is noisy.",
+                  "Tilts toward FMCG, pharma and IT; lags beta rallies."],
+    },
+    "etf_trend": {
+        "id": "L13", "summary": "Faber's asset-class trend rule on four ETFs, each held only while above its 200-day "
+        "average. The reliable benefit is a smaller drawdown, not a higher return.",
+        "expect": "Close to buy-and-hold with smaller crashes; whipsaws in sideways years. Gold and Nasdaq gains are "
+        "asset-class bets, not stock-picking skill.",
+        "sources": [S("Faber (2007), SSRN 962461", "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=962461"),
+                    S("Moskowitz, Ooi & Pedersen (2012), time-series momentum"),
+                    S("Against: Sullivan, Timmermann & White (1999)", "https://www.fmg.ac.uk/sites/default/files/2020-11/dp303.pdf")],
+        "fails": ["Very few independent decisions: wide confidence intervals.", "MON100 can trade at a premium to NAV.",
+                  "Gold and international ETFs are not taxed as equity; the backtest applies equity tax.",
+                  "A monthly check misses crashes inside a month."],
+    },
 }
 
 # Catalogue entries tested and rejected (fallback rows when the scan has no B4 metrics yet).
@@ -141,7 +182,7 @@ REJECTED_CATALOGUE = [
     {"key": "rsi2_pullback", "name": "RSI-2 pullback (Connors)", "horizon": "swing", "evidence": "WEAK",
      "result_text": "Lost money after realistic Indian delivery costs."},
     {"key": "legacy_rules", "name": "Old textbook rules (baseline)", "horizon": "swing", "evidence": "EXPERIMENTAL",
-     "result_text": "About -12%/yr in testing."},
+     "result_text": "Lost money after costs in testing."},
     {"key": "near_high", "name": "Near 52-week high", "horizon": "longterm", "evidence": "MODERATE",
      "result_text": "Never beat the average stock in our tests."},
 ]
@@ -163,6 +204,10 @@ _ENTRY = {
     "rsi2_pullback": "Buy when RSI(2) falls below {rsi2_below} in a stock above its 200-day average.",
     "near_high": "Rank uptrending stocks by distance to their 52-week high, closest first.",
     "legacy_rules": "Buy a 50-day-average volume breakout or a 52-week-high breakout.",
+    "momentum_n200": "Rank the {universe_size} most traded stocks with a year of history by the NSE momentum score (6- and 12-month return divided by volatility, z-scored); no trend or market filter.",
+    "residual_momentum": "Rank stocks by residual momentum: their alpha against Nifty 50 over months 12-1 divided by its residual volatility{uptrend}.",
+    "alpha_low_vol": "Rank the {universe_size} most traded stocks by the average of the percentile ranks of 1-year alpha against Nifty 50 (high first) and 1-year volatility (low first).",
+    "etf_trend": "Hold an equal slice of each of the ETFs {etfs} while it is above its 200-day average; a slice whose ETF is below it waits in cash (earning the Nifty 1D rate).",
 }
 _EXIT_SIGNAL = {
     "golden_cross": "Exit when the 50-day average falls back below the 200-day average (death cross).",
@@ -180,6 +225,9 @@ _DEFAULTS = {"uptrend": True, "universe_size": 150, "top_industries": 3, "etf": 
              "max_box_pct": 12, "min_gap_pct": 4, "rsi2_below": 10}
 _RS_DEFAULT = {"golden_cross": 60, "trend_breakout": 90, "vcp_breakout": 80, "pullback_leaders": 80}
 _VOL_DEFAULT = {"trend_breakout": 2.0, "vcp_breakout": 1.5, "earnings_gap": 3}
+_SIZE_DEFAULT = {"momentum_n200": 200}                                   # code defaults that differ from _DEFAULTS
+_ETFS_DEFAULT = {"etf_trend": "NIFTYBEES, JUNIORBEES, GOLDBEES, MON100"}
+_REVIEW = {"semiannual": "on the last trading day of June and December", "biweekly": "every two weeks"}
 
 
 def evidence_card(key: str, grade: str) -> dict:
@@ -192,10 +240,13 @@ def evidence_card(key: str, grade: str) -> dict:
             "sources": c["sources"], "failure_modes": c["fails"], "validation": None}
 
 
-def plain_rules(key: str, rules: dict) -> list[str]:
+def plain_rules(key: str, rules: dict, costs=None) -> list[str]:
+    """Rule sentences; `costs` (a scanner.costs.CostModel) words the slippage line from the configured costs."""
     params = dict(_DEFAULTS)
     params["rs_min"] = _RS_DEFAULT.get(key)
     params["min_vol_ratio"] = _VOL_DEFAULT.get(key)
+    params["universe_size"] = _SIZE_DEFAULT.get(key, params["universe_size"])
+    params["etfs"] = _ETFS_DEFAULT.get(key, params["etfs"])
     for k, v in (rules.get("params") or {}).items():
         params[k] = ", ".join(map(str, v)) if isinstance(v, list) else v
     params["uptrend"] = " (only stocks above their 200-day average)" if params.get("require_uptrend", True) else ""
@@ -207,7 +258,8 @@ def plain_rules(key: str, rules: dict) -> list[str]:
             out.append(_ENTRY[key])
     if rules.get("kind") == "rank":
         out.append(f"Hold the top {rules.get('top_n')}; keep a holding while it ranks within the top "
-                   f"{rules.get('keep_rank') or rules.get('top_n')}. Reviewed {rules.get('rebalance') or 'monthly'}, "
+                   f"{rules.get('keep_rank') or rules.get('top_n')}. Reviewed "
+                   f"{_REVIEW.get(rules.get('rebalance'), rules.get('rebalance') or 'monthly')}, "
                    "decided at the close and traded at the next open.")
     else:
         out.append(f"Signals are read at the close and filled at the next open; up to {rules.get('max_positions')} "
@@ -231,5 +283,9 @@ def plain_rules(key: str, rules: dict) -> list[str]:
     if rules.get("use_regime"):
         action = ("sells everything" if rules.get("regime_action") == "cash" else "makes no new buys")
         out.append(f"Regime filter: while Nifty 50 is below its 200-day average the strategy {action}.")
-    out.append("Every order pays full Indian delivery charges plus slippage (0.10% liquid, 0.25% illiquid stocks).")
+    if costs is not None:
+        out.append(f"Every order pays full Indian delivery charges plus slippage ({costs.slippage_pct:g}% liquid, "
+                   f"{costs.slippage_illiquid_pct:g}% for stocks trading under Rs {costs.illiquid_below_cr:g} crore/day).")
+    else:
+        out.append("Every order pays full Indian delivery charges plus slippage (0.10% liquid, 0.25% illiquid stocks).")
     return out

@@ -7,5 +7,6 @@ from .ops import *  # noqa: F401,F403
 from .overview import *  # noqa: F401,F403
 from .paper import *  # noqa: F401,F403
 from .signals import *  # noqa: F401,F403
+from .smart_money import *  # noqa: F401,F403
 from .strategies import *  # noqa: F401,F403
 from .system import *  # noqa: F401,F403

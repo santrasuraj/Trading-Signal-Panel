@@ -21,8 +21,8 @@ from scanner.holdings import load_holdings, save_holdings
 from scanner.indicators import add_indicators
 from scanner.lock import running_scan
 from scanner.fyers_limits import FyersRateLimited
-from scanner.providers import FyersAuthError, get_fyers, load_token
-from scanner.settings import RESULTS_DIR, ROOT, ist_today, load_config
+from scanner.providers import FyersAuthError, get_fyers, load_token, token_expired
+from scanner.settings import RESULTS_DIR, ROOT, load_config
 from scanner.store import PanelStore, load_store
 
 STATUS_FILE = RESULTS_DIR / "status.json"
@@ -145,7 +145,7 @@ latest = load_latest()
 with st.sidebar:
     st.title("📈 NSE Scanner")
     tok = load_token()
-    if tok and tok.get("created", "")[:10] == ist_today().isoformat():
+    if tok and not token_expired(tok):   # the scan's own rule: a token made before 06:00 IST is dead after 06:00
         st.success("Fyers logged in today - real-time prices")
     else:
         st.warning("Not logged in to Fyers today. Live prices come from Yahoo (~15 min delay).")
@@ -182,21 +182,24 @@ with st.sidebar:
 if not latest:
     st.header("Welcome 👋")
     st.write("Click **🔄 Run scan now** on the left. The first run downloads 8 years of prices for ~500 stocks "
-             "and repairs them with NSE's official data (about 4 minutes). After that, scans take ~20 seconds.")
+             "and repairs them with NSE's official data (about 4 minutes). After that a scan takes a few minutes "
+             "(it re-tests every strategy).")
     st.stop()
 
 # ----------------------------------------------------------------------------- header
 m = latest["market"]
 {"good": st.success, "bad": st.error}.get(m["level"], st.warning)(f"**Market: {m['label']}** - {m['advice']}")
 if latest.get("live"):
-    st.info("⏱ Market is open: today's candle is still forming. Signals marked *provisional* can change by 3:30 PM.")
+    st.info("⏱ Today's prices are live/delayed quotes, not NSE's official close (published after ~6 PM). "
+            "Signals marked *provisional* can still change.")
 c = st.columns(5)
 c[0].metric("Nifty 50", f"{m['nifty'] or 0:,.0f}", pct(m["nifty_change_pct"], nd=2))
 c[1].metric("India VIX", f"{m['vix'] or 0:.1f}", pct(m["vix_change_pct"], nd=2), delta_color="inverse")
 c[2].metric("Stocks above 50-DMA", pct(m["breadth_50"], signed=False, nd=0))
 c[3].metric("Up / Down today", f"{m['advances']}/{m['declines']}")
 c[4].metric("Nifty trend", "Up ▲" if m["regime_up"] else "Down ▼",
-            help="Up = Nifty above its 200-day average. Strategies only open new positions in an up trend.")
+            help="Up = Nifty above its 200-day average. Strategies with the regime filter only open new positions "
+                 "in an up trend.")
 
 strats = latest["strategies"]
 tabs = st.tabs(["🏆 Strategies", "✅ Today's actions", "📒 Paper trading", "💼 My holdings", "📊 Market", "📈 Chart",
@@ -204,8 +207,9 @@ tabs = st.tabs(["🏆 Strategies", "✅ Today's actions", "📒 Paper trading", 
 
 # ----------------------------------------------------------------------------- strategies
 with tabs[0]:
-    st.caption("Every strategy is re-tested on ~8 years of real NSE data after each scan, buying at the next day's "
-               "open and paying full Indian charges (STT, stamp duty, GST, DP, slippage). **Working now** = beat both "
+    st.caption("After each scan every strategy is re-tested on the stored NSE history (after a 1-year warm-up), "
+               "buying at the next day's open and paying full Indian charges (STT, stamp duty, GST, DP, slippage). "
+               "**Working now** = beat both "
                "Nifty and the average stock over the last 12 and 6 months.")
     rows = []
     for s in strats:
@@ -213,7 +217,8 @@ with tabs[0]:
         rows.append({
             "name": s["name"], "status": STATUS.get(s["status"], (s["status"],))[0],
             "cagr": full.get("cagr_pct"), "at": full.get("after_tax_cagr_pct"),
-            "range": "{:.0f}-{:.0f}%".format(*full["cagr_range"]) if full.get("cagr_range") else "-",
+            "range": ("{:.0f}-{:.0f}%".format(*full["cagr_range"])
+                      if full.get("cagr_range") and None not in full["cagr_range"] else "-"),
             "dd": full.get("max_dd_pct"), "sharpe": full.get("sharpe"),
             "y1": y1.get("return_pct"), "y1n": (y1.get("benchmark") or {}).get("return_pct"),
             "m6": m6.get("return_pct"), "win": full.get("win_rate"), "trades": full.get("trades"),
@@ -243,8 +248,9 @@ with tabs[0]:
                 "were merged away or delisted are included, and hindsight does not flatter these numbers. Today's "
                 "orders still come from today's Nifty 500 list. Backtests still overstate real results a little (luck in the "
                 "rebalance day, and the future is never the past): NSE's own momentum indices beat their parent "
-                "index by about 3-6% a year over 20 years. **Expect an edge of a few % a year, not 40%.** Judge a "
-                "strategy by how much it beats the **average stock** and the **Nifty 500** lines.")
+                "index by about 3-6% a year over 20 years. **Expect an edge of a few % a year, not the full lead "
+                "shown above.** Judge a strategy by how much it beats the **average stock** and the **Nifty 500** "
+                "lines.")
     else:
         st.warning("**Reality check:** these tests use *today's* Nifty 500 list, so companies that collapsed or were "
                    f"dropped are missing - every number above is flattered. The gap between the average stock in this "
@@ -257,7 +263,9 @@ with tabs[0]:
 
     curves = cached_curves(file_mtime(CURVES_FILE))
     if curves is not None and not curves.empty:
+        # curves.parquet also holds the tested-and-rejected strategies: name them, don't style them as benchmarks
         names = {s["key"]: s["name"] for s in strats}
+        names.update({r["key"]: f"{r['name']} (tested & rejected)" for r in latest.get("rejected_strategies") or []})
         show = st.multiselect("Compare growth of ₹1", list(curves.columns),
                               default=[c for c in curves.columns if c in (strats[0]["key"], "NIFTY 500", "Average stock")],
                               format_func=lambda k: names.get(k, k))
@@ -287,7 +295,8 @@ with tabs[0]:
             k[3].metric("Avg win / loss", f"{pct(f_.get('avg_win_pct'))} / {pct(f_.get('avg_loss_pct'))}")
             k[4].metric("Profit factor", f"{f_.get('profit_factor') or 0:.2f}")
             k[5].metric("Time invested", pct(f_.get("exposure_pct"), signed=False, nd=0))
-            st.caption("Most recent closed trades")
+            st.caption("Most recent closed trades of the model portfolio on today's stock list (the one behind "
+                       "today's orders; the numbers above come from the backtest universe)")
             table(s["recent_trades"], {"symbol": "Stock", "entry": "Bought", "exit": "Sold", "ret_pct": "Return %",
                                        "days": "Days", "reason": "Exit reason"},
                   signed=("ret_pct",), fmt={"ret_pct": "{:+.1f}"}, empty="No trades yet.")
@@ -300,9 +309,13 @@ with tabs[1]:
     s = next(x for x in strats if x["key"] == choice)
     if s["status"] == "not-working":
         st.error("This strategy has NOT been working recently. Shown for comparison only.")
-    if not m["regime_up"]:
-        st.warning("Nifty is below its 200-day average, so this strategy is not opening new positions. "
-                   "This rule avoided much of the 2020 and 2022 falls in testing.")
+    # Only strategies with the regime filter stop buying (a scan without `rules` keeps the old warning)
+    if not m["regime_up"] and (s.get("rules") or {}).get("use_regime", True):
+        st.warning("Nifty is below its 200-day average, so this strategy's regime filter blocks new positions "
+                   "until Nifty is back above it.")
+    elif not m["regime_up"]:
+        st.info("Nifty is below its 200-day average. This strategy does not use the regime filter: its own entry "
+                "rules decide whether it buys.")
     st.write(f"**Model portfolio:** up to {s['max_positions']} stocks, about {rupees(s['per_position'])} each "
              f"(your capital ÷ {s['max_positions']})."
              + (f" Next review: **{s['next_rebalance']}**." if s.get("next_rebalance") else ""))
@@ -515,7 +528,9 @@ with tabs[5]:
 # ----------------------------------------------------------------------------- data & settings
 with tabs[6]:
     st.write(f"**Live prices:** {latest['fyers_note']}")
-    st.write(f"**Official data:** {latest['nse_status']} · complete through {latest['complete_upto']}")
+    # a re-check without download (--no-update) has no complete_upto: its stored prices end at data_date
+    st.write(f"**Official data:** {latest['nse_status']} · complete through "
+             f"{latest.get('complete_upto') or latest.get('data_date')}")
     st.write(f"**{latest.get('results_note', 'Results calendar: -')}** (source: NSE event calendar)")
     st.write(f"**Trading cost assumed:** ~{latest['costs_round_trip_pct']}% per round trip on a typical position "
              "(edit the `costs:` section of config.yaml).")
@@ -534,6 +549,11 @@ with tabs[6]:
 - *Worst drop* is the largest fall from a peak. Expect to live through drops like this.
 - *Win rate* alone means little. Momentum wins under half its trades but its winners are much bigger than its losers.
 - Signals use the close of day *t* and trade at the open of day *t+1*. No future data is used.
-- **Survivorship bias:** the stock list is today's index list, so past results look better than reality.
-  Compare against the *average stock* line, not just Nifty.
 """)
+    if (latest.get("backtest") or {}).get("universe") == "point_in_time":
+        st.markdown("- **Survivorship bias:** the backtests use each past day's 500 most-traded NSE stocks, including "
+                    "companies that later collapsed or were delisted. Today's orders come from today's list.\n"
+                    "- Compare against the *average stock* and *Nifty 500* lines, not just Nifty 50.")
+    else:
+        st.markdown("- **Survivorship bias:** the backtests use today's index list, so past results look better than "
+                    "reality. Compare against the *average stock* line, not just Nifty.")

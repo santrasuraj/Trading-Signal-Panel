@@ -125,6 +125,17 @@ export function Banner({ tone, children, onDismiss, action, icon }: { tone: Bann
   )
 }
 
+/** A refetch failed but the previous data is still on screen (TanStack keeps it): say so instead of showing old
+ *  results as if they were the new scan's. Render as `{q.error && q.data && <RefreshFailed ... />}`. */
+export function RefreshFailed({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  if (!error) return null
+  return (
+    <Banner tone="warn" action={<Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={onRetry}>Retry</Button>}>
+      Could not load the latest results: showing the previous data.{isFailure(error) ? ` ${error.message}` : ''}
+    </Banner>
+  )
+}
+
 /** Query wrapper: skeleton on first load, error card on failure, children with data otherwise. */
 export function QueryView<T>({ q, skeleton, children, compact }: {
   q: { data: T | undefined; error: unknown; isLoading: boolean; refetch: () => unknown }; skeleton?: ReactNode; children: (d: T) => ReactNode; compact?: boolean

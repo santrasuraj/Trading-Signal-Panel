@@ -14,6 +14,7 @@ const Chart = lazy(() => import('@/pages/Chart'))
 const Portfolio = lazy(() => import('@/pages/Portfolio'))
 const Paper = lazy(() => import('@/pages/Paper'))
 const Market = lazy(() => import('@/pages/Market'))
+const SmartMoney = lazy(() => import('@/pages/SmartMoney'))
 const Intraday = lazy(() => import('@/pages/Intraday'))
 const Settings = lazy(() => import('@/pages/Settings'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
@@ -62,6 +63,8 @@ export const router = createBrowserRouter([
       { path: 'paper/:key', element: g(<Paper />) },
       { path: 'market', element: <Navigate to="/market/movers" replace /> },
       { path: 'market/:tab', element: g(<Market />) },
+      { path: 'smart-money', element: <Navigate to="/smart-money/today" replace /> },
+      { path: 'smart-money/:tab', element: <SmartMoney /> },
       { path: 'intraday', element: <Intraday /> },
       { path: 'settings', element: <Navigate to="/settings/data" replace /> },
       { path: 'settings/:section', element: <Settings /> },

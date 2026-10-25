@@ -20,12 +20,15 @@ def _sebi() -> dict:
         return {"source": "SEBI (July 2024)", "url": "https://www.sebi.gov.in", "points": []}
 
 
-def _costs() -> dict | None:
+def _costs(params: dict | None = None) -> dict | None:
+    """Round trip on Rs 1 lakh: with the cost parameters the shown results were run with (intraday.json
+    cost_params) when the file has them, else with today's config."""
     try:
         from scanner.intraday.engine import IntradayCosts
     except Exception:   # pragma: no cover
         return None
-    c = IntradayCosts.from_config((data.config().get("intraday") or {}).get("costs"))
+    c = IntradayCosts.from_config(params if isinstance(params, dict) and params
+                                  else (data.config().get("intraday") or {}).get("costs"))
     value = 100000.0
     total = c.charges(value, value) + 2 * value * c.slippage_other_pct / 100
     return {"value": value, "round_trip_pct": round(total / value * 100, 4)}
@@ -111,9 +114,18 @@ def payload() -> dict:
             "data": data_block, "rules": {str(k): str(v) for k, v in (r.get("rules") or {}).items()},
             "sebi": {"source": str(sebi.get("source") or ""), "url": str(sebi.get("url") or ""),
                      "points": [str(x) for x in sebi.get("points") or []]},
-            "costs": _costs(), "strategies": strats, "summary": summary_text(strats, d.get("sessions")), "run": run}
+            "costs": _costs(r.get("cost_params")), "strategies": strats, "summary": summary_text(strats, d.get("sessions")),
+            "run": run}
 
 
 def count() -> int:
     r = data.intraday()
     return len(r.get("strategies") or []) if r else 0
+
+
+def losing() -> tuple[int, int]:
+    """(strategies that lost money after costs, strategies tested) from intraday.json."""
+    r = data.intraday() or {}
+    s = r.get("strategies") or []
+    rets = [num((x.get("metrics") or {}).get("return_pct")) for x in s]
+    return sum(1 for v in rets if v is not None and v <= 0), len(s)

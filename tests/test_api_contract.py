@@ -260,6 +260,7 @@ def _with_sell(env, qty_in_model: int = 5026):
     mom = next(s for s in lt["strategies"] if s["key"] == "momentum")
     pos = mom["positions"][0]
     pos["qty"] = qty_in_model
+    pos.pop("weight_pct", None)          # keep testing the curve fallback once scans record the live weight
     mom["actions"].append({"action": "SELL", "symbol": pos["symbol"], "reason": "dropped from ranking",
                            "price": pos["last_price"], "qty": qty_in_model, "amount": qty_in_model * pos["last_price"],
                            "stop": None, "results_on": None, "results_warning": False, "provisional": False})
@@ -288,6 +289,88 @@ def test_sell_uses_your_holding_when_you_hold_it(mclient, env):
     body = get_ok(mclient, "/api/signals", M.SignalsResponse)
     o = next(o for g in body["groups"] for o in g["orders"] if o["action"] == "SELL")
     assert (o["qty"], o["qty_basis"], o["you_hold_qty"]) == (120, "your_holding", 120)
+
+
+def test_sell_keeps_the_share_of_another_followed_strategy(mclient, env):
+    """holdings.csv does not say which strategy a lot belongs to: with allocations, when another followed strategy
+    still holds the stock (and is not selling it), the SELL sizes on this strategy's model weight, capped at your
+    holding; without that other allocation it sells the whole holding."""
+    pos = _with_sell(env)
+    lt = latest_fixture(env)
+    other = next(s for s in lt["strategies"] if s["key"] == "earnings_gap")
+    other["status"] = "working"
+    other["positions"] = list(other.get("positions") or []) + [dict(pos)]
+    other["actions"] = [a for a in other.get("actions") or [] if a.get("symbol") != pos["symbol"]]
+    write_latest(env, lt)
+    (env / "holdings.csv").write_text(f"symbol,qty,buy_price,buy_date,stop_loss_pct,target_pct\n{pos['symbol']},120,70,,,\n",
+                                      encoding="utf-8")
+    caches.clear_all()
+    body = get_ok(mclient, "/api/signals?allocations=momentum:60,earnings_gap:40", M.SignalsResponse)
+    o = next(o for g in body["groups"] for o in g["orders"] if o["action"] == "SELL")
+    assert o["qty_basis"] == "model_weight" and o["qty"] is not None and 0 <= o["qty"] <= 120
+    body = get_ok(mclient, "/api/signals?allocations=momentum:100", M.SignalsResponse)
+    o = next(o for g in body["groups"] for o in g["orders"] if o["action"] == "SELL")
+    assert (o["qty"], o["qty_basis"]) == (120, "your_holding")
+
+
+def test_model_weight_never_divides_by_the_point_in_time_curve(client):
+    """The positions come from the simulation on today's list; a point-in-time backtest's curve is another
+    simulation, so it is never the denominator (the scan's own weight / model equity are used instead)."""
+    from web.api.services import strategies as st
+    pos, s, pit = {"qty": 10, "last_price": 100.0}, {"key": "momentum"}, {"backtest_universe": "point_in_time"}
+    assert st.model_weight({**pos, "weight_pct": 12.5}, s, 500000, pit) == 12.5
+    assert st.model_weight(pos, {**s, "model_equity": 4000.0}, 500000, pit) == 25.0
+    assert st.model_weight(pos, s, 500000, pit) is None
+    assert st.model_weight(pos, s, 500000, {}) is not None          # today's-list backtest: its curve is that model
+
+
+def test_live_snapshot_is_stale_once_the_official_close_exists(client):
+    from web.api.services import strategies as st
+    lt = {"generated_at": "2026-10-23T11:00:00+05:30", "data_date": "2026-10-23", "live": True, "strategies": [],
+          "indices": {}}
+    assert st.as_of(lt, {"last_completed_day": "2026-10-22"})["stale"] is False      # during the session
+    assert st.as_of(lt, {"last_completed_day": "2026-10-23"})["stale"] is True       # after 18:00 / next morning
+    assert st.as_of({**lt, "live": False}, {"last_completed_day": "2026-10-23"})["stale"] is False
+
+
+def test_a_broken_paper_journal_never_breaks_the_main_pages(mclient, env, monkeypatch):
+    from web.api.services import paper_svc
+
+    def boom(**kw):
+        raise RuntimeError("journal locked")
+    monkeypatch.setattr(paper_svc.paper, "paper_report", boom)
+    caches.clear_all()
+    for url, model in (("/api/overview", M.OverviewResponse), ("/api/signals", M.SignalsResponse),
+                       ("/api/strategies", M.StrategyListResponse), ("/api/strategies/momentum", M.StrategyDetail)):
+        get_ok(mclient, url, model)
+    assert get_ok(mclient, "/api/paper", M.PaperListResponse)["available"] is False
+
+
+def test_each_lot_is_compared_with_its_own_scanned_lot(mclient, env):
+    """Two lots of one symbol: lot k of holdings.csv is checked against lot k of the scan, so an unchanged earlier
+    lot is not flagged 'changed after the last scan' forever."""
+    lt = latest_fixture(env)
+    sym = next(s for s in lt["strategies"] if s["key"] == "momentum")["positions"][0]["symbol"]
+    lt["holdings"] = [{"symbol": sym, "qty": 100, "buy_price": 70.0, "price": 75.0, "change_pct": 1.0, "alerts": [],
+                       "level": "ok"},
+                      {"symbol": sym, "qty": 20, "buy_price": 80.0, "price": 75.0, "change_pct": 1.0, "alerts": [],
+                       "level": "ok"}]
+    write_latest(env, lt)
+    (env / "holdings.csv").write_text("symbol,qty,buy_price,buy_date,stop_loss_pct,target_pct\n"
+                                      f"{sym},100,70,,,\n{sym},20,80,,,\n", encoding="utf-8")
+    caches.clear_all()
+    h = get_ok(mclient, "/api/holdings", M.HoldingsResponse)
+    rows = [r for r in h["rows"] if r["symbol"] == sym]
+    assert [(r["qty"], r["buy_price"]) for r in rows] == [(100, 70.0), (20, 80.0)]
+    assert not any("changed after the last scan" in a for r in rows for a in r["alerts"])
+
+
+def test_fyers_import_uses_the_quantity_left_after_todays_sales():
+    from web.api.services import holdings_svc
+    rows = holdings_svc.from_fyers([{"symbol": "NSE:SBIN-EQ", "quantity": 10, "remainingQuantity": 4, "costPrice": 500},
+                                    {"symbol": "NSE:TCS-EQ", "quantity": 5, "remainingQuantity": 0, "costPrice": 3000},
+                                    {"symbol": "NSE:INFY-EQ", "quantity": 3, "costPrice": 1500}])
+    assert [(r["symbol"], r["qty"]) for r in rows] == [("SBIN", 4.0), ("INFY", 3.0)]
 
 
 def test_allocations_query_resizes_buys(mclient, env):

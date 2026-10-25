@@ -7,6 +7,7 @@ import type { AsOf, Order, ResultsEvent, StrategySummary } from '@/api/types'
 import { cn } from '@/lib/csv'
 import { date, pct, qty } from '@/lib/format'
 import { orderClipboard } from '@/lib/sizing'
+import { lostMoney } from '@/lib/vocab'
 import { EvidenceChip, EtfChip, HorizonChip, ProvisionalChip, ResultsChip, SidePill, StatusDot, WarnChip } from './badges'
 import { DataTable, SymbolCell, type Col } from './DataTable'
 import { Chip, IconButton, Tip } from './ui'
@@ -31,7 +32,7 @@ export function PageHeader({ title, subtitle, right, children }: { title: ReactN
 export function AsOfLine({ a }: { a: AsOf }) {
   return (
     <span>
-      Prices <span className="whitespace-nowrap">{date(a.data_date)}</span> · {a.live ? <span className="text-warn">live candle, provisional</span> : a.stale ? <span className="text-warn">stale</span> : <span className="whitespace-nowrap">official close</span>}
+      Prices <span className="whitespace-nowrap">{date(a.data_date)}</span> · {a.stale ? <span className="text-warn">stale</span> : a.live ? <span className="text-warn">live candle, provisional</span> : <span className="whitespace-nowrap">official close</span>}
     </span>
   )
 }
@@ -66,11 +67,11 @@ export function KpiStrip({ children, min = 132, gridClass }: { children: ReactNo
   )
 }
 
-export function StrategyNameCell({ s, link = true, compact }: { s: Pick<StrategySummary, 'key' | 'name' | 'horizon' | 'evidence' | 'universe' | 'status'>; link?: boolean; compact?: boolean }) {
+export function StrategyNameCell({ s, link = true, compact }: { s: Pick<StrategySummary, 'key' | 'name' | 'horizon' | 'evidence' | 'universe' | 'status'> & { headline?: StrategySummary['headline'] }; link?: boolean; compact?: boolean }) {
   const name = <span className="truncate font-semibold text-fg">{s.name}</span>
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <StatusDot status={s.status} />
+      <StatusDot status={s.status} lost={s.headline ? lostMoney(s.headline) : false} />
       <div className="flex min-w-0 flex-col gap-0.5">
         {link ? <Link to={`/strategies/${s.key}`} className="truncate hover:underline" onClick={(e) => e.stopPropagation()}>{name}</Link> : name}
         {!compact && (
@@ -83,6 +84,11 @@ export function StrategyNameCell({ s, link = true, compact }: { s: Pick<Strategy
       </div>
     </div>
   )
+}
+
+/** The scan's own caveat when a backtest is flattered (sector rotation: industries unknown for part of the test). */
+export function flatteredNote(s: Pick<StrategySummary, 'status_reason'>): string | null {
+  return s.status_reason && s.status_reason.startsWith('Flattered:') ? s.status_reason : null
 }
 
 /** Survivorship-bias context; shown next to backtest numbers while backtests use today's list. */

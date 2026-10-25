@@ -119,6 +119,58 @@ def test_stop_loss_intraday_and_on_a_gap(jpath, open_23, expected_raw):
     assert t["exit_price"] == pytest.approx(raw * (1 - SLIP)) and t["pnl"] < 0
 
 
+def test_order_buy_keeps_its_journaled_atr_stop(jpath):
+    """Donchian-style orders carry a k x ATR stop (no stop_pct in the rules): the replay keeps it - as a fraction of
+    the decision-day close, applied to the fill - instead of buying without a stop."""
+    fr = make_store(opens={("A", 21): 102.0}, lows={("A", 23): 91.0})
+    d = fr["close"].index
+    s = scan(d[20], actions=[("BUY", "A", "entry signal")], kind="event", rules={"stop_pct": None, "stop_atr": 2.0})
+    s["strategies"][0]["actions"][0]["stop"] = 90.0                 # close 100 - 2 x ATR of 5
+    paper.record_scan(s, jpath)
+    t = report(fr, jpath)["trades"][0]
+    stop = 102 * (1 + SLIP) * 0.90
+    assert t["reason"] == "stop-loss" and t["exit_date"] == d[23].date().isoformat()
+    assert t["exit_price"] == pytest.approx(stop * (1 - SLIP))
+
+
+def test_no_buy_at_an_upper_circuit_lock(jpath):
+    """One price all day on real volume, above the previous close: locked at the upper band, so the buy cannot
+    fill (as in the backtest)."""
+    fr = make_store(opens={("A", 21): 105.0}, closes={("A", 21): 105.0})
+    d = fr["close"].index
+    paper.record_scan(scan(d[20], actions=[("BUY", "A", "enters top ranks")]), jpath)
+    rep = report(fr, jpath)
+    assert not rep["open"] and not rep["trades"]
+
+
+def test_idle_cash_earns_the_cash_rate_like_the_backtest(jpath):
+    fr = make_store()
+    d = fr["close"].index
+    paper.record_scan(scan(d[20]), jpath)                          # all cash
+    rate = pd.Series(1.0001 ** np.arange(N), index=d)
+    no_fee = CostModel(slippage_pct=0.1, slippage_illiquid_pct=0.1, cash_fee_pct=0.0)
+    eq = paper.build_report(fr, no_fee, jpath, cash_rate=rate)["mom"]["equity"]["Paper"]
+    assert eq.iloc[-1] == pytest.approx(100_000 * 1.0001 ** (N - 21))
+    with_fee = paper.build_report(fr, COSTS, jpath, cash_rate=rate)["mom"]["equity"]["Paper"]
+    assert eq.iloc[-1] > with_fee.iloc[-1] > 100_000
+    assert report(fr, jpath)["equity"]["Paper"].iloc[-1] == 100_000   # no cash rate given: no yield
+
+
+def test_expectation_comes_from_the_first_point_in_time_backtest(jpath):
+    """An early journal record from a current-list (survivorship-flattered) backtest is never the yardstick."""
+    fr = make_store()
+    d = fr["close"].index
+    early, later = scan(d[20]), scan(d[22])
+    early["strategies"][0]["metrics"]["full"].update(cagr_pct=41.9, backtest_universe="current")
+    later["strategies"][0]["metrics"]["full"].update(cagr_pct=28.7, backtest_universe="point_in_time")
+    paper.record_scan(early, jpath)
+    paper.record_scan(later, jpath)
+    rep = report(fr, jpath)
+    assert rep["start"] == d[20].date().isoformat()                 # the paper portfolio still starts on day one
+    assert rep["expect"]["cagr_pct"] == 28.7 and rep["summary"]["backtest_cagr_pct"] == 28.7
+    assert "survivorship-free" in rep["summary"]["comparison"]
+
+
 def test_stopped_out_position_is_not_bought_back_while_model_still_holds_it(jpath):
     fr = make_store(lows={("A", 23): 90.0})
     d = fr["close"].index

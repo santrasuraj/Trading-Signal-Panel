@@ -29,13 +29,14 @@ if defined NO_NPM if defined NEED_BUILD (
   pause
   exit /b 1
 )
+REM A failed build (a type error stops tsc before vite touches dist) starts the previous build when one is there.
 if defined NEED_BUILD (
   echo Building the app - about a minute...
   pushd web\ui
   if defined NEED_CI (
     call npm ci || (popd & echo npm ci failed - see the messages above. & pause & exit /b 1)
   )
-  call npm run build || (popd & echo The build failed - see the messages above. & pause & exit /b 1)
+  call npm run build || (findstr /c:"Quant Desk" "dist\index.html" >nul 2>nul && (echo The build failed - starting the previous build, which may be out of date. See the messages above.) || (popd & echo The build failed - see the messages above. & pause & exit /b 1))
   popd
 )
 

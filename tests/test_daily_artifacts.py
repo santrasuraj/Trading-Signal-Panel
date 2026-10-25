@@ -5,7 +5,9 @@ import json
 from datetime import datetime
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from scanner import daily
 from scanner.settings import IST
@@ -89,6 +91,39 @@ def test_clean_metrics_rounds_lists_like_numbers():
     assert m["full"]["cagr_range"][0] <= m["full"]["cagr_pct"] and m["full"]["name"] == "x"
 
 
+def test_next_session_skips_weekends_and_nse_holidays(monkeypatch):
+    def holidays(year):
+        assert year >= 2026                                       # past years' lists are never looked up
+        return {"2026-11-09"} if year == 2026 else {"2027-01-01"}
+    monkeypatch.setattr(daily, "trading_holidays", holidays)
+    monkeypatch.setattr(daily, "ist_now", lambda: datetime(2026, 10, 25, 12, 0, tzinfo=IST))
+    assert daily._next_session(pd.Timestamp("2026-11-06")) == pd.Timestamp("2026-11-10")   # Fri -> Mon holiday -> Tue
+    assert daily._next_session(pd.Timestamp("2026-12-31")) == pd.Timestamp("2027-01-04")   # next year's holiday list
+    assert daily._next_session(pd.Timestamp("2025-02-07")) == pd.Timestamp("2025-02-10")   # an old day: weekdays only
+
+
+def test_next_review_follows_the_engine_periods():
+    """On a review day its orders are in this scan, so the next review is the following period's."""
+    def nxt_review(last, nxt, how):
+        return daily._next_rebalance(pd.DatetimeIndex([pd.Timestamp(last)]), how, pd.Timestamp(nxt))
+    assert nxt_review("2026-10-23", "2026-10-26", "monthly") == "2026-10-30"
+    assert nxt_review("2026-10-30", "2026-11-02", "monthly") == "2026-11-30"     # today is the review day
+    assert nxt_review("2026-10-21", "2026-10-22", "weekly") == "2026-10-23"
+    assert nxt_review("2026-10-23", "2026-10-26", "weekly") == "2026-10-30"      # a Friday review: next Friday
+    assert nxt_review("2026-10-23", "2026-10-26", "biweekly") == "2026-11-06"    # ISO week 43 ends a period
+    assert nxt_review("2026-10-28", "2026-10-29", "biweekly") == "2026-11-06"
+
+
+def test_index_tables_end_on_the_last_real_nse_close():
+    """A live scan's today (no NSE close yet) is left out - never shown as a copied 0.00% day."""
+    idx = pd.bdate_range("2026-08-03", periods=41, name="date")
+    h = pd.DataFrame({"Nifty 500": 100.0 + np.arange(41.0)}, index=idx)
+    h.iloc[-1] = np.nan
+    row = daily._index_tables(h, idx)["factors"][0]
+    assert row["name"] == "Nifty 500" and row["as_of"] == idx[-2].date().isoformat()
+    assert row["last"] == 139.0 and row["chg_1d"] == pytest.approx(0.72)
+
+
 def test_yearly_returns_run_from_the_previous_year_end():
     idx = pd.to_datetime(["2021-06-01", "2021-12-31", "2022-01-03", "2022-12-30"])
     eq = pd.Series([100.0, 110.0, 99.0, 121.0], index=idx)
@@ -110,3 +145,11 @@ def test_etf_stray_open_prints_are_cleaned_and_stocks_are_not():
     assert abs(o.iloc[2] - 443.8 * 0.98) < 0.01 and abs(o.iloc[1] - 443.8 * 1.02) < 0.01
     assert (lo <= o).all() and (o <= hi).all() and (lo <= p.close["JUNIORBEES"]).all()
     assert p.open["STOCK"].iloc[2] == 112.0 and p.low["STOCK"].iloc[2] == 104.0     # a real stock gap stays
+
+
+def test_factor_index_lookup_ignores_case():
+    """NSE's index file mixes 'NIFTY ...' and 'Nifty ...': a strategy's benchmark name must still find its column."""
+    h = pd.DataFrame({"Nifty Alpha Low-Volatility 30": [1.0, 2.0], "Nifty 50": [3.0, 4.0]})
+    assert daily._index_column(h, "NIFTY Alpha Low-Volatility 30").tolist() == [1.0, 2.0]
+    assert daily._index_column(h, "Nifty 50").tolist() == [3.0, 4.0]
+    assert daily._index_column(h, "Nifty Alpha 50") is None and daily._index_column(h, "") is None

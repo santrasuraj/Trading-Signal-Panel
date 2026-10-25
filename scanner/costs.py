@@ -21,6 +21,8 @@ class CostModel:
     slippage_pct: float = 0.10        # assumed execution slippage per side, liquid stocks
     slippage_illiquid_pct: float = 0.25   # ... and for stocks trading under `illiquid_below_cr`
     illiquid_below_cr: float = 25.0       # average daily traded value, Rs crore
+    cash_fee_pct: float = 0.7         # yearly cost of parking idle cash (liquid-ETF expense ratio; an assumption:
+                                      # check your fund's current factsheet), deducted from the cash yield
 
     @classmethod
     def from_config(cls, cfg: dict | None) -> "CostModel":
@@ -53,10 +55,12 @@ class CostModel:
 @dataclass(frozen=True)
 class TaxModel:
     """Indian capital-gains tax on listed shares (STT paid), FY Apr-Mar, rates incl. 4% cess.
-    Short term (held <= 12 months) 20% + cess; long term 12.5% + cess above Rs 1.25 lakh a year."""
+    Short term (held <= 12 months) 20% + cess; long term 12.5% + cess above Rs 1.25 lakh a year.
+    Income on idle cash (liquid fund / ETF) is taxed at the slab rate: `interest_pct` (top slab by default)."""
     stcg_pct: float = 20.8
     ltcg_pct: float = 13.0
     ltcg_exempt: float = 125000.0
+    interest_pct: float = 31.2        # 30% slab + 4% cess; set your own slab
 
     @classmethod
     def from_config(cls, cfg: dict | None) -> "TaxModel":

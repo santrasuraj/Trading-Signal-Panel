@@ -10,8 +10,11 @@ are shown, so the same inputs always give the same P&L, and corrected prices or 
 flow through automatically:
   - each strategy starts with the account capital (config.yaml) of its first journal day;
   - orders fill at the next trading day's official open with slippage and full charges (costs.py),
-    sized like the backtest (equity / max positions, never more than the cash available);
-  - stop-losses / targets trigger intraday from the day's low / high, as in the backtest;
+    sized like the backtest (equity / max positions, never more than the cash available); as in the
+    backtest, no buy fills at an upper-circuit lock and no sell or stop at a lower-circuit lock;
+  - stop-losses / targets trigger intraday from the day's low / high, as in the backtest (an order's
+    own stop - a % or k x ATR stop - is journaled with it);
+  - idle cash earns the cash-rate index less the fund fee when one is given, as in the backtest;
   - the paper portfolio follows the model portfolio: on the first day it buys the current model
     holdings, and if a scan was missed it catches up at the open after the next scan.
 """
@@ -116,8 +119,10 @@ def load_journal(path=None) -> dict[str, pd.DataFrame]:
 
 # ----------------------------------------------------------------------------- simulation
 def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd.DataFrame],
-                costs: CostModel) -> dict | None:
-    """Rebuild one strategy's paper portfolio from its journal and the stored prices (completed days only)."""
+                costs: CostModel, cash_rate: pd.Series | None = None) -> dict | None:
+    """Rebuild one strategy's paper portfolio from its journal and the stored prices (completed days only).
+    `cash_rate`: a cash-return index (Nifty 1D Rate) - idle cash then earns it less `costs.cash_fee_pct`
+    a year, exactly as in engine.simulate; without it idle cash earns nothing."""
     scans = journal["scans"][journal["scans"]["strategy"] == key].sort_values("date")
     close_all = _sorted(frames["close"])
     if scans.empty or close_all.empty:
@@ -126,6 +131,9 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
     positions = journal["positions"][journal["positions"]["strategy"] == key]
     dates = close_all.index
     T = len(dates)
+    growth = (cash_rate.reindex(dates).ffill().pct_change().fillna(0.0).clip(-0.01, 0.01).to_numpy()
+              if cash_rate is not None else np.zeros(T))
+    cash_fee = dates.to_series().diff().dt.days.fillna(0).to_numpy(dtype=float) / 365.25 * costs.cash_fee_pct / 100
     first = str(scans["date"].iloc[0])
     i0 = int(dates.searchsorted(pd.Timestamp(first), side="right")) - 1   # last trading day <= first journal day
     if i0 < 0:
@@ -140,9 +148,15 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
         return _sorted(frames[f]).reindex(index=dates, columns=syms).to_numpy(dtype=float)
 
     O, H, L, C = (arr(f) for f in ("open", "high", "low", "close"))
+    V = arr("volume")
     C_ff = pd.DataFrame(C).ffill().to_numpy()
+    # As engine.simulate: one price all day on real volume = locked at a circuit band. No buy at an upper-circuit
+    # lock and no sell or stop at a lower-circuit lock (the order would sit unfilled): it waits for the next day.
+    prev_c = np.vstack([np.full((1, C.shape[1]), np.nan), C[:-1]])
+    locked = (H == L) & (V > 0)
+    up_lock, dn_lock = locked & (C > prev_c), locked & (C < prev_c)
     # Slippage as in the backtest: stocks averaging under `illiquid_below_cr` a day (to yesterday) cost more.
-    turnover = pd.DataFrame(C * arr("volume")).rolling(20, min_periods=15).mean().to_numpy() / 1e7
+    turnover = pd.DataFrame(C * V).rolling(20, min_periods=15).mean().to_numpy() / 1e7
     liquid = np.zeros(C.shape, dtype=bool)
     liquid[1:] = turnover[:-1] >= costs.illiquid_below_cr
     slip = np.where(liquid, costs.slippage_pct, costs.slippage_illiquid_pct) / 100
@@ -163,7 +177,9 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
         t_exec = int(dates.searchsorted(pd.Timestamp(d), side="right"))
         days[d] = {"rules": json.loads(row.rules or "{}"), "model": model, "di": t_exec - 1,
                    "sells": {o.symbol: o.reason for o in od.itertuples(index=False) if o.action == "SELL"},
-                   "buys": [(o.symbol, o.reason) for o in od.itertuples(index=False) if o.action == "BUY"],
+                   # the order's own stop as a fraction of its price (that day's close: split-proof)
+                   "buys": [(o.symbol, o.reason, o.stop / o.price if _ok(o.stop) and _ok(o.price) and o.price > 0
+                             else None) for o in od.itertuples(index=False) if o.action == "BUY"],
                    "t": t_exec}
         if t_exec < T:
             exec_at[t_exec] = d       # days are in order, so the newest journal day wins
@@ -183,16 +199,17 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
         portfolio back in line with the model portfolio (first day, missed scans)."""
         info = days[d]
         model, sells = info["model"], info["sells"]
-        buys = [s for s, _ in info["buys"]]
+        buys = [s for s, _, _ in info["buys"]]
         target = (set(model) - set(sells)) | set(buys)
         out_sells = {s: sells.get(s, NOT_IN_MODEL) for s in pos if s not in target}
-        out_buys = [(s, "order", None, r) for s, r in info["buys"] if s not in pos]
+        out_buys = [(s, "order", frac, r) for s, r, frac in info["buys"] if s not in pos]
         for s, (entry, frac) in model.items():
             if s in pos or s in sells or s in buys:
                 continue
             if s in last_exit and entry <= last_exit[s]:
                 continue          # the paper position was stopped out; don't buy the same model position back
-            ref = C[info["di"], col[s]] if info["di"] >= 0 else np.nan
+            # the model's stop is a fraction of its (forward-filled) last price: so is the reference here
+            ref = C_ff[info["di"], col[s]] if info["di"] >= 0 else np.nan
             out_buys.append((s, "sync", frac * ref if frac is not None and ref > 0 else None, CATCH_UP))
         return out_sells, out_buys
 
@@ -220,6 +237,8 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
         last_exit[s] = dates[t].date().isoformat()
 
     for t in range(i0 + 1, T):
+        if cash > 0 and cash_rate is not None:   # idle cash in a liquid fund, as in the backtest
+            cash *= 1 + growth[t] - cash_fee[t]
         buys: list[tuple] = []
         d = exec_at.get(t)
         if d is not None:
@@ -228,11 +247,12 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
             for s, r in sells.items():
                 pending_sell.setdefault(s, r)
 
-        # 1) Sells at the open first (a missing open keeps the order for the next day), then buys.
+        # 1) Sells at the open first (a missing open or a lower-circuit lock keeps the order for the next day),
+        #    then buys.
         for s, r in list(pending_sell.items()):
             if s not in pos:
                 del pending_sell[s]
-            elif O[t, col[s]] > 0:
+            elif O[t, col[s]] > 0 and not dn_lock[t, col[s]]:
                 close_position(t, s, O[t, col[s]], r)
                 del pending_sell[s]
         if buys:
@@ -240,14 +260,20 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
             stop_pct, target_pct = rules.get("stop_pct"), rules.get("target_pct")
             eq_open = cash + mark(t, use_open=True)
             slots = max_pos - len(pos)
-            for s, how, sync_stop, _ in buys:
+            for s, how, stop_ref, _ in buys:
                 if slots <= 0:
                     break
                 px = O[t, col[s]]
-                if s in pos or not px > 0:
+                if s in pos or not px > 0 or up_lock[t, col[s]]:
                     continue
                 fill = px * (1 + slip[t, col[s]])
-                stop = sync_stop if how == "sync" else (fill * (1 - stop_pct / 100) if stop_pct else None)
+                if how == "sync":
+                    stop = stop_ref                     # the model's own stop (rupees)
+                else:
+                    stop = fill * (1 - stop_pct / 100) if stop_pct else None
+                    if rules.get("stop_atr") and stop_ref is not None:   # the order's k x ATR stop, as the engine
+                        atr_stop = fill * stop_ref
+                        stop = max(stop, atr_stop) if stop is not None else atr_stop
                 if stop is not None and px <= stop:
                     continue      # opened below the model's stop: the model itself exits today
                 alloc = eq_open / max_pos
@@ -269,10 +295,10 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
                           "cost": value + fee, "via": how}
                 slots -= 1
 
-        # 2) Intraday stop-loss / target, exactly as the backtest.
+        # 2) Intraday stop-loss / target, exactly as the backtest (not at a lower-circuit lock).
         for s in list(pos):
             ps, j = pos[s], col[s]
-            if math.isnan(L[t, j]):
+            if math.isnan(L[t, j]) or dn_lock[t, j]:
                 continue
             if ps["stop"] is not None and L[t, j] <= ps["stop"]:
                 close_position(t, s, min(O[t, j], ps["stop"]) if not math.isnan(O[t, j]) else ps["stop"], "stop-loss")
@@ -312,6 +338,10 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
                    "exit_price": float(tr.exit_price), "qty": tr.qty, "pnl": float(tr.pnl), "ret_pct": float(tr.ret_pct),
                    "days": tr.days, "reason": tr.reason, "via": v} for tr, v in zip(trades, via)]
 
+    # The expectation stays fixed at the start - but from the first survivorship-free (point-in-time) backtest
+    # when there is one, so an early record from a flattered current-list backtest is never kept.
+    exps = [json.loads(x or "{}") for x in scans["expect"]]
+    expect = next((e for e in exps if e.get("backtest_universe") == "point_in_time"), exps[0])
     eq_idx = dates[i0:]
     curves = pd.DataFrame({"Paper": pd.Series(equity, index=eq_idx)})
     for sym, label in ((INDEX_NIFTY, "NIFTY 50"), (INDEX_N500, "NIFTY 500")):
@@ -325,7 +355,7 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
         "journal_days": len(scans), "last_journal": last_day,
         "equity": curves, "cash": cash, "fees": fees, "slippage": slippage,
         "open": open_rows, "trades": trade_rows, "pending": waiting,
-        "trade_stats": _trade_stats(trades), "expect": json.loads(scans["expect"].iloc[0] or "{}"),
+        "trade_stats": _trade_stats(trades), "expect": expect,
     }
 
 
@@ -436,9 +466,10 @@ def _clean_etfs(frames: dict[str, pd.DataFrame], etfs) -> dict[str, pd.DataFrame
     return out
 
 
-def build_report(frames: dict[str, pd.DataFrame], costs: CostModel, path=None, etfs=()) -> dict[str, dict]:
+def build_report(frames: dict[str, pd.DataFrame], costs: CostModel, path=None, etfs=(),
+                 cash_rate: pd.Series | None = None) -> dict[str, dict]:
     """Paper portfolio + summary for every journaled strategy (deterministic: journal + stored prices).
-    `etfs`: ETF columns whose stray open prints are cleaned, as in the backtest."""
+    `etfs`: ETF columns whose stray open prints are cleaned, as in the backtest. `cash_rate`: see paper_trade."""
     journal = load_journal(path)
     frames = {k: _sorted(v) for k, v in frames.items()}           # sort once, not 6 times per strategy
     frames = _clean_etfs(frames, etfs)
@@ -446,7 +477,7 @@ def build_report(frames: dict[str, pd.DataFrame], costs: CostModel, path=None, e
     out = {}
     for key in dict.fromkeys(journal["scans"]["strategy"]):
         mine = {t: by_key[t].get(key, journal[t].iloc[0:0]) for t in journal}
-        rep = paper_trade(key, mine, frames, costs)
+        rep = paper_trade(key, mine, frames, costs, cash_rate)
         if rep is not None:
             rep["summary"] = summarize(rep)
             out[key] = rep
@@ -473,14 +504,16 @@ def _points(s: pd.Series | None) -> list:
 
 
 def paper_report(frames: dict[str, pd.DataFrame] | None = None, costs: CostModel | None = None,
-                 path=None, etfs=None) -> dict:
+                 path=None, etfs=None, cash_rate: pd.Series | None = None) -> dict:
     """All paper-trading results as one JSON-serialisable dict (dashboard, GET /api/paper, Telegram).
 
-    Defaults: the price store and the `costs:` from config.yaml. Per strategy key:
+    Defaults: the price store and the `costs:` from config.yaml; no cash yield unless `cash_rate` (the Nifty
+    1D Rate Index, as the scan passes it) is given. Per strategy key:
       summary          headline numbers, live-vs-backtest comparison, verdict (see summarize)
       equity           [[date, value]] paper portfolio value; nifty50 / nifty500: same, scaled to the capital
       trades / open / pending   closed paper trades, current paper holdings, orders waiting for the next open
       trade_stats, expect       paper trade statistics; backtest expectation recorded on the first journal day
+                                (the first point-in-time one when there is one)
     """
     if frames is None:
         from .store import load_store
@@ -493,7 +526,7 @@ def paper_report(frames: dict[str, pd.DataFrame] | None = None, costs: CostModel
         if etfs is None:
             etfs = [str(e).upper() for e in (cfg.get("etfs") or [])]
     out = {}
-    for key, rep in build_report(frames, costs, path, etfs).items():
+    for key, rep in build_report(frames, costs, path, etfs, cash_rate).items():
         curves = rep["equity"]
         out[key] = _json({
             **{k: rep[k] for k in ("key", "name", "kind", "capital", "start", "last_date", "days", "journal_days",
@@ -507,6 +540,7 @@ def paper_report(frames: dict[str, pd.DataFrame] | None = None, costs: CostModel
             "strategies": out}
 
 
-def summaries(frames: dict[str, pd.DataFrame], costs: CostModel, path=None, etfs=None) -> dict[str, dict]:
+def summaries(frames: dict[str, pd.DataFrame], costs: CostModel, path=None, etfs=None,
+              cash_rate: pd.Series | None = None) -> dict[str, dict]:
     """Per-strategy summaries only (saved with each scan for Telegram)."""
-    return {k: v["summary"] for k, v in paper_report(frames, costs, path, etfs)["strategies"].items()}
+    return {k: v["summary"] for k, v in paper_report(frames, costs, path, etfs, cash_rate)["strategies"].items()}

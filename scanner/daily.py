@@ -11,15 +11,16 @@ import os
 import subprocess
 import time
 from dataclasses import replace
-from datetime import timedelta
+from datetime import date
 
 import numpy as np
 import pandas as pd
 
-from . import paper, pit
+from . import corporate, paper, pit
 from .costs import CostModel, TaxModel
-from .engine import EventStrategy, _curve_stats, evaluate, equal_weight_index, simulate, working_status
-from .events import results_history, upcoming_results
+from .engine import (EventStrategy, _curve_stats, _period_ends, evaluate, equal_weight_index, simulate,
+                     working_status)
+from .events import results_history, trading_holidays, upcoming_results
 from .nse import index_history
 from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
@@ -33,9 +34,11 @@ from .universe import get_universe, industry_map
 LATEST_FILE = RESULTS_DIR / "latest.json"
 TIMING_CACHE = RESULTS_DIR / "timing_cache.json"
 REJECTED_CACHE = RESULTS_DIR / "rejected_cache.json"   # B4: re-test results of strategies that never trade
-ENGINE_VERSION = 5   # bump when simulation logic changes, so cached timing ranges are recomputed
+ENGINE_VERSION = 7  # bump when simulation logic changes, so cached timing ranges are recomputed
 NEEDS_INDUSTRY = {"sector_rotation"}   # strategies whose picks depend on each stock's industry
-# (4: ETF stray open prints cleaned, low-vol "most traded" among stocks only)
+# (4: ETF stray open prints cleaned, low-vol "most traded" among stocks only; 6: no fills on gap-filled days or
+#  at locked circuits, cash yield less a fund fee and taxed, calendar-year CAGR, Sharpe over cash, idle windows
+#  'unknown', open positions taxed at the end)
 CURVES_FILE = RESULTS_DIR / "curves.parquet"
 TRADES_FILE = RESULTS_DIR / "trades.parquet"       # B1: every closed trade of every strategy's backtest
 SCREENER_FILE = RESULTS_DIR / "screener.parquet"   # B2: one row per tradable stock at scan time
@@ -99,6 +102,17 @@ def _clean_metrics(m: dict) -> dict:
     return out
 
 
+def _index_column(h: pd.DataFrame, name: str | None) -> pd.Series | None:
+    """Column `name` of NSE's index history, matched without regard to case (NSE's file writes some names
+    'NIFTY ...' and others 'Nifty ...'), or None."""
+    if not name:
+        return None
+    if name in h.columns:
+        return h[name]
+    hit = next((c for c in h.columns if str(c).lower() == name.lower()), None)
+    return h[hit] if hit is not None else None
+
+
 def _rank_candidates(s, f: Factors, trad: pd.DataFrame) -> pd.Series:
     """Today's scores of what the simulation may buy (the same masks as engine.simulate): eligible, tradable,
     and stocks or ETFs by the strategy's universe - so the shown ranking matches the backtest's ranks."""
@@ -111,13 +125,44 @@ def _rank_candidates(s, f: Factors, trad: pd.DataFrame) -> pd.Series:
     return score[ok]
 
 
-def _next_rebalance(dates: pd.DatetimeIndex, how: str) -> str:
-    """Approximate next rebalance decision day (last trading day of the period)."""
+def _starts_new_period(day, nxt, how: str) -> bool:
+    """Is `day` the last trading day of its rebalance period, given that `nxt` is the trading day after it
+    (the engine's own period rule, engine._period_ends)?"""
+    return bool(_period_ends(pd.DatetimeIndex([pd.Timestamp(day)]), how, pd.Timestamp(nxt))[-1])
+
+
+def _next_session(last) -> pd.Timestamp:
+    """The NSE trading day after `last`: weekends and NSE's published trading holidays skipped (holiday lists
+    are looked up for this year and later only - a scan's last day is never far in the past; if NSE is
+    unreachable, plain weekdays). Special weekend sessions (Budget day, Muhurat) are not known in advance."""
+    last = pd.Timestamp(last).normalize()
+    hol: set[str] = set()
+    for y in {last.year, (last + pd.Timedelta(days=10)).year}:
+        if y >= ist_now().year:
+            hol |= trading_holidays(y)
+    d = last + pd.Timedelta(days=1)
+    for _ in range(15):   # a bad holiday list can never make this loop forever
+        if d.weekday() < 5 and d.date().isoformat() not in hol:
+            break
+        d += pd.Timedelta(days=1)
+    return d
+
+
+def _next_rebalance(dates: pd.DatetimeIndex, how: str, next_session=None) -> str:
+    """Approximate next rebalance decision day (last trading day of the period). With `next_session`
+    (the trading day after the scan's last day): when today is itself the review day, its orders are in
+    this scan, so the next review is the following period's."""
     last = dates[-1]
+    if next_session is not None and _starts_new_period(last, next_session, how):
+        last = pd.Timestamp(next_session)
     if how == "weekly":
-        target = last + pd.offsets.Week(weekday=4)
+        target = last + pd.offsets.Week(0, weekday=4)   # (n=0: a Friday is itself the target)
     elif how == "biweekly":
-        target = last + pd.offsets.Week(weekday=4) + pd.Timedelta(days=7 * ((last.isocalendar().week + 1) % 2))
+        target = last + pd.offsets.Week(0, weekday=4)
+        for _ in range(3):   # the engine's biweekly periods: the Friday whose next week starts a new one
+            if _starts_new_period(target, target + pd.Timedelta(days=7), how):
+                break
+            target += pd.Timedelta(days=7)
     elif how == "quarterly":
         target = last + pd.offsets.BQuarterEnd(0, startingMonth=3)
     elif how == "semiannual":
@@ -206,6 +251,19 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     industry = {**industry_map(), **{s: v["industry"] for s, v in meta.items() if v.get("industry")}}
     first = p.dates[0].date()
     results_hist = results_history(first, ist_now().date(), log=log)
+    try:   # NSE's calendar names each company by the symbol it had then; both panels use today's symbol
+        forward: dict[str, list] = {}
+        for new, olds in corporate.renames().items():
+            for old, eff in olds:
+                forward.setdefault(old, []).append((new, eff))
+        if forward:
+            moved: dict[str, set[str]] = {}
+            for sym, days in results_hist.items():
+                for d in days:
+                    moved.setdefault(pit._current_symbol(sym, date.fromisoformat(d), forward), set()).add(d)
+            results_hist = {k: sorted(v) for k, v in moved.items()}
+    except Exception as e:   # never let it break a scan: results dates stay under the calendar's symbols
+        log(f"Results calendar: symbol renames not applied ({type(e).__name__}: {e})")
     f = Factors(p, etfs=set(etfs), industry=industry, results_dates=results_hist)
     flt = cfg.get("filters") or {}
     trad = tradable_mask(f, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)))
@@ -218,7 +276,9 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     min_position = float(acct.get("min_position", 0))
 
     last = p.dates[-1]
-    results, results_note = upcoming_results(symbols, ist_now().date(), days=14)
+    next_session = _next_session(last)   # when the orders of this scan fill
+    warn_days = int((cfg.get("results") or {}).get("warn_days", 7))
+    results, results_note = upcoming_results(symbols, ist_now().date(), days=max(14, warn_days))
     today_d = ist_now().date()
 
     def results_info(sym: str) -> dict:
@@ -234,7 +294,10 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
 
     n500 = frames["close"][INDEX_N500].reindex(p.dates) if INDEX_N500 in frames["close"].columns else None
     done_upto = pd.Timestamp(info.get("complete_upto") or p.dates[-1])
-    idx_hist = index_history([d.date() for d in p.dates if d <= done_upto], log=log).reindex(p.dates).ffill()
+    # Real NSE index closes only (a live scan's today, or a day NSE has not published, stays empty: the index
+    # tables end on the last real close instead of showing a copied 0.00% day) ...
+    idx_raw = index_history([d.date() for d in p.dates if d <= done_upto], log=log).reindex(p.dates)
+    idx_hist = idx_raw.ffill()   # ... and carried forward for the simulation: cash rate, factor benchmarks
     cash_rate = idx_hist.get("Nifty 1D Rate Index")
     complete_upto = info.get("complete_upto") or p.dates[-1].date().isoformat()
     # Backtest metrics come from `bt` (the point-in-time universe when configured); today's orders,
@@ -247,7 +310,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     # Inputs that change results without changing the config (part of every cache signature).
     data_sig = [sorted(etfs), sum(len(v) for v in results_hist.values()),
                 _num(cash_rate.dropna().iloc[-1], 6) if cash_rate is not None and cash_rate.notna().any() else None,
-                bt["universe"], bt.get("last_day"), len(industry)]
+                bt["universe"], bt.get("last_day"), len(industry),
+                bt.get("built_at")]   # a same-day rebuild of the point-in-time data (when pit reports it)
     # Sector rotation needs each stock's industry. NSE lists industries only for today's index members, so on
     # the point-in-time test companies that later dropped out of every index can never be picked: flattered.
     ind_cov = bt.get("industry_coverage_pct")
@@ -260,16 +324,19 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         log(f"Testing strategy {n_done}/{len(all_strats)}: {s.name}")   # run_scan.py turns this into progress
         conf_s = (cfg.get("strategies") or {}).get(s.key)
         lifecycle, rejected_reason = strategy_lifecycle(cfg, s.key)
+        # One signature for both caches: everything that changes the cached numbers (the resolved rules include
+        # code defaults such as top_n and the raw config values; tax for the rejected entries' after-tax metrics).
+        sig = json.dumps([ENGINE_VERSION, _rules(s, conf_s), cfg.get("costs"), cfg.get("filters"), cfg.get("tax"),
+                          capital, min_position, complete_upto, data_sig], sort_keys=True, default=str)
         if lifecycle != "active":
             # B4: strategies that never trade are still re-tested (once per completed day, cached) so the
             # "Tested & rejected" list shows real numbers. No timing range, no orders, no positions.
-            sig = json.dumps([ENGINE_VERSION, conf_s, cfg.get("costs"), cfg.get("filters"), capital, min_position,
-                              complete_upto, data_sig], sort_keys=True, default=str)
             hit = rejected_cache.get(s.key)
             if not (hit and hit.get("sig") == sig):
                 res = simulate(s, bf, costs, btrad, capital=capital, min_position=min_position, cash_rate=cash_rate)
-                factor = idx_hist.get(s.benchmark) if s.benchmark else None
-                m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor)
+                factor = _index_column(idx_hist, s.benchmark)
+                m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
+                             cash_rate=cash_rate, stt_pct=costs.stt_pct)
                 m["full"]["factor_benchmark_name"] = s.benchmark or None
                 m["full"]["backtest_universe"] = bt["universe"]
                 m["full"]["cagr_range"] = None
@@ -299,11 +366,16 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                                           index=pd.DatetimeIndex([d for d, _ in hit["curve"]], name="date"))
             trade_rows.extend(hit.get("trades") or [])
             continue
-        live_res = simulate(s, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate)
+        # next_session: a rank strategy whose review day is today decides its orders at today's close (it only
+        # changes next_orders, never equity or trades, so `res` may still be this run)
+        live_res = simulate(s, f, costs, trad, capital=capital, min_position=min_position, cash_rate=cash_rate,
+                            next_session=next_session)
+        live_eq = float(live_res.equity.dropna().iloc[-1]) if live_res.equity.notna().any() else 0.0
         res = live_res if bf is f else simulate(s, bf, costs, btrad, capital=capital, min_position=min_position,
                                                 cash_rate=cash_rate)
-        factor = idx_hist.get(s.benchmark) if s.benchmark else None
-        m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor)
+        factor = _index_column(idx_hist, s.benchmark)
+        m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
+                     cash_rate=cash_rate, stt_pct=costs.stt_pct)
         m["full"]["factor_benchmark_name"] = s.benchmark or None
         m["full"]["backtest_universe"] = bt["universe"]
         if bn500 is not None:   # tracking error vs the real Nifty 500: how far luck alone moves the gap
@@ -311,9 +383,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             m["full"]["te_n500_pct"] = float(gap.std() * np.sqrt(252) * 100) if len(gap) > 20 else None
         # Timing luck: the same rules rebalanced a few days earlier (or started a few weeks later)
         # can give quite different results - report the spread, not just one number.
-        # (cached: recomputed only when the completed data or this strategy's settings change)
-        sig = json.dumps([ENGINE_VERSION, conf_s, cfg.get("costs"),
-                          cfg.get("filters"), capital, complete_upto, data_sig], sort_keys=True, default=str)
+        # (cached: recomputed only when the completed data or this strategy's settings change - `sig` above)
         hit = timing_cache.get(s.key)
         if hit and hit.get("sig") == sig:
             m["full"]["cagr_range"] = hit["range"]
@@ -350,12 +420,22 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         for o in live_res.next_orders:
             sym = o["symbol"]
             stop = None
-            if o["action"] == "BUY" and getattr(s, "stop_pct", None):
-                stop = close_last.get(sym, np.nan) * (1 - s.stop_pct / 100)
+            if o["action"] == "BUY":   # the model's initial stop from tonight's close (the engine uses the fill)
+                px_c = float(close_last.get(sym, np.nan))
+                if getattr(s, "stop_pct", None):
+                    stop = px_c * (1 - s.stop_pct / 100)
+                if isinstance(s, EventStrategy) and s.stop_atr and sym in f.atr14.columns:
+                    a = float(f.atr14[sym].iloc[-1])   # as engine.simulate: k x ATR(14) of the decision day
+                    if not np.isnan(a):
+                        atr_stop = px_c - s.stop_atr * a
+                        stop = max(stop, atr_stop) if stop is not None else atr_stop
             rinfo = results_info(sym)   # (not `info`: that name holds the store refresh info used below)
             warn = (o["action"] == "BUY" and rinfo.get("results_on") is not None
-                    and rinfo["results_in_days"] <= int((cfg.get("results") or {}).get("warn_days", 7)))
-            actions.append({**o, **meta.get(sym, {}), **sized(sym, stop), **rinfo,
+                    and rinfo["results_in_days"] <= warn_days)
+            # A SELL closes the model's position: its share count is the model's or yours, never capital / slots.
+            size = (sized(sym, stop) if o["action"] == "BUY"
+                    else {"price": _num(close_last.get(sym)), "qty": None, "amount": None})
+            actions.append({**o, **meta.get(sym, {}), **size, **rinfo,
                             "results_warning": warn, "stop": _num(stop), "provisional": live})
         ranking = []
         if s.kind == "rank":
@@ -371,12 +451,15 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             "horizon": s.horizon, "evidence": s.evidence, "universe": s.universe, "benchmark": s.benchmark,
             "status": status, "status_reason": why, "metrics": _clean_metrics(m),
             "yearly": {str(k): _num(v, 1) for k, v in yearly.items()},
-            "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"])} for pp in live_res.open_positions],
+            # weight: the share of the model portfolio these positions come from (live_res, not the backtest curve)
+            "positions": [{**pp, **meta.get(pp["symbol"], {}), **results_info(pp["symbol"]),
+                           "weight_pct": _num(pp["qty"] * pp["last_price"] / live_eq * 100, 2) if live_eq > 0 else None}
+                          for pp in live_res.open_positions],
             "actions": actions, "ranking": ranking,
             "max_positions": s.max_positions, "per_position": _num(per_pos, 0),
             "lifecycle": "active", "rejected_reason": None,
             "rules": _rules(s, conf_s),
-            "next_rebalance": _next_rebalance(p.dates, s.rebalance) if s.kind == "rank" else None,
+            "next_rebalance": _next_rebalance(p.dates, s.rebalance, next_session) if s.kind == "rank" else None,
             "recent_trades": [{"symbol": t.symbol, "entry": t.entry_date.date().isoformat(),
                                "exit": t.exit_date.date().isoformat(), "ret_pct": _num(t.ret_pct, 1),
                                "days": t.days, "reason": t.reason} for t in live_res.trades[-25:]][::-1],
@@ -407,15 +490,16 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     nifty, nifty_chg = series_last(nifty_close)
     vix, vix_chg = series_last(vix_close)
     breadth = _num(f.breadth_50.iloc[-1], 1)
+    # (mood_level, not `level`: the holdings loop below reuses that name for each holding's level)
     if regime_up and (breadth or 0) >= 50:
-        mood, level = "Bullish", "good"
+        mood, mood_level = "Bullish", "good"
         advice = "Nifty is above its 200-day average and most stocks are in uptrends. Strategies may open new positions."
     elif not regime_up:
-        mood, level = "Bearish", "bad"
+        mood, mood_level = "Bearish", "bad"
         advice = ("Nifty is below its 200-day average. Strategies with the regime filter make no new buys in this "
                   "regime (protects capital) and only manage existing positions.")
     else:
-        mood, level = "Mixed", "neutral"
+        mood, mood_level = "Mixed", "neutral"
         advice = "Nifty is in an uptrend but fewer than half of stocks are. Be selective."
     if (vix or 0) >= 20:
         advice += " India VIX is high: expect large swings."
@@ -441,7 +525,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         sl = h.stop_loss_pct if not pd.isna(h.stop_loss_pct) else float(hd.get("stop_loss_pct", 8))
         tg = h.target_pct if not pd.isna(h.target_pct) else float(hd.get("target_pct", 20))
         buy = float(h.buy_price) if not pd.isna(h.buy_price) else None
-        qty = float(h.qty) if not pd.isna(h.qty) else 0.0
+        qty = float(h.qty) if not pd.isna(h.qty) else None   # blank qty: no rupee P&L (never a made-up 0 shares)
+        fresh_px = bool(observed_last.get(sym, False))     # False: the price is a gap-filled copy of the last close
         alerts, level = [], "ok"
         if sym in rename_notes:
             alerts.append(rename_notes[sym])
@@ -450,15 +535,20 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         # Restate the buy price in today's terms if a split/bonus/demerger happened since buying.
         factor = adjustment_factor(sym, h.buy_date, p.close[sym]) if buy and not pd.isna(h.buy_date) else None
         if factor and factor != 1.0:
+            q_txt = (f" and qty from {qty:g} to {qty / factor:g} (split/bonus; after a demerger your real share "
+                     "count is unchanged - this is the parent-equivalent count)" if qty is not None else "")
             alerts.append(f"Corporate action since your buy date: buy price adjusted from ₹{buy:,.2f} "
-                          f"to ₹{buy * factor:,.2f} and qty from {qty:g} to {qty / factor:g}")
-            buy, qty = buy * factor, qty / factor
+                          f"to ₹{buy * factor:,.2f}{q_txt}")
+            buy, qty = buy * factor, (qty / factor if qty is not None else None)
         elif buy and pd.isna(h.buy_date) and px < 0.6 * buy:
             alerts.append("Price is far below your buy price - if the stock had a split/bonus since you bought, "
                           "add your buy date so the price can be adjusted.")
-        if not bool(observed_last.get(sym, False)):
-            alerts.append(f"No fresh price today (last real data before {last.date()}) - possibly suspended/renamed")
-            level = "watch"
+        if not fresh_px:
+            if live:   # a live scan without a quote for it yet: not a sign of a suspension
+                alerts.append("No live quote yet today (price shown is the last close)")
+            else:
+                alerts.append(f"No fresh price today (last real data before {last.date()}) - possibly suspended/renamed")
+                level = "watch"
         if buy:
             if px <= buy * (1 - sl / 100):
                 alerts.append(f"STOP-LOSS HIT: down more than {sl:g}% from your buy price")
@@ -474,9 +564,9 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             level = "danger" if level == "danger" else "watch"
         holding_rows.append({
             "symbol": sym, "company": meta.get(sym, {}).get("company", sym), "qty": _num(qty, 0),
-            "buy_price": _num(buy), "price": _num(px), "change_pct": _num(chg.get(sym)),
+            "buy_price": _num(buy), "price": _num(px), "change_pct": _num(chg.get(sym)) if fresh_px else None,
             "pnl_pct": _num((px / buy - 1) * 100) if buy else None,
-            "pnl_amount": _num((px - buy) * qty, 0) if buy else None,
+            "pnl_amount": _num((px - buy) * qty, 0) if buy and qty is not None else None,
             "stop_price": _num(buy * (1 - sl / 100)) if buy else None,
             "target_price": _num(buy * (1 + tg / 100)) if buy else None,
             "momentum_rank": _num(mom_rank.get(sym), 0), "rs": _num(f.rs_rating[sym].iloc[-1], 0),
@@ -493,13 +583,13 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         "generated_at": started.isoformat(timespec="seconds"),
         "elapsed_s": round(time.perf_counter() - t_start, 1),
         "data_date": last.date().isoformat(), "live": live, "live_source": info.get("live_source"),
-        "complete_upto": info.get("complete_upto"), "fyers_note": fyers_note, "nse_status": info.get("nse_status"),
+        "complete_upto": complete_upto, "fyers_note": fyers_note, "nse_status": info.get("nse_status"),
         "universe": uni_note, "stocks": int(trad.iloc[-1].sum()), "stale_symbols": stale[:50],
         "backtest": {k: v for k, v in bt.items() if k not in ("f", "trad", "ew", "n500")},
         "errors": info.get("errors", {}), "corporate_actions": info.get("corporate_actions", []),
         "capital": capital, "min_position": min_position,
         "costs_round_trip_pct": _num(costs.round_trip_pct(capital / 15), 3),
-        "market": {"label": mood, "level": level, "advice": advice, "regime_up": regime_up,
+        "market": {"label": mood, "level": mood_level, "advice": advice, "regime_up": regime_up,
                    "nifty": nifty, "nifty_change_pct": nifty_chg,
                    "nifty_sma200": _num(f.index_sma200.iloc[-1]),   # B3: distance to the regime line
                    "vix": vix, "vix_change_pct": vix_chg,
@@ -513,14 +603,20 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         "holdings": holding_rows,
         "symbols": sorted(c for c in p.close.columns),
         "results_note": results_note,
-        "indices": _index_tables(idx_hist, p.dates),
+        "indices": _index_tables(idx_raw, p.dates),
     }
     try:
         # Paper trading: journal completed days only, then replay the journal on stored (completed) prices.
-        if not live:
+        # Never once the session these orders fill at has opened (a re-check scan after the open): the
+        # journal would then hold orders written with that open already known.
+        opened = (pd.Timestamp(ist_now().replace(tzinfo=None))
+                  >= next_session + pd.Timedelta(hours=SESSION_START[0], minutes=SESSION_START[1]))
+        if not live and not opened:
             paper.record_scan(result)
+        elif not live:
+            log("Paper journal not updated: the session after these prices has already opened.")
         done = {k: v.iloc[:-1] for k, v in frames.items()} if live else frames
-        result["paper"] = paper.summaries(done, costs, etfs=etfs)
+        result["paper"] = paper.summaries(done, costs, etfs=etfs, cash_rate=cash_rate)
     except Exception as e:   # the journal must never break a scan
         log(f"Paper-trading journal problem: {type(e).__name__}: {e}")
         result["paper"] = {}
@@ -540,7 +636,8 @@ SECTOR_INDICES = ["Nifty Bank", "Nifty Financial Services", "Nifty IT", "Nifty P
 
 
 def _index_tables(h: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
-    """Factor-index gallery (real NSE indices) and sector strength, from NSE's index history."""
+    """Factor-index gallery (real NSE indices) and sector strength, from NSE's index history (real closes
+    only, not carried forward: each row ends on its last NSE close, dated by `as_of`)."""
     def stats(s: pd.Series) -> dict | None:
         s = s.dropna()
         if len(s) < 30:
@@ -552,7 +649,7 @@ def _index_tables(h: pd.DataFrame, dates: pd.DatetimeIndex) -> dict:
         chg_1d = _num((s.iloc[-1] / s.iloc[-2] - 1) * 100, 2) if len(s) > 1 else None
         return {"last": _num(s.iloc[-1]), "chg_1d": chg_1d, "ret_1m": ret(21), "ret_3m": ret(63), "ret_6m": ret(126),
                 "ret_1y": ret(252), "cagr": _num(cs.get("cagr_pct"), 1), "max_dd": _num(cs.get("max_dd_pct"), 1),
-                "since": s.index[0].date().isoformat(),
+                "since": s.index[0].date().isoformat(), "as_of": s.index[-1].date().isoformat(),
                 "above_50dma": bool(s.iloc[-1] > s.iloc[-50:].mean()) if len(s) >= 50 else None}
     factors = [{"name": n, **st} for n in FACTOR_INDICES if n in h and (st := stats(h[n]))]
     sectors = [{"name": n, **st} for n in SECTOR_INDICES if n in h and (st := stats(h[n]))]
@@ -641,7 +738,10 @@ def _save(result: dict, curves: dict, p, ew: pd.Series, n500: pd.Series | None, 
     _write_atomic(RESULTS_DIR / f"scan_{started:%Y%m%d_%H%M}.json", lambda t: t.write_text(text, encoding="utf-8"))
     old = sorted(RESULTS_DIR.glob("scan_*.json"))[:-KEEP_SCAN_FILES]
     for o in old:
-        o.unlink(missing_ok=True)
+        try:
+            o.unlink(missing_ok=True)
+        except OSError:   # open in another process (Windows): pruned next time
+            pass
     _write_atomic(LATEST_FILE, lambda t: t.write_text(text, encoding="utf-8"))
 
 

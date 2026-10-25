@@ -159,6 +159,26 @@ def test_factors_have_no_lookahead(frames_factory):
         pd.testing.assert_frame_equal(a, b, check_exact=False, rtol=1e-9)
 
 
+def test_nr7_ignores_gap_filled_bars(frames_factory):
+    """A day with no trade is bridged with a flat copy of the last close (range 0): never a narrow-range day."""
+    fr = frames_factory({"A": list(100 + np.arange(40.0))})    # real ranges widen every day: no real NR7
+    for fld in ("open", "high", "low", "close"):
+        fr[fld].iloc[30, 0] = np.nan
+    f = Factors(panel_from_wide(fr))
+    assert f.p.high["A"].iloc[30] == f.p.low["A"].iloc[30] and not f.p.observed["A"].iloc[30]
+    assert not f.nr7["A"].any()
+
+
+def test_min_price_filter_can_use_prices_as_traded(frames_factory):
+    """On a back-adjusted panel a later 1:10 split shows Rs 300 as Rs 30: the minimum-price test must use the
+    price as it traded that day, or a future split decides whether the stock was tradable before it."""
+    from scanner.strategies import tradable_mask
+    f = Factors(panel_from_wide(frames_factory({"A": [30.0] * 40})))
+    assert not tradable_mask(f, 50, 0)["A"].any()
+    as_traded = tradable_mask(f, 50, 0, price=f.p.close * 10)
+    assert as_traded["A"].iloc[20:].all()
+
+
 # ------------------------------------------------------------------ engine
 def _flat_market(frames_factory, n=300, price=100.0):
     fr = frames_factory({"A": [price] * n, "B": [price] * n})
@@ -214,6 +234,133 @@ def test_rebalance_days_are_month_ends():
     d = pd.bdate_range("2025-01-01", "2025-03-31")
     r = rebalance_days(d, "monthly")
     assert [x.date().isoformat() for x in d[r]] == ["2025-01-31", "2025-02-28"]   # last row never rebalances
+    # ... unless the next session is known (live run) and starts a new period
+    r2 = rebalance_days(d, "monthly", next_session=pd.Timestamp("2025-04-01"))
+    assert [x.date().isoformat() for x in d[r2]] == ["2025-01-31", "2025-02-28", "2025-03-31"]
+    assert not rebalance_days(d[:-1], "monthly", next_session=d[-1])[-1]          # 28 -> 31 Mar: same month
+
+
+def test_weekly_rebalance_uses_iso_years():
+    """29-31 Dec 2025 are ISO week 1 of 2026: no extra mid-week period end on New Year's Eve."""
+    d = pd.bdate_range("2025-12-22", "2026-01-09")
+    assert [x.date().isoformat() for x in d[rebalance_days(d, "weekly")]] == ["2025-12-26", "2026-01-02"]
+
+
+def test_rank_strategy_orders_on_its_review_day_when_the_next_session_is_known(frames_factory):
+    fr = frames_factory({"A": [100.0] * 285, "B": [100.0] * 285})      # 1 Jan 2024 .. Fri 31 Jan 2025
+    p = panel_from_wide(fr)
+    p.index_close = pd.Series(1000.0, index=p.dates)
+    f = Factors(p)
+    score = pd.DataFrame({"A": 2.0, "B": 1.0}, index=p.dates)
+    score.iloc[-1, 1] = 3.0                                             # B overtakes A at the month-end close
+    strat = RankStrategy("r", "r", "", score=lambda _: score, top_n=1, keep_rank=1, use_regime=False)
+    trad = pd.DataFrame(True, index=p.dates, columns=["A", "B"])
+    old = simulate(strat, f, CostModel(), tradable=trad)
+    assert p.dates[-1] == pd.Timestamp("2025-01-31") and old.next_orders == []
+    new = simulate(strat, f, CostModel(), tradable=trad, next_session=pd.Timestamp("2025-02-03"))
+    assert [(o["action"], o["symbol"]) for o in new.next_orders] == [("SELL", "A"), ("BUY", "B")]
+    assert new.equity.equals(old.equity) and len(new.trades) == len(old.trades)   # only tomorrow's orders change
+
+
+def test_no_fills_on_gap_filled_days_or_at_a_locked_circuit(frames_factory):
+    """A buy cannot fill at an upper-circuit lock (one price all day on real volume) or on a day with no
+    trade; a stop cannot be sold at a lower-circuit lock - it fills at the next day's open."""
+    n = 300
+    costs = CostModel(slippage_pct=0.1, illiquid_below_cr=0)
+
+    def bar(fr, i, o, h, lo, c):
+        for fld, v in (("open", o), ("high", h), ("low", lo), ("close", c)):
+            fr[fld].iloc[i, 0] = v
+
+    def run(edit):
+        fr = frames_factory({"A": [100.0] * n})
+        edit(fr)
+        p = panel_from_wide(fr)
+        p.index_close = pd.Series(1000.0, index=p.dates)
+        sig = pd.DataFrame(False, index=p.dates, columns=["A"])
+        sig.iloc[261] = True                                         # signal at close of day 261
+        strat = EventStrategy("t", "t", "", entries=lambda _: sig, stop_pct=8, max_positions=1, use_regime=False)
+        trad = pd.DataFrame(True, index=p.dates, columns=["A"])
+        return simulate(strat, Factors(p), costs, tradable=trad, capital=100_000, warmup=252), p
+
+    res, _ = run(lambda fr: bar(fr, 262, 105.0, 105.0, 105.0, 105.0))     # opens locked at the upper band
+    assert not res.trades and not res.open_positions
+    res, _ = run(lambda fr: bar(fr, 262, np.nan, np.nan, np.nan, np.nan))  # no trade that day (gap-filled)
+    assert not res.trades and not res.open_positions
+
+    def crash(fr):
+        bar(fr, 263, 80.0, 80.0, 80.0, 80.0)                             # locked at the lower band all day
+        bar(fr, 264, 85.0, 86.0, 84.0, 85.0)
+    res, p = run(crash)
+    t = res.trades[0]
+    assert t.entry_date == p.dates[262] and t.reason == "stop-loss" and t.exit_date == p.dates[264]
+    assert t.exit_price == pytest.approx(85 * 0.999)                   # the next day's open, below the stop
+
+
+def test_idle_cash_earns_the_cash_rate_less_the_fund_fee(frames_factory):
+    p = _flat_market(frames_factory)
+    p.index_close = pd.Series(np.linspace(2000, 1000, len(p.dates)), index=p.dates)   # falling Nifty: no buys
+    f = Factors(p)
+    score = pd.DataFrame({"A": 2.0, "B": 1.0}, index=p.dates)
+    strat = RankStrategy("r", "r", "", score=lambda _: score, top_n=1, use_regime=True)
+    trad = pd.DataFrame(True, index=p.dates, columns=["A", "B"])
+    rate = pd.Series(1.0001 ** np.arange(len(p.dates)), index=p.dates)
+    res = simulate(strat, f, CostModel(cash_fee_pct=0.0), tradable=trad, capital=100_000, cash_rate=rate)
+    assert not res.trades
+    assert res.equity.iloc[-1] == pytest.approx(100_000 * 1.0001 ** (len(res.equity) - 1))
+    assert sum(res.cash_income.values()) == pytest.approx(res.equity.iloc[-1] - 100_000)
+    fee = simulate(strat, f, CostModel(cash_fee_pct=1.0), tradable=trad, capital=100_000, cash_rate=rate)
+    assert fee.equity.iloc[-1] < res.equity.iloc[-1]
+    assert simulate(strat, f, CostModel(), tradable=trad, capital=100_000).equity.iloc[-1] == 100_000   # no rate
+
+
+def test_curve_stats_cagr_over_calendar_years_and_sharpe_over_cash():
+    from scanner.engine import _curve_stats
+    idx = pd.bdate_range("2024-01-01", "2026-01-01")
+    rng = np.random.default_rng(5)
+    eq = pd.Series(100 * np.cumprod(1 + rng.normal(0.0006, 0.01, len(idx))), index=idx)
+    years = (idx[-1] - idx[0]).days / 365.25
+    cs = _curve_stats(eq)
+    assert cs["cagr_pct"] == pytest.approx(((eq.iloc[-1] / eq.iloc[0]) ** (1 / years) - 1) * 100)
+    cash = pd.Series(1.0002 ** np.arange(len(idx)), index=idx)
+    rf = cash.pct_change().fillna(0.0)
+    daily = eq.pct_change().dropna()
+    assert _curve_stats(eq, rf)["sharpe"] == pytest.approx((daily.mean() - 0.0002) / daily.std() * np.sqrt(252))
+    assert _curve_stats(eq, rf)["sharpe"] < cs["sharpe"]
+    assert _curve_stats(cash)["sharpe"] is None                       # pure cash: no meaningful Sharpe ratio
+
+
+def test_factor_benchmark_that_starts_later_is_compared_over_its_own_period():
+    """NSE's history of a factor index can start after the strategy (Nifty200 Momentum 30: Aug 2020): its CAGR and
+    after-tax CAGR use its own span, and the strategy's CAGR over that same span is reported next to it."""
+    from scanner.costs import TaxModel
+    from scanner.engine import SimResult, _curve_stats, evaluate
+    idx = pd.bdate_range("2023-01-02", "2025-01-01")
+    eq = pd.Series(100 * 1.0005 ** np.arange(len(idx)), index=idx)
+    res = SimResult("x", eq, eq * 0 + 1, [], [], [], 0)
+    factor = pd.Series(1.0003 ** np.arange(len(idx)), index=idx).where(idx >= pd.Timestamp("2024-01-01"))
+    out = evaluate(res, eq * 0 + 1, tax=TaxModel(), factor_benchmark=factor)
+    fb = out["full"]["factor_benchmark"]
+    assert fb["start"] == "2024-01-01" and "strategy_cagr_same_period_pct" not in out["full"]["benchmark"]
+    assert fb["strategy_cagr_same_period_pct"] == pytest.approx(_curve_stats(eq.loc["2024-01-01":])["cagr_pct"])
+    years = (idx[-1] - pd.Timestamp("2024-01-01")).days / 365.25      # its own span, not the strategy's
+    assert fb["after_tax_cagr_pct"] == pytest.approx(((1 + fb["return_pct"] / 100 * 0.87) ** (1 / years) - 1) * 100)
+    assert out["12m"]["exposure_pct"] == pytest.approx(100.0)          # windows carry exposure (working_status)
+
+
+def test_working_status_needs_money_made_and_recent_trading():
+    from scanner.engine import working_status
+
+    def win(ret, exposure):
+        return {"return_pct": ret, "exposure_pct": exposure, "benchmark": {"return_pct": -5.0},
+                "ew_benchmark": {"return_pct": -4.0}}
+    assert working_status({"full": {"cagr_pct": 12.0}, "12m": win(3.0, 80.0), "6m": win(1.0, 70.0)})[0] == "working"
+    # beat the market recently, but lost money over the whole backtest: never "working"
+    assert working_status({"full": {"cagr_pct": -9.7}, "12m": win(3.0, 80.0), "6m": win(1.0, 70.0)})[0] == "not-working"
+    # 6 months in cash (regime filter): its "result" is the cash yield
+    status, why = working_status({"full": {"cagr_pct": 8.5}, "12m": win(-5.3, 30.0), "6m": win(2.6, 0.0)})
+    assert status == "unknown" and "6m" in why
+    assert working_status({"full": {"cagr_pct": 12.0}, "12m": win(-9.0, 80.0), "6m": win(-6.0, 90.0)})[0] == "not-working"
 
 
 def test_scan_lock_blocks_second_scan():
@@ -259,6 +406,22 @@ def test_after_tax_losses_offset_and_ltcg_exemption():
     assert out.iloc[-1] == pytest.approx(1_000_000 - 20_000 * 0.208)
 
 
+def test_after_tax_taxes_open_gains_and_cash_income_and_adds_back_stt():
+    from scanner.costs import TaxModel
+    from scanner.engine import SimResult, Trade, after_tax_equity
+    idx = pd.bdate_range("2025-04-01", "2025-12-31")
+    eq = pd.Series(1_000_000.0, index=idx)
+    still_held = [{"symbol": "A", "entry_date": "2025-06-02", "entry_price": 100.0, "qty": 1000, "last_price": 150.0}]
+    res = SimResult("x", eq, eq * 0 + 1, [], still_held, [], 0, {2025: 10_000.0})
+    out = after_tax_equity(res, TaxModel())
+    # 50,000 short-term gain still open (taxed as if sold, like the benchmarks) + 10,000 cash income at the slab rate
+    assert out.iloc[-1] == pytest.approx(1_000_000 - 50_000 * 0.208 - 10_000 * 0.312)
+    assert out.iloc[-2] == 1_000_000
+    t = Trade("A", pd.Timestamp("2025-05-01"), 100, pd.Timestamp("2025-06-02"), 110, 1000, 9_500, 9.5, 22, "x")
+    out = after_tax_equity(_result_with([t], eq), TaxModel(), stt_pct=0.1)
+    assert out.iloc[-1] == pytest.approx(1_000_000 - (9_500 + 1000 * 210 * 0.001) * 0.208)   # STT not deductible
+
+
 def test_quarterly_and_semiannual_rebalance():
     d = pd.bdate_range("2025-01-01", "2025-12-31")
     q = [x.date().isoformat() for x in d[rebalance_days(d, "quarterly")]]
@@ -296,6 +459,22 @@ def test_summary_survives_missing_index_data_and_skips_buys_the_backtest_would_s
     assert "AAA x100" in buy_line and "MRF" not in buy_line and "TINY" not in buy_line
     skipped = next(x for x in text.splitlines() if "Skipped" in x)
     assert "MRF" in skipped and "TINY" in skipped and "15,000" in skipped
+
+
+def test_summary_flags_cut_buy_lists_model_sells_and_comparison_only_strategies():
+    from scanner.alerts import format_daily
+    r = _summary_result()
+    s = r["strategies"][0]
+    s["actions"] = [{"action": "BUY", "symbol": f"S{i}", "qty": 10, "price": 2000.0, "amount": 20_000.0}
+                    for i in range(12)] + [{"action": "SELL", "symbol": "OLD", "reason": "dropped from ranking"}]
+    r["holdings"] = [{"symbol": "OLD"}]
+    text = format_daily(r, top_n=10)
+    buy_line = next(x for x in text.splitlines() if "BUY at next open" in x)
+    assert "S9 x10" in buy_line and "S10" not in buy_line and buy_line.endswith("(+2 more on the dashboard)")
+    assert "OLD - you hold it (dropped from ranking)" in text
+    s["status"] = "not-working"                     # as the dashboard: its new buys are comparison only
+    text = format_daily(r, top_n=10)
+    assert "BUY at next open" not in text and "Comparison only" in text and "OLD - you hold it" in text
 
 
 def test_telegram_without_credentials_sends_nothing(monkeypatch):

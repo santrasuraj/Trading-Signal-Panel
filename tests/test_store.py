@@ -256,16 +256,36 @@ def refresh_env(monkeypatch, tmp_path, today: date):
     monkeypatch.setattr(store.events, "trading_holidays", lambda year: set())
 
 
-def test_refresh_applies_a_notice_listed_only_the_day_after(monkeypatch, tmp_path):
+def yahoo_like(px: dict) -> pd.DataFrame:
+    """A Yahoo download from {date: close}."""
+    y = pd.DataFrame({"close": list(px.values())}, index=pd.DatetimeIndex(list(px), name="date"))
+    return y.assign(open=y["close"], high=y["close"] * 1.01, low=y["close"] * 0.99, volume=1e5)
+
+
+def saved_store(meta: dict, frames: dict) -> None:
+    """A store saved by an earlier scan (current repair version)."""
+    st = store.PanelStore()
+    st.meta.update({"repair_version": store.REPAIR_VERSION, **meta})
+    st.save(frames)
+
+
+def _x_world(monkeypatch, tmp_path, ex: date, factor: float, by_day: dict) -> dict:
+    """X trades 1000, 1001, ... on business days from 1 May to 13 Jun 2025; from `ex` on NSE's raw prices are
+    x`factor` (a corporate action). Yahoo's copy ends on 11 Jun. Returns the raw prices."""
     days = list(pd.bdate_range("2025-05-01", "2025-06-13").date)
-    ex, after = date(2025, 6, 12), date(2025, 6, 13)
-    px = {d: 1000.0 + i for i, d in enumerate(days)}
-    px[ex], px[after] = px[ex] / 2, px[after] / 2                   # raw 1:1 bonus on 12 Jun
+    px = {d: (1000.0 + i) * (factor if d >= ex else 1) for i, d in enumerate(days)}
     world = {d: {"X": (px[d], px[d], px[days[i - 1]] if i else px[d])} for i, d in enumerate(days)}
     nse_world(monkeypatch, tmp_path, world)
-    notices(monkeypatch, {after: {("X", ex.isoformat()): ["BONUS 1:1"]}})   # listed only on 13 Jun
+    notices(monkeypatch, by_day)
     y = pd.DataFrame({"close": [px[d] for d in days[:-2]]}, index=pd.DatetimeIndex(days[:-2], name="date"))
     FakeYahoo.data = {"X": y.assign(open=y["close"], high=y["close"] * 1.01, low=y["close"] * 0.99, volume=1e5)}
+    return px
+
+
+def test_refresh_applies_a_notice_listed_only_the_day_after(monkeypatch, tmp_path):
+    # A demerger has no ratio the price alone could reveal: the notice decides, and NSE lists it only on 13 Jun.
+    ex, after = date(2025, 6, 12), date(2025, 6, 13)
+    px = _x_world(monkeypatch, tmp_path, ex, 0.7, {after: {("X", ex.isoformat()): ["DEMERGER"]}})
     log = lambda *_: None                                              # noqa: E731
 
     refresh_env(monkeypatch, tmp_path, ex)                            # evening of the ex-date
@@ -274,10 +294,42 @@ def test_refresh_applies_a_notice_listed_only_the_day_after(monkeypatch, tmp_pat
 
     refresh_env(monkeypatch, tmp_path, after)                         # next evening: the notice appears
     fr, info = store.refresh_store(["X"], 60, log=log)
-    assert [(a["date"], a["factor"]) for a in info["corporate_actions"]] == [(ex.isoformat(), 0.5)]
+    assert [(a["date"], a["factor"]) for a in info["corporate_actions"]] == [
+        (ex.isoformat(), pytest.approx(px[ex] / px[date(2025, 6, 11)], rel=1e-5))]
     c = fr["close"]["X"].dropna()
-    assert (c.pct_change().dropna().abs() < 0.01).all()                # no fake 50% crash left
-    assert store.PanelStore().meta["corporate_actions"][-1]["reason"] == "BONUS 1:1"
+    assert (c.pct_change().dropna().abs() < 0.01).all()                # no fake 30% crash left
+    assert store.PanelStore().meta["corporate_actions"][-1]["reason"] == "DEMERGER"
+
+
+def test_refresh_adjusts_a_split_nse_never_listed(monkeypatch, tmp_path):
+    # SHRIRAMFIN / 360ONE style: a 1:5 split without a notice on the ex-date, added from NSE's raw file. The
+    # clean ratio is applied at once; the notice that turns up the next day then finds nothing left to do.
+    ex, after = date(2025, 6, 12), date(2025, 6, 13)
+    _x_world(monkeypatch, tmp_path, ex, 0.2, {after: {("X", ex.isoformat()): ["FV SPLT FRM RS 10 TO 2"]}})
+    log = lambda *_: None                                              # noqa: E731
+
+    refresh_env(monkeypatch, tmp_path, ex)
+    fr, info = store.refresh_store(["X"], 60, log=log)
+    assert [(a["date"], a["factor"]) for a in info["corporate_actions"]] == [(ex.isoformat(), 0.2)]
+    assert info["corporate_actions"][0]["reason"].startswith("no NSE notice")
+    assert (fr["close"]["X"].dropna().pct_change().dropna().abs() < 0.01).all()   # no fake 80% crash
+
+    refresh_env(monkeypatch, tmp_path, after)
+    fr, info = store.refresh_store(["X"], 60, log=log)
+    assert info["corporate_actions"] == []                            # not applied a second time
+    assert (fr["close"]["X"].dropna().pct_change().dropna().abs() < 0.01).all()
+
+
+def test_scheme_notice_without_a_price_effect_is_left_alone(monkeypatch, tmp_path):
+    days = [date(2025, 6, d) for d in (11, 12, 13)]
+    nse_world(monkeypatch, tmp_path, {days[1]: {"UP": (99, 100, 98), "DEM": (99, 100, 98)},
+                                      days[2]: {"UP": (103, 104, 100), "DEM": (70, 71, 100)}})
+    notices(monkeypatch, {days[2]: {("UP", "2025-06-13"): ["SCHEME OF ARRANGEMENT"],
+                                    ("DEM", "2025-06-13"): ["DEMERGER"]}})
+    fr = ours({"UP": [98, 100, 104], "DEM": [98, 100, 71]}, days)
+    found = store._check_listed_actions(fr, days[2], nse.fetch_day(days[2]))
+    assert [(a["symbol"], a["factor"]) for a in found] == [("DEM", pytest.approx(0.7))]
+    assert fr["close"]["UP"].tolist() == [98, 100, 104]               # a 3% gap up is news, not a scheme's effect
 
 
 def test_old_repair_version_downloads_history_again_once(monkeypatch, tmp_path):
@@ -308,8 +360,93 @@ def test_old_repair_version_downloads_history_again_once(monkeypatch, tmp_path):
     assert fr["close"]["X"].dropna().tolist() == pytest.approx(good["close"].tolist())
 
 
+def test_stored_prices_are_never_overwritten_with_raw_nse_ones(monkeypatch, tmp_path):
+    # X's 1:1 bonus on 10 Jun is already applied to its stored history. Y is new and Yahoo's copy of it ends on
+    # 5 Jun, so NSE's files from 6 Jun on are merged again: they may fill Y's gaps, but X's raw pre-bonus prices
+    # must not come back (the bonus check would then halve X's older history a second time).
+    days = list(pd.bdate_range("2025-05-01", "2025-06-13").date)
+    ex, y_end = date(2025, 6, 10), date(2025, 6, 5)
+    raw = {"X": {d: (1000.0 + i) / (2 if d >= ex else 1) for i, d in enumerate(days)},
+           "Y": {d: 500.0 + i for i, d in enumerate(days)}}
+    nse_world(monkeypatch, tmp_path, {d: {s: (raw[s][d], raw[s][d], raw[s][days[i - 1]] if i else raw[s][d])
+                                          for s in raw} for i, d in enumerate(days)})
+    notices(monkeypatch, {ex: {("X", ex.isoformat()): ["BONUS 1:1"]}})
+    refresh_env(monkeypatch, tmp_path, days[-1])
+    saved_store({"symbols": {"X": {"full_from": "2025-04-01"}}},
+                ours({"X": [(1000.0 + i) / 2 for i in range(len(days) - 1)]}, days[:-1]))   # bonus applied
+    before = store.load_store()["close"]["X"].copy()
+    FakeYahoo.data = {"Y": yahoo_like({d: v for d, v in raw["Y"].items() if d <= y_end})}
+    fr, info = store.refresh_store(["X", "Y"], 60, log=lambda *_: None)
+    assert info["corporate_actions"] == []
+    assert fr["close"]["X"].reindex(before.index).tolist() == pytest.approx(before.tolist())   # not re-adjusted
+    assert fr["close"].at[pd.Timestamp(days[-1]), "X"] == pytest.approx(raw["X"][days[-1]])
+    assert fr["close"]["Y"].dropna().tolist() == pytest.approx(list(raw["Y"].values()))      # gaps filled from NSE
+
+
+def test_symbol_back_in_the_list_is_downloaded_again(monkeypatch, tmp_path):
+    # Y left the list after 20 May and is back (a config switch, an index rebalance): the days NSE's files added
+    # meanwhile covered only the list of the time, so Y is downloaded again instead of keeping a hole for good.
+    days = list(pd.bdate_range("2025-05-01", "2025-06-13").date)
+    px = {d: 100.0 + i for i, d in enumerate(days)}
+    nse_world(monkeypatch, tmp_path, {d: {s: (px[d], px[d], px[days[i - 1]] if i else px[d]) for s in ("X", "Y")}
+                                      for i, d in enumerate(days)})
+    notices(monkeypatch, {})
+    refresh_env(monkeypatch, tmp_path, days[-1])
+    gone = date(2025, 5, 20)
+    saved_store({"active": ["X"], "symbols": {s: {"full_from": "2025-04-01"} for s in ("X", "Y")}},
+                ours({"X": [px[d] for d in days[:-1]], "Y": [px[d] if d <= gone else np.nan for d in days[:-1]]},
+                     days[:-1]))
+    FakeYahoo.data = {"Y": yahoo_like({d: px[d] for d in days[:-1]})}
+    fr, _ = store.refresh_store(["X", "Y"], 60, log=lambda *_: None)
+    assert fr["close"]["Y"].dropna().tolist() == pytest.approx([px[d] for d in days])
+    assert store.PanelStore().meta["active"][-2:] == ["X", "Y"]
+
+
+def test_day_filled_from_yahoo_is_removed_when_nse_calls_it_a_holiday(monkeypatch, tmp_path):
+    days = list(pd.bdate_range("2025-05-01", "2025-06-13").date)
+    hol = date(2025, 6, 11)                      # NSE was unreachable and Yahoo listed the day: it was a holiday
+    px = {d: 100.0 + i for i, d in enumerate(days)}
+    nse_world(monkeypatch, tmp_path, {d: {"X": (px[d], px[d], px[d])} for d in days if d != hol}, holidays={hol})
+    notices(monkeypatch, {})
+    refresh_env(monkeypatch, tmp_path, days[-1])
+    saved_store({"symbols": {"X": {"full_from": "2025-04-01"}}, "provisional": [hol.isoformat()]},
+                ours({"X": [px[d] for d in days[:-1]]}, days[:-1]))
+    fr, _ = store.refresh_store(["X"], 60, log=lambda *_: None)
+    assert pd.Timestamp(hol) not in fr["close"].index and pd.Timestamp(days[-1]) in fr["close"].index
+    meta = store.PanelStore().meta
+    assert meta["provisional"] == [] and hol.isoformat() in meta["holidays"]
+
+
+class FakeFyers:
+    def __init__(self, quotes: dict):
+        self.quotes = quotes
+
+    def live_rows(self, symbols):
+        return {s: q for s, q in self.quotes.items() if s in symbols}
+
+
+def test_live_candle_skips_untraded_quotes_and_tops_up_from_yahoo(monkeypatch, tmp_path):
+    days = list(pd.bdate_range("2025-05-01", "2025-06-13").date)
+    today, px = days[-1], {d: 100.0 + i for i, d in enumerate(days)}
+    nse_world(monkeypatch, tmp_path, {d: {s: (px[d], px[d], px[d]) for s in "XYZ"} for d in days[:-1]})
+    notices(monkeypatch, {})
+    refresh_env(monkeypatch, tmp_path, today)
+    monkeypatch.setattr(store, "ist_now", lambda: datetime(2025, 6, 13, 11, 0, tzinfo=IST))   # during the session
+    saved_store({"symbols": {s: {"full_from": "2025-04-01"} for s in "XYZ"}},
+                ours({s: [px[d] for d in days[:-1]] for s in "XYZ"}, days[:-1]))
+    FakeYahoo.data = {"Z": yahoo_like(px)}                             # Z is missing from FYERS' reply
+    fyers = FakeFyers({"X": (today, {"open": 0, "high": 0, "low": 0, "close": 140.0, "volume": 0}),   # no trade yet
+                       "Y": (today, {"open": 141.0, "high": None, "low": 0, "close": 142.0, "volume": 5e4})})
+    fr, info = store.refresh_store(list("XYZ"), 60, fyers=fyers, log=lambda *_: None)
+    t = pd.Timestamp(today)
+    assert np.isnan(fr["close"].at[t, "X"])                            # left on its last close
+    assert (fr["open"].at[t, "Y"], fr["high"].at[t, "Y"], fr["low"].at[t, "Y"]) == (141.0, 142.0, 141.0)
+    assert fr["close"].at[t, "Z"] == pytest.approx(px[today])
+    assert info["live_count"] == 2 and info["live_source"].startswith("Fyers (real-time) + Yahoo for 1")
+
+
 # ------------------------------------------------------------------ 4. daily scan keeps refresh info
-def test_daily_result_keeps_refresh_info_when_a_strategy_has_actions(monkeypatch, frames_factory):
+def test_daily_result_keeps_refresh_info_when_a_strategy_has_actions(monkeypatch, frames_factory, tmp_path):
     from scanner.engine import SimResult
     n = 300
     fr = frames_factory({"A": np.linspace(100, 200, n), "B": np.linspace(100, 150, n), "NIFTY50": [1000.0] * n})
@@ -325,6 +462,11 @@ def test_daily_result_keeps_refresh_info_when_a_strategy_has_actions(monkeypatch
         columns=["symbol", "qty", "buy_price", "buy_date", "stop_loss_pct", "target_pct"]))
     monkeypatch.setattr(daily, "refresh_store", lambda *a, **k: (fr, dict(info)))
     monkeypatch.setattr(daily, "upcoming_results", lambda syms, day, days=14: ({"A": "2099-01-01"}, "note"))
+    # no NSE downloads and no writes to the real data/results caches from a test
+    monkeypatch.setattr(daily, "results_history", lambda start, end, log=print: {})
+    monkeypatch.setattr(daily, "index_history", lambda days, log=print: pd.DataFrame())
+    monkeypatch.setattr(daily, "TIMING_CACHE", tmp_path / "timing_cache.json")
+    monkeypatch.setattr(daily, "REJECTED_CACHE", tmp_path / "rejected_cache.json")
     eq = pd.Series(np.linspace(1, 2, n), index=fr["close"].index)
     res = SimResult("momentum", eq, eq * 0 + 1, [], [], [{"action": "BUY", "symbol": "A", "reason": "top"}], 0)
     monkeypatch.setattr(daily, "simulate", lambda *a, **k: res)

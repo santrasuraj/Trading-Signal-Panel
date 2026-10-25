@@ -12,6 +12,7 @@ import { PriceChart, type PriceChartHandle } from '@/components/charts/PriceChar
 import { RangeBar52w } from '@/components/charts/svg'
 import { ErrorState, Skeleton, SkeletonChart } from '@/components/feedback'
 import { Money, Pct, Price } from '@/components/num'
+import { SmartMoneyPanel } from '@/components/SmartMoneyPanel'
 import { Button, Card, IconButton, KV, MenuCheck, Popover, Segmented, Switch } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { date, daysBetween, num, qty, todayIST } from '@/lib/format'
@@ -91,6 +92,7 @@ function SidePanel({ symbol }: { symbol: string }) {
           </div>
         ) : <div className="text-xs text-muted">None. <Link to="/portfolio" className="link">Add holdings</Link></div>}
       </div>
+      {stock && <div className="p-4"><SmartMoneyPanel symbol={s.symbol} /></div>}
       {s.corporate_actions.length > 0 && (
         <div className="p-4">
           <div className="eyebrow mb-2">Corporate actions</div>

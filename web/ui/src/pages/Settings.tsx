@@ -31,6 +31,7 @@ function ReadOnlyNote() {
 
 function DataSection() {
   const q = useDataHealth()
+  const { data: st } = useStatus()                 // before the early returns: hooks run on every render
   const [level, setLevel] = useState<'all' | 'error'>('all')
   const log = useScanLog(level)
   const logRef = useRef<HTMLPreElement>(null)
@@ -48,14 +49,14 @@ function DataSection() {
           <KV k="Trading days · symbols" v={`${num(h.store.trading_days, 0)} · ${h.store.symbols}`} />
           <KV k="Fields" v={h.store.fields.join(', ')} />
           <KV k="Size" v={`${num(h.store.size_mb, 1)} MB`} />
-          <KV k="NSE status" v={h.nse.status ?? 'official close'} />
+          <KV k="NSE status" v={h.nse.status ?? '—'} />
           <KV k="NSE complete up to" v={date(h.nse.complete_upto)} />
         </Card>
         <Card title="Sources">
           <KV k="Universe" v={`${h.universe.note} · ${h.universe.size}`} />
           <KV k="Index history" v={h.index_history ? `${date(h.index_history.last_date)} · ${h.index_history.columns} indices` : 'missing'} />
           <KV k="Results calendar" v={h.results_calendar.cached_on ? `cached ${date(h.results_calendar.cached_on)}` : 'missing'} title={h.results_calendar.note ?? undefined} />
-          <KV k="Point-in-time universe" v={h.pit?.built ? 'built' : 'not used yet'} title={h.pit?.note} />
+          <KV k="Point-in-time universe" v={h.pit?.built ? (st?.latest?.backtest_universe === 'point_in_time' ? 'built · in use' : 'built · not used') : 'not built'} title={h.pit?.note} />
           <KV k="Paper journal" v={h.journal.exists ? `${h.journal.days ?? 0} day${(h.journal.days ?? 0) === 1 ? '' : 's'} · ${num(h.journal.size_kb, 0)} KB` : 'not started'} />
           <KV k="Saved scans" v={`${h.scans.count}${h.scans.newest ? ` · newest ${dateTimeIST(h.scans.newest)}` : ''}`} />
           {h.scans.mixed_producers && <p className="mt-2 text-2xs text-warn">Saved scans come from different scanner versions (the data folder is shared with other checkouts); comparisons only use fields present in both.</p>}
@@ -169,7 +170,7 @@ function ScanSection() {
             {scan.state === 'failed' && <Button size="sm" onClick={() => nav('/settings/data')}>Open the log</Button>}
           </div>
         )}
-        <p className="mt-4 text-2xs text-faint">Scheduled scans run at 15:40 and 19:15 on weekdays (setup_schedule.ps1). Scheduled and manual scans share one lock, so this page follows whichever is running.</p>
+        <p className="mt-4 text-2xs text-faint">Scheduled scans run at 08:30, 15:40 and 19:15 on weekdays (setup_schedule.ps1). Scheduled and manual scans share one lock, so this page follows whichever is running.</p>
       </Card>
       {/* the count that is really listed (the server keeps up to 60; "Last 60" over a "1-20 of 30" pager read wrong) */}
       <Card title={hist.data ? `Recent scans (${hist.data.scans.length})` : 'Recent scans'} subtitle="Up to the last 60 kept" flush>
@@ -274,7 +275,7 @@ function CostsSection() {
     <ConfigSection>
       {(c) => (
         <>
-          <Card title="Cost of one order" subtitle="Delivery (CNC) charges as the backtest applies them">
+          <Card title="Cost of one order" subtitle={`Delivery (CNC) charges; slippage shown for liquid stocks (the backtest uses ${num(c.costs.slippage_illiquid_pct, 2)}% per side under ₹${num(c.costs.illiquid_below_cr, 0)} cr/day)`}>
             <label className="mb-4 flex items-center gap-3 text-[13px]">
               <span className="text-muted">Order value ₹</span>
               <input type="number" min={1} step={1000} value={raw} onChange={(e) => setRaw(e.target.value)} aria-invalid={!valid} className={cn('input num w-36 text-right', !valid && 'border-loss/70')} />

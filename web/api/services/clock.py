@@ -20,6 +20,8 @@ def _holiday_map(year: int) -> tuple[dict[str, str], bool]:
     out: dict[str, str] = {}
     for y in (year - 1, year, year + 1):
         out.update(data.holidays(y) or {})
+    for d in data.store_meta().get("holidays") or []:     # remembered by the store (as store.trading_today uses)
+        out.setdefault(str(d)[:10], "Holiday")
     return out, data.holidays(year) is not None
 
 

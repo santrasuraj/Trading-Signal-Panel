@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import errors
 from .errors import ApiException, SafeJSONResponse
-from .routers import lookup, market, ops, overview, portfolio, strategies, system
+from .routers import lookup, market, ops, overview, portfolio, smart_money, strategies, system
 from .security import SecurityMiddleware
 
 DIST = Path(__file__).resolve().parent.parent / "ui" / "dist"
@@ -61,7 +61,7 @@ def create_app(warm: bool = True) -> FastAPI:
                   openapi_url="/api/openapi.json", default_response_class=SafeJSONResponse, lifespan=lifespan)
     app.add_middleware(SecurityMiddleware)
     errors.install(app)
-    for r in (system, overview, strategies, lookup, portfolio, market, ops):
+    for r in (system, overview, strategies, lookup, portfolio, market, ops, smart_money):
         app.include_router(r.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)

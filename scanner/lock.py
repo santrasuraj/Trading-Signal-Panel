@@ -72,8 +72,11 @@ def scan_lock(by: str):
         raise ScanBusy(f"A scan is already running (started {info.get('started', '?')} by {info.get('by', '?')}). "
                        "Wait for it to finish.")
     try:
-        INFO_FILE.write_text(json.dumps({"started": ist_now().strftime("%H:%M:%S"), "by": by, "pid": os.getpid()}),
-                             encoding="utf-8")
+        try:
+            INFO_FILE.write_text(json.dumps({"started": ist_now().strftime("%H:%M:%S"), "by": by, "pid": os.getpid()}),
+                                 encoding="utf-8")
+        except OSError:   # only shown to a blocked scan ("started ? by ?"): never fail the scan over it
+            pass
         yield
     finally:
         _unlock(fh)

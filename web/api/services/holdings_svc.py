@@ -179,7 +179,12 @@ def rows(lt: dict | None) -> tuple[list[dict], bool]:
     meta = data.symbol_meta()
     models = _in_models(lt)
     inputs = _inputs()
-    scanned = {h.get("symbol"): h for h in lt.get("holdings") or []}
+    # daily.py writes one health row per holdings.csv row, in file order: lot k of a symbol is compared with
+    # lot k of the scan (comparing every lot with the last one would flag the earlier lots as changed forever)
+    lots: dict[str, list[dict]] = {}
+    for h in lt.get("holdings") or []:
+        lots.setdefault(h.get("symbol"), []).append(h)
+    scanned = {k: v[0] for k, v in lots.items()}
     renamed = _renamed(scanned)
     dsl, dtg = _defaults()
     soon: dict[str, str] | None = None
@@ -187,7 +192,8 @@ def rows(lt: dict | None) -> tuple[list[dict], bool]:
     for i in inputs:
         sym = renamed.get(i["symbol"], i["symbol"])     # holdings.csv may still say e.g. TATAMOTORS
         sl, tg = _pcts(i, dsl, dtg)
-        h = scanned.get(sym)
+        q = lots.get(sym)
+        h = q.pop(0) if q else None
         if h is None:
             if soon is None:
                 from . import results as results_svc
@@ -335,7 +341,11 @@ def from_fyers(raw: list[dict]) -> list[dict]:
         sym = str(h.get("symbol", "")).split(":")[-1].rsplit("-", 1)[0].strip().upper()
         if not sym:
             continue
-        q, cp = num(h.get("quantity")), num(h.get("costPrice"))
+        # FYERS v3: quantity is the start-of-day quantity, remainingQuantity what is left after today's sales
+        rq = num(h.get("remainingQuantity"))
+        q, cp = (rq if rq is not None else num(h.get("quantity"))), num(h.get("costPrice"))
+        if q == 0:
+            continue                # fully sold today
         out.append({"symbol": sym, "qty": q if q is None or not math.isnan(q) else None, "buy_price": cp,
                     "buy_date": None, "stop_loss_pct": None, "target_pct": None})
     return out

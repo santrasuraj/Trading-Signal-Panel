@@ -19,11 +19,15 @@ from .engine import EventStrategy, RankStrategy
 from .panel import Factors
 
 
-def tradable_mask(f: Factors, min_price: float, min_turnover_cr: float) -> pd.DataFrame:
+def tradable_mask(f: Factors, min_price: float, min_turnover_cr: float,
+                  price: pd.DataFrame | None = None) -> pd.DataFrame:
     """Instruments liquid enough to trade: price and average daily traded value filters - and, on a
     point-in-time panel, only that day's universe members (ETFs are funds, never universe members:
-    they stay tradable for the ETF strategies)."""
-    ok = (f.p.close >= min_price) & (f.turnover_avg20_cr >= min_turnover_cr) & f.p.close.notna()
+    they stay tradable for the ETF strategies). `price`: the prices the minimum-price test uses
+    (default f.p.close). On a panel back-adjusted for corporate actions, pass the prices as they traded
+    that day, so a later split or bonus cannot decide whether a stock was tradable before it."""
+    px = f.p.close if price is None else price.reindex(index=f.p.dates, columns=f.p.close.columns)
+    ok = (px >= min_price) & (f.turnover_avg20_cr >= min_turnover_cr) & f.p.close.notna()
     return ok if f.p.universe is None else ok & (f.p.universe | f.etf_mask)
 
 
@@ -50,12 +54,25 @@ def _only(f: Factors, names) -> pd.DataFrame:
     return pd.DataFrame([row] * len(f.p.dates), index=f.p.dates, columns=f.p.close.columns)
 
 
+def _alpha_lowvol_universe(f: Factors, size: int) -> pd.DataFrame:
+    """The `size` most traded stocks that day with a year of returns (alpha and volatility both known)."""
+    return (f.turnover_rank <= size) & f.vol_ann.notna() & f.alpha_1y.notna()
+
+
+def _alpha_lowvol_score(f: Factors, size: int) -> pd.DataFrame:
+    """NSE Alpha Low-Volatility style score: the average of the percentile ranks of 1-year alpha (high is good)
+    and 1-year volatility (low is good), each taken inside that day's universe."""
+    u = _alpha_lowvol_universe(f, size)
+    return (0.5 * f.alpha_1y.where(u).rank(axis=1, pct=True)
+            + 0.5 * (-f.vol_ann).where(u).rank(axis=1, pct=True))
+
+
 # Strategies that are off unless config.yaml turns them on: tested here and rejected. They are still
 # re-tested (cached) by the daily scan so the platform can show the evidence, but never produce orders.
 REJECTED_REASONS = {
     "rsi2_pullback": "Lost money after realistic Indian delivery costs (short-term reversal works mostly in illiquid stocks).",
     "near_high": "Never beat the average stock in our tests.",
-    "legacy_rules": "The old v1 rules lost about 12%/yr in testing; kept only as a 'what not to do' baseline.",
+    "legacy_rules": "The old v1 rules lost money in every re-test; kept only as a 'what not to do' baseline.",
 }
 
 
@@ -92,8 +109,9 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             description=("Holds the 15 strongest stocks by risk-adjusted 6- and 12-month return (the method behind "
                          "NSE's Nifty200 Momentum 30 index), reviewed monthly; a holding is kept while it stays in "
                          "the top 30. Momentum is the most consistently documented stock-selection effect worldwide "
-                         "and in India (IIM-A factor data: ~10%/yr long-short since 1994). Crashes hard in sharp "
-                         "reversals (2008-09)."),
+                         "and in India (IIM-A's Indian factor data). Crashes hard in sharp reversals (2008-09, "
+                         "2020, 2024-25); the live Nifty200 Momentum 30 index (since Aug 2020) is the honest guide to "
+                         "what to expect."),
             score=lambda f: f.momentum,
             eligible=(lambda f: f.p.close > f.sma200) if need_trend else None,
             top_n=int(opt(k, "top_n", 15)), keep_rank=int(opt(k, "keep_rank", 30)),
@@ -134,12 +152,13 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
 
     k = "golden_cross"
     if enabled(k):
+        gc_rs = float(opt(k, "rs_min", 60))
         out.append(EventStrategy(
             key=k, name="Golden cross trend", horizon="longterm", evidence="WEAK",
             description=("Buys when the 50-day average crosses above the 200-day average (a 'golden cross') in a "
                          "strong stock, and holds until the 'death cross' (50-day back below 200-day). Classic "
                          "long-term trend following; slow, many small losses, a few big winners."),
-            entries=lambda f: f.golden_cross & (f.rs_rating >= float(opt(k, "rs_min", 60))),
+            entries=lambda f: f.golden_cross & (f.rs_rating >= gc_rs),
             priority=lambda f: f.rs_rating,
             exit_signal=lambda f: f.sma50 < f.sma200,
             stop_pct=float(opt(k, "stop_pct", 15)), max_positions=int(opt(k, "max_positions", 15)),
@@ -175,6 +194,81 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             universe="etfs",
         ))
 
+    # Added 25 Oct 2026 - new, untested here until the next scan: judge each one by its own backtest.
+    # (Every value a rule needs is read into its own variable first: a lambda that called opt(k, ...) would see
+    # the LAST strategy's k when the backtest runs it.)
+    k = "momentum_n200"
+    if enabled(k):
+        n200_size = int(opt(k, "universe_size", 200))
+        out.append(RankStrategy(
+            key=k, name="NSE momentum replica (Nifty200 Momentum 30 rules)", horizon="longterm", evidence="STRONG",
+            benchmark="Nifty200 Momentum 30",
+            description=("New: judge it by its backtest. A check on 'Momentum leaders' and on the engine: NSE's own "
+                         "Nifty200 Momentum 30 rules - the 30 best by the same momentum score among the 200 most "
+                         "traded stocks (our stand-in for the Nifty 200) with a year of history, reviewed only in "
+                         "June and December, kept while in the top 60, no trend or market filter, equal weight (NSE "
+                         "weights by score x market cap). If it lands far above the live index over the same years, "
+                         "the backtest is flattering."),
+            score=lambda f: f.momentum,
+            eligible=lambda f: (f.turnover_rank <= n200_size) & f.vol_ann.notna() & f.ret_12m.notna(),
+            top_n=int(opt(k, "top_n", 30)), keep_rank=int(opt(k, "keep_rank", 60)),
+            rebalance=opt(k, "rebalance", "semiannual"), use_regime=opt(k, "use_regime", False),
+            regime_action=opt(k, "regime_action", "hold"), stop_pct=opt(k, "stop_pct", None),
+        ))
+
+    k = "residual_momentum"
+    if enabled(k):
+        rm_trend = opt(k, "require_uptrend", True)
+        out.append(RankStrategy(
+            key=k, name="Residual momentum (beta-adjusted)", horizon="longterm", evidence="MODERATE",
+            benchmark="Nifty Alpha 50",
+            description=("New: judge it by its backtest. Momentum with the market's share taken out: ranks stocks by "
+                         "their 12-1 month return not explained by Nifty 50 (CAPM alpha / residual volatility), with "
+                         "the same portfolio rules as 'Momentum leaders'. Blitz, Huij & Martens (2011) found about "
+                         "twice the risk-adjusted profit of plain momentum abroad; no Indian test found, and it lags "
+                         "rallies led by high-beta stocks."),
+            score=lambda f: f.resid_mom,
+            eligible=(lambda f: f.p.close > f.sma200) if rm_trend else None,
+            top_n=int(opt(k, "top_n", 15)), keep_rank=int(opt(k, "keep_rank", 30)),
+            rebalance=opt(k, "rebalance", "monthly"), use_regime=opt(k, "use_regime", True),
+            regime_action=opt(k, "regime_action", "hold"), stop_pct=opt(k, "stop_pct", None),
+        ))
+
+    k = "alpha_low_vol"
+    if enabled(k):
+        alv_size = int(opt(k, "universe_size", 150))
+        out.append(RankStrategy(
+            key=k, name="Alpha + low volatility", horizon="longterm", evidence="MODERATE",
+            benchmark="NIFTY Alpha Low-Volatility 30",
+            description=(f"New: judge it by its backtest. NSE's Alpha Low-Volatility 30 method on the {alv_size} most "
+                         "traded stocks: equal parts 1-year alpha against Nifty 50 (high) and 1-year volatility "
+                         "(low), the best 30, reviewed in June and December, kept while in the top 60. Joshipura "
+                         "(2020, top 500 NSE stocks 2004-18): the low-risk effect is independent of size, value and "
+                         "momentum, and adding momentum improved it. It mainly cuts drawdowns and lags strong rallies."),
+            score=lambda f: _alpha_lowvol_score(f, alv_size),
+            eligible=lambda f: _alpha_lowvol_universe(f, alv_size),
+            top_n=int(opt(k, "top_n", 30)), keep_rank=int(opt(k, "keep_rank", 60)),
+            rebalance=opt(k, "rebalance", "semiannual"), use_regime=opt(k, "use_regime", False),
+            stop_pct=opt(k, "stop_pct", None),
+        ))
+
+    k = "etf_trend"
+    if enabled(k):
+        trend_etfs = list(opt(k, "etfs", ["NIFTYBEES", "JUNIORBEES", "GOLDBEES", "MON100"]))
+        n_etfs = max(1, len(trend_etfs))
+        out.append(RankStrategy(
+            key=k, name="ETF trend basket (Faber)", horizon="longterm", evidence="MODERATE", benchmark="Nifty 50",
+            description=(f"New: judge it by its backtest. An equal 1/{n_etfs} slice in each of "
+                         f"{', '.join(trend_etfs)}, held only while that ETF is above its 200-day average (checked "
+                         "monthly; otherwise the slice waits in cash). Faber's asset-class trend rule (2007): returns "
+                         "close to buy-and-hold with much smaller drawdowns, but whipsaws in sideways years; gold and "
+                         "Nasdaq gains are asset-class bets, not stock-picking skill."),
+            score=lambda f: f.ret_12m,
+            eligible=lambda f: _only(f, trend_etfs) & (f.p.close > f.sma200),
+            top_n=n_etfs, keep_rank=n_etfs, rebalance=opt(k, "rebalance", "monthly"), use_regime=False,
+            universe="etfs",
+        ))
+
     # ============================================================== SWING (days to weeks)
     k = "trend_breakout"
     if enabled(k):
@@ -194,15 +288,17 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
 
     k = "vcp_breakout"
     if enabled(k):
+        vcp_rs, vcp_box = float(opt(k, "rs_min", 80)), float(opt(k, "max_box_pct", 12))
+        vcp_vol = float(opt(k, "min_vol_ratio", 1.5))
         out.append(EventStrategy(
             key=k, name="Volatility contraction (VCP) breakout", horizon="swing", evidence="WEAK",
             description=("A leader near its 52-week high goes quiet - a tight 15-day box (under 12% high-to-low) "
                          "with shrinking volatility - then breaks out of the box on 1.5x volume (Minervini's VCP / "
                          "Darvas box). Stop 7%, exit on a close below the 50-day average."),
-            entries=lambda f: (_trend_template(f, float(opt(k, "rs_min", 80)))
-                               & (f.pct_from_52w_high >= -10) & (f.range_15_pct.shift(1) <= float(opt(k, "max_box_pct", 12)))
+            entries=lambda f: (_trend_template(f, vcp_rs)
+                               & (f.pct_from_52w_high >= -10) & (f.range_15_pct.shift(1) <= vcp_box)
                                & (f.atr_contraction.shift(1) <= 0.85) & (f.p.close > f.high_15_prev)
-                               & (f.vol_ratio >= float(opt(k, "min_vol_ratio", 1.5)))),
+                               & (f.vol_ratio >= vcp_vol)),
             priority=lambda f: f.rs_rating, exit_signal=lambda f: f.p.close < f.sma50,
             stop_pct=float(opt(k, "stop_pct", 7)), max_positions=int(opt(k, "max_positions", 10)),
             use_regime=opt(k, "use_regime", True),
@@ -223,12 +319,13 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
 
     k = "pullback_leaders"
     if enabled(k):
+        pb_rs = float(opt(k, "rs_min", 80))
         out.append(EventStrategy(
             key=k, name="Pullback in leaders (21-EMA)", horizon="swing", evidence="WEAK",
             description=("Buys a relative-strength leader (RS 80+) in a stage-2 uptrend when it pulls back to its "
                          "21-day EMA and bounces (low touches the EMA, close above it). Exit: close below the "
                          "50-day average or after 20 days; 7% stop. 'Buy the dip in strong stocks'."),
-            entries=lambda f: (_stage2(f) & (f.rs_rating >= float(opt(k, "rs_min", 80)))
+            entries=lambda f: (_stage2(f) & (f.rs_rating >= pb_rs)
                                & (f.p.low <= f.ema21) & (f.p.close > f.ema21) & (f.rsi14 < 65)),
             priority=lambda f: f.rs_rating, exit_signal=lambda f: f.p.close < f.sma50,
             stop_pct=float(opt(k, "stop_pct", 7)), max_hold=int(opt(k, "max_hold", 20)),
@@ -237,14 +334,15 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
 
     k = "earnings_gap"
     if enabled(k):
+        eg_gap, eg_vol = float(opt(k, "min_gap_pct", 4)), float(opt(k, "min_vol_ratio", 3))
         out.append(EventStrategy(
             key=k, name="Earnings gap-up (PEAD)", horizon="swing", evidence="MODERATE",
             description=("Post-earnings-announcement drift: after quarterly results, a stock that gaps up 4%+ on 3x "
                          "volume and holds the gap tends to keep rising for weeks (Ball & Brown 1968; mixed but "
                          "positive Indian evidence). Results dates from NSE's event calendar. 8% stop, 40-day "
                          "holding limit, exit on a close below the 50-day average."),
-            entries=lambda f: (f.results_window & (f.gap_pct >= float(opt(k, "min_gap_pct", 4)))
-                               & (f.p.close >= f.p.open) & (f.vol_ratio >= float(opt(k, "min_vol_ratio", 3)))
+            entries=lambda f: (f.results_window & (f.gap_pct >= eg_gap)
+                               & (f.p.close >= f.p.open) & (f.vol_ratio >= eg_vol)
                                & (f.p.close > f.sma200)),
             priority=lambda f: f.gap_pct, exit_signal=lambda f: f.p.close < f.sma50,
             stop_pct=float(opt(k, "stop_pct", 8)), max_hold=int(opt(k, "max_hold", 40)),
@@ -308,7 +406,7 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
         out.append(EventStrategy(
             key=k, name="Old textbook rules (baseline)", horizon="swing", evidence="EXPERIMENTAL",
             description=("The v1 rules (50-DMA volume breakout, 52-week-high breakout) with 5% stop / 10% target / "
-                         "15 days. Kept only as a 'what not to do' comparison (-12%/yr in testing)."),
+                         "15 days. Kept only as a 'what not to do' comparison (lost money in every re-test)."),
             entries=lambda f: (((f.p.close > f.sma50) & (f.p.close.shift(1) <= f.sma50.shift(1))
                                 & (f.vol_ratio >= 2) & (f.p.close > f.sma200))
                                | ((f.p.close > f.high_52w_prev) & (f.vol_ratio >= 1.5))),

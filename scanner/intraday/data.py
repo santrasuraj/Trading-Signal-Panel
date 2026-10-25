@@ -631,8 +631,8 @@ class TickBarBuilder:
     def on_tick(self, msg: dict):
         sym, ltp = msg.get("symbol"), msg.get("ltp")
         t = msg.get("last_traded_time") or msg.get("exch_feed_time")
-        if not sym or ltp is None or not t:
-            return
+        if not sym or ltp is None or not t or float(ltp) <= 0:
+            return      # a zero / negative price is a bad tick, never a bar low
         ts = pd.Timestamp(int(t), unit="s") + pd.Timedelta(hours=5, minutes=30)
         if ts.date() != datetime.now(IST).date():
             return      # subscription snapshot of a stock not traded yet today: yesterday's last trade

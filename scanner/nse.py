@@ -15,7 +15,9 @@ adjusted (corporate.py supplies the factor).
 from __future__ import annotations
 
 import io
+import os
 import threading
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -159,11 +161,36 @@ def _old(day: date) -> bool:
     return (date.today() - day).days > 2
 
 
+def _write_parquet(df: pd.DataFrame, path) -> None:
+    """Write via a temporary file and swap it in, so a killed process never leaves half a file. If the swap
+    keeps failing (another process has the file open), the file is simply not cached this time."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    df.to_parquet(tmp)
+    for i in range(10):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.2 * (i + 1))
+    _unlink(tmp)
+
+
+def _unlink(*paths) -> None:
+    for p in paths:
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def fetch_day(day: date, use_cache: bool = True) -> DayFile:
     tag = day.strftime("%Y%m%d")
     sp, ip = NSE_DIR / f"stocks_{tag}.parquet", NSE_DIR / f"indices_{tag}.parquet"
     if use_cache and sp.exists() and (ip.exists() or _old(day)):
-        return DayFile(day, "ok", pd.read_parquet(sp), pd.read_parquet(ip) if ip.exists() else None)
+        try:
+            return DayFile(day, "ok", pd.read_parquet(sp), pd.read_parquet(ip) if ip.exists() else None)
+        except Exception:   # a damaged cache file (killed process, full disk): download the day again
+            _unlink(sp, ip)
     d = day.strftime("%d%m%Y")
     sources = []
     if day >= FULL_FROM:
@@ -202,10 +229,10 @@ def fetch_day(day: date, use_cache: bool = True) -> DayFile:
         # Nifty series has no holes; older days are cached with the stock file alone.
         if not _old(day):
             return DayFile(day, "missing", stocks, None)
-        stocks.to_parquet(sp)
+        _write_parquet(stocks, sp)
         return DayFile(day, "ok", stocks, None)
-    stocks.to_parquet(sp)
-    indices.to_parquet(ip)
+    _write_parquet(indices, ip)     # the index file first: whoever finds the stock file finds its index file too
+    _write_parquet(stocks, sp)
     return DayFile(day, "ok", stocks, indices)
 
 
@@ -216,7 +243,10 @@ def _index_closes(day: date) -> pd.Series | None:
     """Closing values of every NSE index on `day` (None if no file / holiday)."""
     cached = NSE_DIR / f"indices_{day:%Y%m%d}.parquet"
     if cached.exists():
-        return pd.read_parquet(cached)["close"]
+        try:
+            return pd.read_parquet(cached)["close"]
+        except Exception:   # a damaged cache file: download it again
+            _unlink(cached)
     code, text = _get(INDEX_URL.format(d=day.strftime("%d%m%Y")))
     if code != 200:
         return None
@@ -225,7 +255,7 @@ def _index_closes(day: date) -> pd.Series | None:
     except Exception:
         return None
     if (date.today() - day).days > 2:
-        df.to_parquet(cached)
+        _write_parquet(df, cached)
     return df["close"]
 
 

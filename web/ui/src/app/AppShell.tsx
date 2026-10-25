@@ -114,7 +114,7 @@ function GlobalBanners() {
 const HELP: [string, string][] = [
   ['Ctrl K', 'Command palette: stocks, strategies, pages, actions'],
   ['g o / g s / g t', 'Go to Overview / Signals / Strategies'],
-  ['g c / g p / g m', 'Go to Chart / Portfolio / Market'],
+  ['g c / g p / g m / g b', 'Go to Chart / Portfolio / Market / Smart money'],
   ['g r / g a / g i / g ,', 'Go to Screener / Paper / Intraday / Settings'],
   ['/', "Focus the current table's filter"],
   ['j / k, Enter', 'Move the table selection; open it'],
@@ -164,12 +164,16 @@ function Shortcuts() {
 
 function FirstRunNotice() {
   const [seen, setSeen] = useLocalStorage('qd.disclaimerSeen', false)
+  const { data: st } = useStatus()                 // before the early return: hooks run on every render
   if (seen) return null
+  const pit = st?.latest?.backtest_universe === 'point_in_time'
   return (
     <Dialog open onClose={() => setSeen(true)} title="Before you start" footer={<Button variant="primary" onClick={() => setSeen(true)}>I understand</Button>}>
       <div className="space-y-3 text-[13px] text-muted">
         <p className="text-fg">Quant Desk is a personal research tool, not investment advice.</p>
-        <p>Every number is a <span className="text-fg">backtest</span> on past NSE data with realistic Indian costs, unless it says <span className="text-fg">paper</span> or <span className="text-fg">live</span>. Backtests use today's index list, so they include survivorship bias: stocks that dropped out of the index are missing and results look better than reality.</p>
+        <p>Every number is a <span className="text-fg">backtest</span> on past NSE data with realistic Indian costs, unless it says <span className="text-fg">paper</span> or <span className="text-fg">live</span>. {pit
+          ? "Backtests use a point-in-time universe (each past day's 500 most-traded NSE stocks, including companies that later dropped out), so they are free of survivorship bias; live results are still usually worse than backtests."
+          : "Backtests use today's index list, so they include survivorship bias: stocks that dropped out of the index are missing and results look better than reality."}</p>
         <p>Orders shown are what a model portfolio would do at the next open. You decide and place every trade yourself in the Fyers app.</p>
       </div>
     </Dialog>

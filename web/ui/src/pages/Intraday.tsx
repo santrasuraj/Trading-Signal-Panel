@@ -71,7 +71,7 @@ function StrategyPanel({ s, sessions }: { s: IntradayStrategy; sessions: number 
 }
 
 /** Re-run button + background run state; toasts when a run this page watched finishes. */
-function RerunControl({ run, label = 'Re-run backtest' }: { run: IntradayRun | undefined; label?: string }) {
+function RerunControl({ run, label = 'Re-run backtest', source }: { run: IntradayRun | undefined; label?: string; source?: string }) {
   const start = useIntradayRun()
   const toast = useToast()
   const qc = useQueryClient()
@@ -102,7 +102,7 @@ function RerunControl({ run, label = 'Re-run backtest' }: { run: IntradayRun | u
         loading={start.isPending}
         disabled={!!run?.running}
         onClick={go}
-        title="Refresh the 5-minute bars (Yahoo) and re-test every intraday strategy in the background. Takes a few minutes."
+        title={`Refresh the 5-minute bars (FYERS when logged in, else Yahoo; last run: ${source || '—'}) and re-test every intraday strategy in the background. Takes a few minutes.`}
       >
         {label}
       </Button>
@@ -144,7 +144,7 @@ export default function Intraday() {
       <PageHeader
         title="Intraday research"
         subtitle={d?.generated_at ? <>Backtest of {dateTimeIST(d.generated_at)}{d.elapsed_s != null ? ` (${duration(d.elapsed_s)})` : ''} · research only, no orders</> : 'Research only: no intraday orders are produced'}
-        right={d ? <RerunControl run={d.run} label={d.available ? 'Re-run backtest' : 'Run backtest'} /> : undefined}
+        right={d ? <RerunControl run={d.run} label={d.available ? 'Re-run backtest' : 'Run backtest'} source={d.data?.source} /> : undefined}
       />
       {q.error && !d ? <div className="card"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div> : !d ? <div className="card"><SkeletonRows /></div> : (
         <div className="space-y-3">
@@ -203,7 +203,7 @@ export default function Intraday() {
                 <DataTable id="intraday" data={strategies} columns={cols} rowKey={(s) => s.key} onRowClick={(s) => setSel(s.key === sel ? null : s.key)} rowClassName={(s) => cn(s.key === sel && 'bg-accent/[0.06]')} keyboard />
               </Card>
               {selected && <StrategyPanel s={selected} sessions={d.data?.sessions ?? null} />}
-              <Card title="Today's setups (simulated)" subtitle={<>What each strategy would have done {setupDay ? <>on <span className="num">{date(setupDay)}</span></> : 'in the latest session'} on delayed 5-minute data. Not orders: intraday strategies are research only.</>} flush>
+              <Card title="Today's setups (simulated)" subtitle={<>What each strategy would have done {setupDay ? <>on <span className="num">{date(setupDay)}</span></> : 'in the latest session'} on {d.data?.source === 'yahoo' ? 'delayed (~15 min) ' : ''}5-minute data{d.data?.source ? ` (${d.data.source})` : ''}. Not orders: intraday strategies are research only.</>} flush>
                 <DataTable id="intraday.today" data={today} columns={tradeCols(true)} rowKey={(r) => `${r.strategy_key}${r.symbol}${r.entry_time}`} empty={<EmptyState compact title={marketClosed ? 'Market closed today' : 'No setups today'}>{marketClosed ? `No session today (${clk?.holiday_name ?? (clk?.session === 'weekend' ? 'weekend' : 'holiday')}): setups appear on the next trading day.` : clk?.session === 'pre_open' ? 'The market has not opened yet.' : 'No strategy has triggered so far today.'}</EmptyState>} />
               </Card>
             </>

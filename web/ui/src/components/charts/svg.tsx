@@ -176,17 +176,18 @@ export function ReturnHistogram({ bins, height = 120 }: { bins: { bin_lo: number
           return (
             <rect key={b.bin_lo} x={i * W + W * 0.12} width={W * 0.76} y={height - h} height={h}
               className={b.bin_lo >= 0 ? 'fill-profit/70' : 'fill-loss/70'}>
-              <title>{`${b.bin_lo}% to ${b.bin_hi}%: ${b.count} trades`}</title>
+              {/* the API clips returns into [-30, 100): the end bins hold every trade beyond them */}
+              <title>{`${b.bin_hi >= 100 ? `${b.bin_lo}% or more` : b.bin_lo <= -30 ? `${b.bin_hi}% or less` : `${b.bin_lo}% to ${b.bin_hi}%`}: ${b.count} trades`}</title>
             </rect>
           )
         })}
         {zero > 0 && <line x1={zero * W} x2={zero * W} y1={0} y2={height} className="stroke-line-strong" strokeWidth={0.3} strokeDasharray="1 1" />}
       </svg>
       <div className="num relative mt-1 flex h-4 justify-between text-2xs text-faint">
-        <span>{pct(lo, { dp: 0 })}</span>
+        <span>{lo <= -30 ? `≤ ${pct(lo, { dp: 0 })}` : pct(lo, { dp: 0 })}</span>
         {/* under the zero line, only when zero is inside the axis (an all-loss filter has no 0%) */}
         {zero > 0 && zero * W > 8 && zero * W < 92 && <span className="absolute -translate-x-1/2" style={{ left: `${zero * W}%` }}>0%</span>}
-        <span>{pct(hi, { dp: 0 })}</span>
+        <span>{hi >= 100 ? `${pct(hi, { dp: 0 })}+` : pct(hi, { dp: 0 })}</span>
       </div>
     </div>
   )
@@ -214,7 +215,7 @@ export function EvidenceMeter({ excess, expected, haircut, noise }: { excess: nu
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-2xs text-muted">
         <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-profit" />Paper vs Nifty 500</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-accent" />Backtest expected</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-muted" />After bias haircut</span>
+        {ok(haircut) && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-muted" />After bias haircut</span>}
         <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded-sm bg-accent/15" />Noise band</span>
       </div>
     </div>
