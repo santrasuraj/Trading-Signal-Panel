@@ -80,15 +80,16 @@ foreach ($j in $jobs) {
 }
 
 #   09:20-15:05 every 5 minutes: live intraday signals, only from strategies whose backtest shows a real edge
-#   after costs (no FYERS history calls; when none is proven it only writes that note and exits)
+#   after costs (no FYERS history calls; when none is proven it only writes that note), and Big money live:
+#   unusual volume for the time of day, large trades, order-book pressure and block deals (footprints.py)
 $sigSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 4) -MultipleInstances IgnoreNew
-$action = New-ScheduledTaskAction -Execute $pythonw -Argument "intraday_sync.py --signals" -WorkingDirectory $root
+$action = New-ScheduledTaskAction -Execute $pythonw -Argument "intraday_sync.py --signals --footprints" -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At "09:20"
 $trigger.Repetition = (New-ScheduledTaskTrigger -Once -At "09:20" -RepetitionInterval (New-TimeSpan -Minutes 5) `
     -RepetitionDuration (New-TimeSpan -Hours 5 -Minutes 45)).Repetition
 Register-ScheduledTask -TaskName "NSE Scanner intraday signals" -Action $action -Trigger $trigger -Settings $sigSettings `
-    -Force -Description "NSE stock scanner - live intraday signals from proven strategies" | Out-Null
+    -Force -Description "NSE stock scanner - live intraday signals (proven strategies) and Big money live" | Out-Null
 Write-Host "Created task: NSE Scanner intraday signals (weekdays 09:20-15:05, every 5 minutes)"
 Write-Host "`nDone. Log in to Fyers (1_login.bat) each trading day before 09:14 for real-time prices."
 Write-Host "Without login the scans still run (Yahoo for live prices, NSE official data in the evening)."

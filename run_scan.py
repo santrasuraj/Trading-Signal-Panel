@@ -134,7 +134,7 @@ def main() -> int:
     owner[0] = True
     # The scan itself is finished and saved: tell the dashboard now, before the slower smart-money download.
     write_status(state="done", progress=1.0, message=f"Done in {result['elapsed_s']}s")
-    if not args.no_update:
+    if not args.no_update and not args.live_only:   # disclosures change once a day: not every 30-minute live scan
         # Smart money (docs/smart_money_spec.md): NSE bulk/block deals, insider trades, FII/DII and shareholding.
         # Own lock and per-source error handling: it never fails the finished scan.
         try:

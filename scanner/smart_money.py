@@ -4,7 +4,11 @@ promoters, well-known investors) bought, sold or left, from NSE's official discl
   nsearchives.nseindia.com/content/equities/bulk.csv, block.csv   the latest day's bulk / block deals (no cookies)
   www.nseindia.com/api/historicalOR/bulk-block-short-deals         deal history, one calendar month per call
   www.nseindia.com/api/snapshot-capital-market-largedeal           today's deals, only when both files fail
-  www.nseindia.com/api/corporates-pit                              insider trades (SEBI PIT Reg 7(2))
+  www.nseindia.com/api/corporates-pit                              insider trades (SEBI PIT Reg 7(2)); NSE stopped
+                                                                   filling it in May 2026, so months it leaves (nearly)
+                                                                   empty come from:
+  www.nseindia.com/api/corporates-pit-gg                           the insider filings list (one month per call), whose
+                                                                   XBRL files (nsearchives) hold the trades
   www.nseindia.com/api/fiidiiTradeReact                            FII/DII cash-market net, market-wide (Rs crore)
   www.nseindia.com/api/corporate-share-holdings-master             quarterly shareholding filings, whose XBRL files
                                                                    (nsearchives) give category % and 1%+ holders
@@ -62,16 +66,18 @@ MAX_SYMBOL_LOOKUPS = 80      # per-symbol shareholding lookups per refresh
 RECHECK_DAYS = 7             # failed XBRL / per-symbol lookups are retried after this many days
 PAST_MONTH_GRACE_DAYS = 7    # a month whose last day is older than this is final (never re-fetched)
 XBRL_WORKERS = 4
+MAX_PIT_XBRL = 600            # insider-filing XBRL files read per refresh (~3 min); the rest next time
+HOLDERS_PARSER = 2            # bump when parse_shp_xbrl's holders change: cached files are parsed again
 XBRL_MAX_FAILURES = 10       # consecutive download failures that stop the XBRL step for this refresh
 LOCK_GRACE_S = 2.0           # refresh_running() probes hold the lock for an instant: don't mistake one for a refresh
 QUARTER_ENDS = {(3, 31), (6, 30), (9, 30), (12, 31)}
 
-CATEGORIES = ("fii", "mf", "insurance", "bank", "pension", "promoter", "famous", "broker", "other")
+CATEGORIES = ("fii", "mf", "insurance", "bank", "pension", "aif", "promoter", "famous", "broker", "other")
 CATEGORY_LABELS = {"fii": "FII/FPI", "mf": "Mutual fund", "insurance": "Insurance", "bank": "Bank/NBFC",
-                   "pension": "Pension/sovereign", "promoter": "Promoter", "famous": "Well-known investor",
-                   "broker": "Broker/prop", "other": "Other"}
+                   "pension": "Pension/sovereign", "aif": "AIF/PE/VC fund", "promoter": "Promoter",
+                   "famous": "Well-known investor", "broker": "Broker/prop", "other": "Other"}
 INSTITUTIONS = frozenset({"fii", "mf", "insurance", "bank", "pension"})
-BIG_MONEY = INSTITUTIONS | {"promoter", "famous"}
+BIG_MONEY = INSTITUTIONS | {"aif", "promoter", "famous"}
 ODI_LABEL = "ODI/arbitrage desk - often hedging clients, weak signal"
 LIKELY_PROMOTER = "Likely promoter (name match)"
 INSIDER_LABEL = "Company insider (director/KMP)"
@@ -95,6 +101,9 @@ INSIDER_EXTRA_COLS: dict[str, str] = {
     "id": "object", "role": "object", "category": "object", "sub_label": "object", "investor": "object",
     "avg_price": "float64", "change_pts": "float64", "is_market": "bool", "fully_exited": "bool",
     "delay_days": "float64"}
+PIT_FILING_COLS: dict[str, str] = {   # corporates-pit-gg: one insider filing, its XBRL file and whether it is read
+    "app_id": "object", "symbol": "object", "company": "object", "broadcast": "object", "submission": "object",
+    "prev_app_id": "object", "xml": "object", "status": "object", "tries": "int64", "last_try": "object"}
 FLOW_COLS: dict[str, str] = {
     "date": "object", "fii_buy_cr": "float64", "fii_sell_cr": "float64", "fii_net_cr": "float64",
     "dii_buy_cr": "float64", "dii_sell_cr": "float64", "dii_net_cr": "float64"}
@@ -150,7 +159,8 @@ def files(folder: Path | None = None) -> dict[str, Path]:
     f = Path(folder or SM_DIR)
     return {"deals": f / "deals.parquet", "insider": f / "insider.parquet", "flows": f / "flows.parquet",
             "holdings": f / "holdings.parquet", "holders": f / "holders.parquet",
-            "filings": f / "shp_filings.parquet", "state": f / "state.json", "unmatched": f / "unmatched_names.json"}
+            "filings": f / "shp_filings.parquet", "pit_filings": f / "pit_filings.parquet", "state": f / "state.json",
+            "unmatched": f / "unmatched_names.json"}
 
 
 def _replace(tmp: Path, path: Path) -> None:
@@ -681,7 +691,7 @@ AMC_BRANDS = ("SBI", "HDFC", "ICICI PRUDENTIAL", "NIPPON INDIA", "NIPPON LIFE IN
               "OLD BRIDGE", "BAJAJ FINSERV", "JIO BLACKROCK", "QUANTUM", "SHRIRAM", "TAURUS", "NJ",
               "BANK OF INDIA", "UNIFI", "ANGEL ONE")
 FOREIGN_MARKERS = ("PLC", "LLC", "LP", "L P", "PTE", "SICAV", "UCITS", "OEIC", "FCP", "S A", "SA", "AG", "GMBH",
-                   "NV", "BV", "INC", "MASTER FUND", "OFFSHORE", "MAURITIUS", "SINGAPORE", "CAYMAN", "LUXEMBOURG",
+                   "NV", "BV", "N V", "B V", "S A R L", "SARL", "AKTIENGESELLSCHAFT", "KG", "INC", "MASTER FUND", "OFFSHORE", "MAURITIUS", "SINGAPORE", "CAYMAN", "LUXEMBOURG",
                    "IRELAND", "HONG KONG", "DIFC", "DUBAI", "EMERGING MARKETS", "FOREIGN PORTFOLIO")
 INSURANCE_WORDS = ("INSURANCE", "ASSURANCE", "REINSURANCE")
 INSURANCE_BRANDS = ("HDFC LIFE", "SBI LIFE", "ICICI PRUDENTIAL LIFE", "ICICI LOMBARD", "TATA AIA", "MAX LIFE",
@@ -692,14 +702,16 @@ PENSION_WORDS = ("PENSION", "PROVIDENT FUND", "EMPLOYEES PROVIDENT", "NPS TRUST"
                  "RETIREMENT SYSTEM", "PUBLIC EMPLOYEES", "TEACHERS", "INVESTMENT AUTHORITY", "MONETARY AUTHORITY",
                  "SOVEREIGN", "GOVERNMENT OF", "PRESIDENT OF INDIA", "GIC PRIVATE", "TEMASEK",
                  "PUBLIC INVESTMENT FUND", "NORGES BANK", "CANADA PENSION PLAN", "CPP INVESTMENT",
-                 "CAISSE DE DEPOT", "ONTARIO TEACHERS")
+                 "CAISSE DE DEPOT", "ONTARIO TEACHERS", "RETIREMENT TRUST", "RETIREMENT FUND", "RETIREMENT PLAN",
+                 "EMPLOYEES RETIREMENT", "ABU DHABI INVESTMENT")
 PROP_FIRMS = ("GRAVITON RESEARCH CAPITAL", "HRTI", "QE SECURITIES", "JUNOMONETA FINSOL", "NK SECURITIES RESEARCH",
               "IRAGE BROKING", "ALPHAGREP", "TOWER RESEARCH", "SILVERLEAF CAPITAL", "MICROCURVES TRADING",
               "MATHISYS ADVISORS", "QUADEYE", "ESTEE ADVISORS", "SHARE INDIA SECURITIES", "PACE STOCK BROKING",
               "DOLAT CAPITAL", "RAJASTHAN GLOBAL SECURITIES", "JUMP TRADING", "CITADEL SECURITIES",
               "BNP PARIBAS ARBITRAGE")
 BROKER_WORDS = ("ARBITRAGE", "STOCK BROKING", "BROKING", "SHARE BROKERS", "STOCK BROKERS", "COMMODITIES", "FINSOL",
-                "RESEARCH LLP", "TRADING LLP", "CAPITAL MARKETS LLP")
+                "RESEARCH LLP", "TRADING LLP", "CAPITAL MARKETS", "CAPITAL MARKET", "TRADETECH", "QUANTCAP",
+                "INTERMEDIARIES", "MARKET MAKER", "STOCKS PRIVATE", "SECURITIES LLP")
 ODI_PHRASES = ("ODI", "SOCIETE GENERALE", "BOFA SECURITIES EUROPE", "CITIGROUP GLOBAL MARKETS MAURITIUS",
                "MORGAN STANLEY ASIA SINGAPORE", "GOLDMAN SACHS SINGAPORE PTE", "MERRILL LYNCH MARKETS SINGAPORE",
                "NOMURA SINGAPORE")
@@ -710,15 +722,24 @@ FII_BRANDS = ("VANGUARD", "BLACKROCK", "ISHARES", "FIDELITY", "GOLDMAN SACHS", "
               "MACQUARIE", "SOCIETE GENERALE", "BNP PARIBAS", "HSBC", "ABRDN", "ABERDEEN", "NORTHERN TRUST",
               "STATE STREET", "WISDOMTREE", "SCHRODER", "INVESCO", "T ROWE", "CAPITAL GROUP", "SMALLCAP WORLD",
               "GOVERNMENT PENSION", "NALANDA", "AMANSA", "ELARA INDIA OPPORTUNITIES", "COPTHALL MAURITIUS", "FPI",
-              "INDIA FUND")
+              "INDIA FUND", "GQG PARTNERS", "COLLECTIVE INVESTMENT TRUST", "EQUITY CIT")
 AIF_WORDS = ("AIF", "ALTERNATIVE INVESTMENT", "ALTERNATE INVESTMENT", "CATEGORY III", "OPPORTUNITIES FUND",
-             "PORTFOLIO MANAGEMENT", "ABAKKUS", "CARNELIAN", "MARCELLUS", "SINGULARITY", "NEO", "3P INDIA", "ASK")
+             "PORTFOLIO MANAGEMENT", "ABAKKUS", "CARNELIAN", "MARCELLUS", "SINGULARITY", "NEO", "3P INDIA", "ASK",
+             # private equity / venture capital (SEBI AIF Cat I/II, or their offshore vehicles)
+             "PRIVATE EQUITY", "VENTURE CAPITAL", "VENTURE FUND", "PEAK XV", "SEQUOIA CAPITAL", "ELEVATION CAPITAL",
+             "SAIF PARTNERS", "ACCEL", "TIGER GLOBAL", "SOFTBANK", "WARBURG PINCUS", "KKR", "BLACKSTONE",
+             "BAIN CAPITAL", "BC INVESTMENTS", "CARLYLE", "TPG", "ADVENT INTERNATIONAL", "CHRYSCAPITAL", "MULTIPLES",
+             "KEDAARA", "PREMJI INVEST", "LIGHTSPEED", "NEXUS VENTURE", "INVESTCORP", "GENERAL ATLANTIC",
+             "EVERSTONE", "TRUE NORTH", "A91", "STEADVIEW", "ICICI VENTURE", "SBI VENTURES", "KOTAK REAL ESTATE",
+             "KOTAK ALTERNATE", "IIFL SPECIAL OPPORTUNITIES", "360 ONE SPECIAL OPPORTUNITIES")
 COMPANY_WORDS = ("LIMITED", "LLP", "PRIVATE", "ENTERPRISES", "INDUSTRIES", "VENTURES", "HOLDINGS")
 TRUST_WORDS = ("HUF", "TRUST", "FOUNDATION")
 CORPORATE_TOKENS = frozenset(COMPANY_WORDS + TRUST_WORDS + (
     "COMPANY", "CORPORATION", "FUND", "FUNDS", "CAPITAL", "INVESTMENT", "INVESTMENTS", "SECURITIES", "ADVISORS",
     "ADVISERS", "MANAGEMENT", "PARTNERS", "GROUP", "ASSOCIATES", "FINANCE", "FINANCIAL", "TRADING", "EXPORTS"))
 PROMOTER_HINTS = ("HOLDINGS", "INVESTMENTS", "FAMILY TRUST", "ENTERPRISES", "VENTURES")
+NOT_PROMOTER_WORDS = ("ASSET MANAGEMENT", "MUTUAL", "FUND", "FUNDS", "INSURANCE", "ASSURANCE", "BANK", "SECURITIES",
+                      "BROKING", "CAPITAL MARKETS", "TRUSTEE")
 COMPANY_STOPWORDS = frozenset({"THE", "SHREE", "SHRI", "SRI", "NEW", "INDIA", "INDIAN", "NATIONAL", "GLOBAL",
                                "INTERNATIONAL", "UNITED", "GENERAL", "ASIAN", "BHARAT", "HINDUSTAN"})
 
@@ -743,9 +764,13 @@ def classify(name: object, *, promoters: set[str] | None = None, company: str | 
     if promoters and (s in promoters or parent_key(name) in promoters):
         return Label("promoter", None, None)
     word = _company_word(company)
-    if word and _has(s, word) and _any(s, PROMOTER_HINTS):
-        return Label("promoter", LIKELY_PROMOTER, None)
-    return _classify_name(s, bool(round_trip))
+    base = _classify_name(s, bool(round_trip))
+    if word and _has(s, word) and not _any(s, NOT_PROMOTER_WORDS):
+        corporate = (base.category == "other" and base.sub_label == "Company") or (
+            base.category == "fii" and base.sub_label is None and not _any(s, FII_BRANDS))   # a foreign parent
+        if _any(s, PROMOTER_HINTS) or corporate:
+            return Label("promoter", LIKELY_PROMOTER, None)
+    return base
 
 
 @functools.lru_cache(maxsize=65536)
@@ -776,8 +801,8 @@ def _classify_name(s: str, round_trip: bool) -> Label:
         return Label("bank", None, None)
     if _any(s, FOREIGN_MARKERS) or _any(s, FII_BRANDS):               # 8) foreign investor
         return Label("fii", None, None)
-    if _any(s, AIF_WORDS):                                            # 9) other, with a sub-label
-        return Label("other", "AIF/PMS fund", None)
+    if _any(s, AIF_WORDS):                                            # 9) AIF / PMS / PE / VC fund
+        return Label("aif", None, None)
     if _any(s, COMPANY_WORDS):
         return Label("other", "Company", None)
     if _any(s, TRUST_WORDS):
@@ -800,6 +825,8 @@ def _holder_label(holder, group, member) -> Label:
         return Label("fii", None, None)
     if "sovereign" in m or "providentfund" in m or "pensionfund" in m:
         return Label("pension", None, None)
+    if "alternativeinvestment" in m:
+        return Label("aif", None, None)
     if "bank" in m:
         return Label("bank", None, None)
     return classify(holder)   # finds well-known investors listed under "Individuals" or "Bodies corporate"
@@ -992,6 +1019,60 @@ def parse_pit(payload) -> pd.DataFrame:
     return _dedupe_insider(_frame(rows, INSIDER_COLS))
 
 
+def parse_pit_listing(payload) -> pd.DataFrame:
+    """corporates-pit-gg -> PIT_FILING_COLS (status 'pending'): the filings only, the trades are in each XBRL."""
+    rows = []
+    for r in _records(payload):
+        app, sym, xml = _text(r.get("appId")), _text(r.get("symbol")), _text(r.get("xmlFileName"))
+        if not app or not sym or not xml:
+            continue
+        rows.append({"app_id": app, "symbol": sym.upper(), "company": _text(r.get("companyName")),
+                     "broadcast": _iso_dt(r.get("broadcastDateTime")), "submission": _text(r.get("typeOfSubmission")),
+                     "prev_app_id": _text(r.get("prevAppId")), "xml": xml, "status": "pending", "tries": 0,
+                     "last_try": None})
+    return _frame(rows, PIT_FILING_COLS)
+
+
+def parse_pit_xbrl(data: bytes, filing: dict) -> pd.DataFrame:
+    """One insider filing's XBRL (in-bse-co, one context per disclosure) -> INSIDER_COLS rows. Percentages are
+    fractions in the file (0.1394 = 13.94%). Raises ValueError when the file is not an insider filing."""
+    root = ET.fromstring(data)
+    facts: dict[str, dict[str, str]] = {}
+    for el in root.iter():
+        if isinstance(el.tag, str) and el.get("contextRef"):
+            facts.setdefault(el.get("contextRef"), {}).setdefault(_local(el.tag), (el.text or "").strip())
+    main = next((f for f in facts.values() if "Symbol" in f or "NameOfTheCompany" in f), {})
+    if not main and not any("NameOfThePerson" in f for f in facts.values()):
+        raise ValueError("not an insider-trading filing")
+
+    def pct(f: dict, key: str) -> float:
+        v = _to_num(f.get(key))
+        return round(v * 100, 4) if _finite(v) else np.nan
+    broadcast = _text(filing.get("broadcast"))
+    rows = []
+    for f in facts.values():
+        person, qty = _text(f.get("NameOfThePerson")), _to_num(f.get("SecuritiesAcquiredOrDisposedNumberOfSecurity"))
+        if not person or not qty > 0:
+            continue                                   # derivatives carry no share quantity
+        txn, mode = _text(f.get("SecuritiesAcquiredOrDisposedTransactionType")), _text(f.get("ModeOfAcquisitionOrDisposal"))
+        intimated = _iso(f.get("DateOfIntimationToCompany"))
+        rows.append({
+            "symbol": str(filing.get("symbol") or main.get("Symbol") or "").upper(),
+            "company": _text(filing.get("company")) or _text(main.get("NameOfTheCompany")), "person": person,
+            "person_key": normalise_name(person), "person_category": _text(f.get("CategoryOfPerson")),
+            "sec_type": _text(f.get("TypeOfInstrument")), "txn": txn, "side": _pit_side(txn, mode), "mode": mode,
+            "mode_kind": _mode_kind(mode), "qty": qty, "value": _to_num(f.get("SecuritiesAcquiredOrDisposedValueOfSecurity")),
+            "before_shares": _to_num(f.get("SecuritiesHeldPriorToAcquisitionOrDisposalNumberOfSecurity")),
+            "before_pct": pct(f, "SecuritiesHeldPriorToAcquisitionOrDisposalPercentageOfShareholding"),
+            "after_shares": _to_num(f.get("SecuritiesHeldPostAcquistionOrDisposalNumberOfSecurity")),
+            "after_pct": pct(f, "SecuritiesHeldPostAcquistionOrDisposalPercentageOfShareholding"),
+            "trade_from": _iso(f.get("DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyFromDate")),
+            "trade_to": _iso(f.get("DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyToDate")),
+            "intimated": intimated, "disclosed": broadcast[:10] if broadcast else intimated, "disclosed_at": broadcast,
+            "exchange": _text(f.get("ExchangeOnWhichTheTradeWasExecuted")), "xbrl": _text(filing.get("xml"))})
+    return _frame(rows, INSIDER_COLS)
+
+
 def _dedupe_insider(df: pd.DataFrame) -> pd.DataFrame:
     df = _conform(df, INSIDER_COLS)
     if df.empty:
@@ -1064,6 +1145,13 @@ SHP_LABEL_NAMES = {"CLEARING MEMBERS", "CLEARING MEMBER", "BODIES CORPORATE", "B
                    "DIRECTORS AND THEIR RELATIVES", "ESOP TRUST", "FIRMS", "PARTNERSHIP FIRMS",
                    "QUALIFIED INSTITUTIONAL BUYER", "SUSPENSE ACCOUNT", "EMPLOYEE TRUSTS"}
 _SKIP_HOLDER_PARTS = ("personsactinginconcert", "personsinconcert", "significantbeneficial", "unclaimed")
+_NOT_PROMOTER_PARTS = ("nonpromoter", "relativesofpromoters", "governmentispromoter")
+PROMOTER_HOLDER_AXES = frozenset(a.lower() for a in (   # the shareholding pattern's Table II (lower case)
+    "DetailsSharesHeldByIndividualsOrHUFAxis", "DetailsOfSharesHeldByCentralGovernmentOrStateGovernmentsAxis",
+    "DetailsOfSharesHeldByIndianFinancialInstitutionsOrBanksAxis", "DetailsOfSharesHeldByOthersIndianShareholdersAxis",
+    "DetailsOfSharesHeldByNonResidentIndividualsOrForeignIndividualsAxis",
+    "DetailsOfSharesHeldByOtherForeignShareholdersAxis", "DetailsOfSharesHeldByForeignInstitutionsAxis",
+    "DetailsOfSharesHeldByForeignGovernmentAxis", "DetailsOfSharesHeldByForeignPortfolioInvestorPromoterAxis"))
 _INSTITUTION_FIELDS = ("dii_pct", "fii_pct", "mf_pct", "insurance_pct", "banks_pct", "pension_pct", "aif_pct")
 
 
@@ -1122,6 +1210,11 @@ def parse_shp_xbrl(data: bytes) -> tuple[dict, list[dict]]:
         ref = el.get("contextRef")
         if ref:
             facts.setdefault(ref, {}).setdefault(name, (el.text or "").strip())
+    # A named holder is split over two contexts with the same typed member: 'D_<id>' (a duration: name, PAN) and
+    # '<id>' (an instant: shares, %). Join them, or every holder loses either its name or its stake.
+    for cid in [c for c in contexts if c.startswith("D_") and c[2:] in contexts]:
+        facts[cid[2:]] = {**facts.get(cid, {}), **facts.get(cid[2:], {})}
+        contexts.pop(cid)
 
     cat_pct: dict[str, float] = {}
     cat_shares: dict[str, float] = {}
@@ -1175,8 +1268,15 @@ def parse_shp_xbrl(data: bytes) -> tuple[dict, list[dict]]:
         parts = [a.lower() for a, _ in explicit] + [m.lower() for _, m in explicit] + [a.lower() for a, _ in typed]
         if any(bad in p for p in parts for bad in _SKIP_HOLDER_PARTS):
             continue   # persons acting in concert / beneficial owners / unclaimed shares repeat other holders
-        # "NonPromoterNonPublic" (employee trusts, DR custodians) also contains "promoter": it is not the promoter group
-        group = "promoter" if any("promoter" in p and "nonpromoter" not in p for p in parts) else "public"
+        # Table II (promoter and promoter group) has its own holder axes, none of them named "promoter"; public axes
+        # like "relatives of promoters other than the promoter group" are not the promoter group. Checked against
+        # each file's own promoter total (285 of 287 files with a promoter match to 1 point).
+        # An explicit promoter-group member (older layouts) counts too; "NonPromoterNonPublic" (employee trusts, DR
+        # custodians) and "relatives of promoters" / "government is promoter" do not.
+        explicit_promoter = any("promoter" in x and not any(n in x for n in _NOT_PROMOTER_PARTS)
+                                for d, m in explicit for x in (d.lower(), m.lower()))
+        group = ("promoter" if explicit_promoter or any(a.lower() in PROMOTER_HOLDER_AXES for a, _ in typed)
+                 else "public")
         member = explicit[0][1] if explicit else typed[0][0]
         pct = _pct_of(f)
         pct = round(pct * scale, 4) if not math.isnan(pct) else np.nan
@@ -1263,7 +1363,8 @@ def load_holders(folder: Path | None = None) -> pd.DataFrame:
 
 def _default_state() -> dict:
     return {"version": 1, "last_run": {}, "sources": {}, "errors": [], "deals_months_done": {"bulk": [], "block": []},
-            "insider_months_done": [], "shp_months_done": [], "shp_failed": {}, "shp_symbol_checked": {}}
+            "insider_months_done": [], "pit_gg_months_done": [], "shp_months_done": [], "shp_failed": {},
+            "shp_symbol_checked": {}}
 
 
 def load_state(folder: Path | None = None) -> dict:
@@ -1308,11 +1409,12 @@ def _safe_log(log: Callable[[str], None]) -> Callable[[str], None]:
 
 
 def refresh(days: int = 365, log: Callable[[str], None] = print, symbols: list[str] | None = None, *,
-            holdings_quarters: int = 2, max_xbrl: int = 300, folder: Path | None = None,
-            today: date | None = None) -> dict:
+            holdings_quarters: int = 2, max_xbrl: int = 300, max_pit_xbrl: int = MAX_PIT_XBRL,
+            folder: Path | None = None, today: date | None = None) -> dict:
     """Download what is new from NSE into the cache: deals and insider trades of the last `days` (past months
     once), today's FII/DII figures, and the newest `holdings_quarters` shareholding filings of `symbols` (default:
-    the cached scan universe + your holdings; at most `max_xbrl` files per run, the rest next time). Never raises
+    the cached scan universe + your holdings; at most `max_xbrl` files per run, the rest next time; insider filings
+    from corporates-pit-gg: at most `max_pit_xbrl` XBRL files per run). Never raises
     for network or data problems: returns {"ok", "started_at", "finished_at", "elapsed_s", "sources", "errors"}."""
     t0, started, say = time.monotonic(), _now(), _safe_log(log)
     folder = Path(folder or SM_DIR)
@@ -1338,7 +1440,7 @@ def refresh(days: int = 365, log: Callable[[str], None] = print, symbols: list[s
         return _report(started, t0, busy, ["Another smart-money refresh is already running."])
     try:
         (folder / "xbrl").mkdir(exist_ok=True)
-        return _run(folder, days, say, symbols, holdings_quarters, max_xbrl, today, started, t0)
+        return _run(folder, days, say, symbols, holdings_quarters, max_xbrl, today, started, t0, max_pit_xbrl)
     except Exception as e:   # outside the per-step guards (disk trouble): still a report, never a crash
         msg = f"{type(e).__name__}: {e}"[:300]
         return _report(started, t0, {n: _source("failed", msg) for n in SOURCE_NAMES}, [msg])
@@ -1348,13 +1450,13 @@ def refresh(days: int = 365, log: Callable[[str], None] = print, symbols: list[s
 
 
 def _run(folder: Path, days: int, say, symbols, holdings_quarters: int, max_xbrl: int, today: date,
-         started: str, t0: float) -> dict:
+         started: str, t0: float, max_pit_xbrl: int = MAX_PIT_XBRL) -> dict:
     _reset_api()
     state = load_state(folder)
     path = files(folder)["state"]
     steps = {
         "deals": lambda: _refresh_deals(folder, state, today, days, say),
-        "insider": lambda: _refresh_insider(folder, state, today, days, say),
+        "insider": lambda: _refresh_insider(folder, state, today, days, say, max_pit_xbrl),
         "flows": lambda: _refresh_flows(folder, say),
         "holdings": lambda: _refresh_holdings(folder, state, today, symbols, holdings_quarters, max_xbrl, say),
     }
@@ -1467,7 +1569,8 @@ def _refresh_deals(folder: Path, state: dict, today: date, days: int, log) -> di
             "latest_date": newest}
 
 
-def _refresh_insider(folder: Path, state: dict, today: date, days: int, log) -> dict:
+def _refresh_insider(folder: Path, state: dict, today: date, days: int, log,
+                     max_pit_xbrl: int = MAX_PIT_XBRL) -> dict:
     done = set(state.get("insider_months_done") or [])
     new: list[pd.DataFrame] = []
     failed_months: list[str] = []
@@ -1495,9 +1598,16 @@ def _refresh_insider(folder: Path, state: dict, today: date, days: int, log) -> 
     f = files(folder)
     old = _read(f["insider"], INSIDER_COLS)   # stored columns only (no enrichment)
     merged = _dedupe_insider(pd.concat([old, *new], ignore_index=True)) if any(len(d) for d in new) else old
+    state["insider_months_done"] = sorted(done, reverse=True)
+    gg_issues: list[str] = []
+    if not blocked:   # since May 2026 the trades come from corporates-pit-gg (see the module docstring)
+        gg_rows, gg_issues, gg_tried, gg_good = _refresh_insider_gg(folder, state, today, days, merged,
+                                                                    max_pit_xbrl, log)
+        tried, good = tried + gg_tried, good + gg_good
+        if len(gg_rows):
+            merged = _dedupe_insider(pd.concat([merged, gg_rows], ignore_index=True))
     if not merged.equals(old):
         _save_parquet(merged, f["insider"])
-    state["insider_months_done"] = sorted(done, reverse=True)
 
     newest = latest(merged, "disclosed")
     issues = []
@@ -1505,10 +1615,105 @@ def _refresh_insider(folder: Path, state: dict, today: date, days: int, log) -> 
         issues.append("failed: " + ", ".join(failed_months[:6]) + (" ..." if len(failed_months) > 6 else ""))
     if blocked:
         issues.append("NSE blocked requests - the rest comes with the next refresh")
+    issues += gg_issues
     msg = f"{len(merged):,} insider filings up to {_day_text(newest)}" if newest else "No insider filings stored yet"
     status = "ok" if not tried else "failed" if not good else "partial" if issues else "ok"
     return {"status": status, "message": "; ".join([msg, *issues]), "rows_added": len(merged) - len(old),
             "latest_date": newest}
+
+
+def _refresh_insider_gg(folder: Path, state: dict, today: date, days: int, have: pd.DataFrame, max_files: int,
+                        log) -> tuple[pd.DataFrame, list[str], int, int]:
+    """corporates-pit-gg: list each month's filings (past months once), then read the XBRL file of every filing the
+    old corporates-pit API did not cover (no stored trade of that stock disclosed that day), newest first, at most
+    `max_files` per refresh. Returns (new INSIDER_COLS rows, issues, list calls tried, list calls that worked)."""
+    f = files(folder)
+    done = set(state.get("pit_gg_months_done") or [])
+    listed: list[pd.DataFrame] = []
+    tried = good = 0
+    issues: list[str] = []
+    for first, last, key, full in _months(today - timedelta(days=days - 1), today):
+        if key in done:
+            continue
+        tried += 1
+        code, body = _fetch(API + "corporates-pit-gg", {"index": "equities", "from_date": first.strftime("%d-%m-%Y"),
+                                                        "to_date": last.strftime("%d-%m-%Y")},
+                            api=True, referer=PAGES["pit"])
+        if code == 200 and _readable(body):
+            listed.append(parse_pit_listing(body))
+            good += 1
+            if _final(first, full, today):
+                done.add(key)
+        elif code == -2:
+            issues.append("NSE blocked the insider filings list - the rest comes with the next refresh")
+            break
+        else:
+            issues.append(f"insider filings list {first:%b %Y} failed")
+    state["pit_gg_months_done"] = sorted(done, reverse=True)
+
+    old = _read(f["pit_filings"], PIT_FILING_COLS)
+    filings = old.copy()
+    if listed:   # new filings join as 'pending'; a filing already stored keeps its status
+        new = pd.concat(listed, ignore_index=True)
+        filings = _conform(pd.concat([old, new[~new["app_id"].isin(old["app_id"])]], ignore_index=True)
+                           .drop_duplicates("app_id", keep="first"), PIT_FILING_COLS)
+    # a filing the old API already gave us (a trade of that stock disclosed that day) is not read again
+    covered = set(zip(have["symbol"], have["disclosed"].astype(str).str[:10]))
+    day = filings["broadcast"].astype(str).str[:10]
+    is_covered = pd.Series([(s, d) in covered for s, d in zip(filings["symbol"], day)], index=filings.index,
+                           dtype=bool)
+    filings.loc[(filings["status"] == "pending") & is_covered, "status"] = "covered"
+    recheck = (today - timedelta(days=RECHECK_DAYS)).isoformat()
+    due = filings[(filings["status"] == "pending")
+                  | ((filings["status"] == "failed") & (filings["tries"] < 5)
+                     & (filings["last_try"].fillna("").astype(str) < recheck))]
+    due = due.sort_values("broadcast", ascending=False, na_position="last")
+    todo = due.head(max(0, int(max_files))).to_dict("records")
+    rows: list[pd.DataFrame] = []
+    n_bad = streak = 0
+    if todo:
+        log(f"Smart money: insider filings 0/{len(todo)} files")
+
+        def get(rec: dict) -> tuple[str, pd.DataFrame | None]:
+            try:
+                code, body = _fetch(rec["xml"])
+                if code != 200 or not body:
+                    return "download", None
+                return "ok", parse_pit_xbrl(body, rec)
+            except Exception:
+                return "unreadable", None
+        status_of: dict[str, str] = {}
+        step = 2 * XBRL_WORKERS
+        with ThreadPoolExecutor(XBRL_WORKERS) as ex:
+            for i in range(0, len(todo), step):
+                chunk = todo[i:i + step]
+                for rec, (st, df) in zip(chunk, ex.map(get, chunk)):
+                    status_of[rec["app_id"]] = "ok" if st == "ok" else "failed"
+                    if st == "ok":
+                        streak = 0
+                        rows.append(df)
+                    else:
+                        n_bad += 1
+                        streak = streak + 1 if st == "download" else 0
+                if (i // step) % 13 == 12:
+                    log(f"Smart money: insider filings {min(i + step, len(todo))}/{len(todo)} files")
+                if streak >= XBRL_MAX_FAILURES:
+                    issues.append("the NSE archive stopped answering - the rest of the insider files come next time")
+                    break
+        hit = filings["app_id"].isin(list(status_of))
+        filings.loc[hit, "status"] = filings.loc[hit, "app_id"].map(status_of)
+        filings.loc[hit, "last_try"] = today.isoformat()
+        filings.loc[hit & (filings["status"] == "failed"), "tries"] += 1
+    left = int((filings["status"] == "pending").sum())
+    if left:
+        issues.append(f"{left:,} insider filing{'s' if left != 1 else ''} left for the next refresh")
+    if n_bad:
+        issues.append(f"{n_bad} insider file{'s' if n_bad != 1 else ''} could not be read (will retry)")
+    filings = _conform(filings, PIT_FILING_COLS)
+    if not filings.equals(old):
+        _save_parquet(filings, f["pit_filings"])
+    out = _dedupe_insider(pd.concat(rows, ignore_index=True)) if rows else pd.DataFrame()
+    return out, issues, tried, good
 
 
 def _refresh_flows(folder: Path, log) -> dict:
@@ -1569,6 +1774,31 @@ def _merge_filings(old: pd.DataFrame, parts: list[pd.DataFrame]) -> pd.DataFrame
     m = m.sort_values(["symbol", "period", "broadcast", "record_id"], ascending=[True, False, False, False],
                       na_position="last")
     return _conform(m, FILING_COLS)
+
+
+def _reparse_cached_holders(folder: Path, hold: pd.DataFrame) -> int:
+    """Named holders of every stored XBRL filing, parsed again from the cached files (no download). Returns the
+    number of files read."""
+    xdir, rows, n = folder / "xbrl", [], 0
+    for r in hold[hold["source"] == "xbrl"].to_dict("records"):
+        path = xdir / f"SHP_{int(r['record_id'])}.xml.gz"
+        try:
+            _, holders = parse_shp_xbrl(gzip.decompress(path.read_bytes()))
+        except Exception:
+            continue                                   # missing or damaged: its old holders stay
+        n += 1
+        rows += [{"symbol": r["symbol"], "period": r["period"], "record_id": int(r["record_id"]), "holder": h["holder"],
+                  "holder_key": normalise_name(h["holder"]), "group": h["group"], "xbrl_member": h["xbrl_member"],
+                  "shares": h["shares"], "pct": h["pct"]} for h in holders]
+    if n:
+        f = files(folder)
+        old = _read(f["holders"], HOLDER_COLS)
+        done = {int(r["record_id"]) for r in rows} | {int(x) for x in hold.loc[hold["source"] == "xbrl", "record_id"]
+                                                    if (xdir / f"SHP_{int(x)}.xml.gz").exists()}
+        keep = old[~old["record_id"].isin(list(done))]
+        _save_parquet(_conform(pd.concat([keep, _frame(rows, HOLDER_COLS)], ignore_index=True), HOLDER_COLS),
+                      f["holders"])
+    return n
 
 
 def _get_xbrl(rec: dict, xdir: Path) -> tuple[str, dict | None, list | None]:
@@ -1668,6 +1898,10 @@ def _refresh_holdings(folder: Path, state: dict, today: date, symbols, holdings_
 
     # 3. the XBRL files to read: the newest `holdings_quarters` periods of each stock (latest revision)
     old_hold = _read(f["holdings"], HOLDING_COLS)
+    if int(state.get("holders_parser") or 1) < HOLDERS_PARSER:
+        n = _reparse_cached_holders(folder, old_hold)
+        log(f"Smart money: named holders re-read from {n} cached shareholding files")
+        state["holders_parser"] = HOLDERS_PARSER
     have_xbrl = set(old_hold.loc[old_hold["source"] == "xbrl", "record_id"].tolist())
     have_any = set(old_hold["record_id"].tolist())
     failed = {str(k): str(v) for k, v in (state.get("shp_failed") or {}).items()}
@@ -1950,6 +2184,9 @@ def holder_changes(holders: pd.DataFrame, holdings: pd.DataFrame) -> pd.DataFram
         return _empty(HOLDER_CHANGE_COLS)
     h = holders if "category" in holders.columns else _enrich_holders(holders)
     h = _conform(h, {**HOLDER_COLS, **HOLDER_EXTRA_COLS})
+    # promoter-group members filed with no shares (0.00%) name the promoters (promoter_sets) but hold no stake:
+    # they never make a new / cut / dropped holder
+    h = h[pd.to_numeric(h["pct"], errors="coerce") >= 0.01]
     by_rid = {int(rid): g.to_dict("records") for rid, g in h.groupby("record_id", sort=False)}
     rows = []
     for sym, (rp, rq) in pq.items():

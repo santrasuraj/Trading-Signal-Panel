@@ -19,7 +19,7 @@ import { TONE_TEXT, TONE_TINT, type ToneName } from '@/lib/vocab'
 const pill = 'inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-2xs font-medium leading-none'
 
 const CATEGORY_TONE: Record<SmCategory, ToneName> = {
-  fii: 'info', mf: 'info', insurance: 'info', bank: 'info', pension: 'info', promoter: 'warn', famous: 'accent', broker: 'faint', other: 'muted',
+  fii: 'info', mf: 'info', insurance: 'info', bank: 'info', pension: 'info', aif: 'info', promoter: 'warn', famous: 'accent', broker: 'faint', other: 'muted',
 }
 
 /** Investor type: "Mutual fund", "FII/FPI", ...; for 'other' the sub-label ("Individual", "Company insider ...") when

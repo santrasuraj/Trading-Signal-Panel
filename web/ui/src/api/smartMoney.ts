@@ -8,7 +8,7 @@ import type { ISODate, ISODateTime } from './types'
 import { DASH, MINUS, num, ok } from '@/lib/format'
 
 // ------------------------------------------------------------------ types (mirror web/api/models/smart_money.py)
-export type SmCategory = 'fii' | 'mf' | 'insurance' | 'bank' | 'pension' | 'promoter' | 'famous' | 'broker' | 'other'
+export type SmCategory = 'fii' | 'mf' | 'insurance' | 'bank' | 'pension' | 'aif' | 'promoter' | 'famous' | 'broker' | 'other'
 export type SmCategoryFilter = 'all' | 'big' | 'institutions' | SmCategory
 export type SmDealKind = 'bulk' | 'block' | 'both'
 export type SmDealSide = 'BUY' | 'SELL' | 'FLAT'
@@ -127,6 +127,25 @@ export interface SmInsiderParams {
 }
 export interface SmHoldingsParams { view: 'accumulating' | 'exiting' | 'all'; days?: number; category?: SmCategoryFilter; symbol?: string }
 
+// ------------------------------------------------------------------ Big money live (GET /api/smart-money/live)
+export type SmDir = 'up' | 'down' | 'mixed'
+export interface SmLiveRow {
+  symbol: string; company: string | null; last: number; change_pct: number | null; vwap: number | null; rvol: number | null;
+  value_cr: number; direction: SmDir; kinds: ('volume' | 'prints' | 'block')[]; reasons: string[];
+  prints: { count: number; value_cr: number; buy_cr: number; sell_cr: number }; book_ratio: number | null;
+  blocks: { client: string | null; side: string | null; value_cr: number }[];
+  disclosures: { direction: SmDir; reasons: string[]; deal_net_value: number; insider_buy_value: number; insider_sell_value: number;
+    promoter_buying: boolean; promoter_selling: boolean } | null;
+  agree: boolean;
+}
+export interface SmLiveStats { alerts: number; hit_rate: number | null; avg_move_pct: number | null }
+export interface SmLiveResponse {
+  generated_at: string | null; market_open: boolean; fresh: boolean; source: string | null; delayed: boolean; note: string;
+  thresholds: Record<string, number>; universe: number; rows: SmLiveRow[];
+  track: { min_to_judge: number; all: SmLiveStats; with_agreement: SmLiveStats; verdict: string;
+    recent: { date: string; time: string; symbol: string; price: number; direction: SmDir; kinds: string[]; next_date: string | null; move_pct: number | null }[] };
+}
+
 // ------------------------------------------------------------------ fetchers (client.ts's qs() is private: own copy)
 function qs(params: Record<string, string | number | boolean | null | undefined>): string {
   const sp = new URLSearchParams()
@@ -138,6 +157,7 @@ function qs(params: Record<string, string | number | boolean | null | undefined>
 const BASE = '/api/smart-money'
 export const smApi = {
   status: () => fetchJson<SmStatus>(`${BASE}/status`),
+  live: () => fetchJson<SmLiveResponse>(`${BASE}/live`),
   overview: (days = 30) => fetchJson<SmOverview>(`${BASE}/overview${qs({ days })}`),
   deals: (p: SmDealsParams) => fetchJson<SmDealsResponse>(`${BASE}/deals${qs({ ...p })}`),
   insider: (p: SmInsiderParams) => fetchJson<SmInsiderResponse>(`${BASE}/insider${qs({ ...p })}`),
@@ -151,6 +171,7 @@ export const smApi = {
 export const smKeys = {
   all: ['smart-money'] as const,
   status: ['smart-money', 'status'] as const,
+  live: ['smart-money', 'live'] as const,
   overview: (days: number) => ['smart-money', 'overview', days] as const,
   deals: (p: SmDealsParams) => ['smart-money', 'deals', p] as const,
   insider: (p: SmInsiderParams) => ['smart-money', 'insider', p] as const,
@@ -163,6 +184,8 @@ const keep = { staleTime: 5 * 60_000, placeholderData: keepPreviousData } as con
 
 export const useSmStatus = () =>
   useQuery({ queryKey: smKeys.status, queryFn: smApi.status, staleTime: 2000, refetchInterval: (q) => (q.state.data?.run.running ? 3000 : false) })
+/** Re-read every minute: the 5-minute task rewrites the footprints in market hours (cheap file read, no NSE call). */
+export const useSmLive = () => useQuery({ queryKey: smKeys.live, queryFn: smApi.live, staleTime: 30_000, refetchInterval: 60_000 })
 export const useSmOverview = (days: number) => useQuery({ queryKey: smKeys.overview(days), queryFn: () => smApi.overview(days), ...keep })
 export const useSmDeals = (p: SmDealsParams, enabled = true) => useQuery({ queryKey: smKeys.deals(p), queryFn: () => smApi.deals(p), ...keep, enabled })
 export const useSmInsider = (p: SmInsiderParams) => useQuery({ queryKey: smKeys.insider(p), queryFn: () => smApi.insider(p), ...keep })
@@ -185,13 +208,14 @@ export function useSmRefresh() {
 
 // ------------------------------------------------------------------ labels and formatting
 export const CATEGORY_LABEL: Record<SmCategory, string> = {
-  fii: 'FII/FPI', mf: 'Mutual fund', insurance: 'Insurance', bank: 'Bank/NBFC', pension: 'Pension/sovereign',
+  fii: 'FII/FPI', mf: 'Mutual fund', insurance: 'Insurance', bank: 'Bank/NBFC', pension: 'Pension/sovereign', aif: 'AIF/PE/VC fund',
   promoter: 'Promoter', famous: 'Well-known investor', broker: 'Broker/prop', other: 'Other',
 }
 export const CATEGORY_FILTERS: { id: SmCategoryFilter; label: string }[] = [
-  { id: 'all', label: 'Everyone' }, { id: 'big', label: 'Big money (institutions, promoters, well-known)' },
+  { id: 'all', label: 'Everyone' }, { id: 'big', label: 'Big money (institutions, AIF/PE, promoters, well-known)' },
   { id: 'institutions', label: 'Institutions only' }, { id: 'fii', label: 'FII/FPI' }, { id: 'mf', label: 'Mutual funds' },
   { id: 'insurance', label: 'Insurance' }, { id: 'bank', label: 'Banks/NBFCs' }, { id: 'pension', label: 'Pension/sovereign' },
+  { id: 'aif', label: 'AIF/PE/VC funds' },
   { id: 'promoter', label: 'Promoters' }, { id: 'famous', label: 'Well-known investors' }, { id: 'broker', label: 'Brokers/prop' },
   { id: 'other', label: 'Others' },
 ]

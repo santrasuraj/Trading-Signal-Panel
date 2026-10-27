@@ -9,9 +9,9 @@ from typing import Literal
 from fastapi import APIRouter, Query
 
 from ..models.smart_money import (SmCategoryFilter, SmDealsResponse, SmFlowsResponse, SmHoldingsResponse,
-                                  SmInsiderResponse, SmOverview, SmRefreshAccepted, SmRefreshRequest, SmStatus,
-                                  SmStockResponse)
-from ..services import smart_money_svc as svc
+                                  SmInsiderResponse, SmLiveResponse, SmOverview, SmRefreshAccepted, SmRefreshRequest,
+                                  SmStatus, SmStockResponse)
+from ..services import footprints_svc, smart_money_svc as svc
 
 router = APIRouter(prefix="/api/smart-money", tags=["smart-money"])
 
@@ -19,6 +19,12 @@ router = APIRouter(prefix="/api/smart-money", tags=["smart-money"])
 @router.get("/status", response_model=SmStatus)
 def status():
     return svc.status()
+
+
+@router.get("/live", response_model=SmLiveResponse)
+def live():
+    """Big money live: today's unusual volume, large trades and block deals, with what the disclosures say."""
+    return footprints_svc.payload()
 
 
 @router.get("/overview", response_model=SmOverview)

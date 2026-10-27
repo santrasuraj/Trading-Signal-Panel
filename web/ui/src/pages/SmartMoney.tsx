@@ -17,6 +17,7 @@ import { DataTable, SymbolCell, type Col } from '@/components/DataTable'
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { EmptyState, ErrorState, SkeletonKpis, SkeletonRows } from '@/components/feedback'
 import { Price, Pts } from '@/components/num'
+import { BigMoneyLive } from '@/components/BigMoneyLive'
 import { CategoryBadge, ExitChip } from '@/components/SmartMoneyPanel'
 import { useToast } from '@/components/toast'
 import { Button, Card, Chip, IconButton, MenuItem, Popover, Segmented, SelectButton, Spinner, Switch, Tabs, Tip } from '@/components/ui'
@@ -24,11 +25,12 @@ import { cn } from '@/lib/csv'
 import { date, dateTimeIST, monthYear, num, ok, qty, relative, toneClass } from '@/lib/format'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 
-type Tab = 'today' | 'insider' | 'accumulating' | 'exited' | 'flows'
+type Tab = 'live' | 'today' | 'insider' | 'accumulating' | 'exited' | 'flows'
 type HoldView = 'accumulating' | 'exiting'
 type SideFilter = 'all' | 'buy' | 'sell'
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'live', label: 'Big money live' },
   { id: 'today', label: "Today's big trades" },
   { id: 'insider', label: 'Insider & promoter trades' },
   { id: 'accumulating', label: 'Accumulating' },
@@ -306,7 +308,7 @@ const dealCols: Col<SmDeal>[] = [
 
 function DealsTab({ symbol, filter }: { symbol: string; filter: ReactNode }) {
   const nav = useNavigate()
-  const [days, setDays] = useState(1)
+  const [days, setDays] = useState(30)          // a month of big trades; 'Latest day' is one click away
   const [side, setSide] = useState<SideFilter>('all')
   const [kind, setKind] = useState<'all' | 'bulk' | 'block'>('all')
   const [category, setCategory] = useState<SmCategoryFilter>('big')
@@ -320,7 +322,7 @@ function DealsTab({ symbol, filter }: { symbol: string; filter: ReactNode }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         {filter}
-        <Segmented ariaLabel="Window" value={String(days)} onChange={(v) => setDays(Number(v))} items={[{ id: '1', label: 'Latest day' }, { id: '7', label: '1 W' }, { id: '30', label: '1 M' }, { id: '90', label: '3 M' }]} />
+        <Segmented ariaLabel="Window" value={String(days)} onChange={(v) => setDays(Number(v))} items={[{ id: '1', label: 'Latest day' }, { id: '7', label: '1 W' }, { id: '30', label: '1 M' }, { id: '90', label: '3 M' }, { id: '365', label: '1 Y' }]} />
         <Segmented ariaLabel="Buys or sells" value={side} onChange={setSide} items={SIDE_ITEMS} />
         <Segmented ariaLabel="Deal type" value={kind} onChange={setKind} items={[{ id: 'all', label: 'All' }, { id: 'bulk', label: 'Bulk' }, { id: 'block', label: 'Block' }]} />
         <CategoryPicker value={category} onChange={setCategory} />
@@ -511,7 +513,7 @@ function eventColumns(view: HoldView): Col<SmEvent>[] {
 
 function HoldingsTab({ view, symbol, filter }: { view: HoldView; symbol: string; filter: ReactNode }) {
   const nav = useNavigate()
-  const [days, setDays] = useState(30)
+  const [days, setDays] = useState(90)          // shareholding changes are quarterly: a full quarter of filings
   const [category, setCategory] = useState<SmCategoryFilter>('big')
   const q = useSmHoldings({ view, days, category, symbol: symbol || undefined })
   const stockCols = useMemo(() => stockColumns(view), [view])
@@ -682,6 +684,7 @@ export default function SmartMoney() {
               <div className="mb-3 border-b border-line">
                 <Tabs<Tab> value={t} items={TABS.map((x) => ({ id: x.id, label: x.label, to: `/smart-money/${x.id}${keep}` }))} />
               </div>
+              {t === 'live' && <BigMoneyLive />}
               {t === 'today' && <DealsTab symbol={symbol} filter={filter} />}
               {t === 'insider' && <InsiderTab symbol={symbol} filter={filter} />}
               {(t === 'accumulating' || t === 'exited') && <HoldingsTab key={t} view={t === 'exited' ? 'exiting' : 'accumulating'} symbol={symbol} filter={filter} />}

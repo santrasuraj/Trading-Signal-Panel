@@ -1660,6 +1660,28 @@
     }
    }
   },
+  "/api/smart-money/live": {
+   "get": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Live",
+    "description": "Big money live: today's unusual volume, large trades and block deals, with what the disclosures say.",
+    "operationId": "live_api_smart_money_live_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmLiveResponse"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/smart-money/overview": {
    "get": {
     "tags": [
@@ -1769,6 +1791,7 @@
         "insurance",
         "bank",
         "pension",
+        "aif",
         "promoter",
         "famous",
         "broker",
@@ -2030,6 +2053,7 @@
         "insurance",
         "bank",
         "pension",
+        "aif",
         "promoter",
         "famous",
         "broker",
@@ -9711,6 +9735,7 @@
        "insurance",
        "bank",
        "pension",
+       "aif",
        "promoter",
        "famous",
        "broker",
@@ -10031,6 +10056,7 @@
        "insurance",
        "bank",
        "pension",
+       "aif",
        "promoter",
        "famous",
        "broker",
@@ -10463,6 +10489,7 @@
        "insurance",
        "bank",
        "pension",
+       "aif",
        "promoter",
        "famous",
        "broker",
@@ -10976,6 +11003,7 @@
        "insurance",
        "bank",
        "pension",
+       "aif",
        "promoter",
        "famous",
        "broker",
@@ -11340,6 +11368,482 @@
      "flows_date"
     ],
     "title": "SmKpis"
+   },
+   "SmLiveAlert": {
+    "properties": {
+     "date": {
+      "type": "string",
+      "title": "Date"
+     },
+     "time": {
+      "type": "string",
+      "title": "Time"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "price": {
+      "type": "number",
+      "title": "Price"
+     },
+     "direction": {
+      "type": "string",
+      "enum": [
+       "up",
+       "down",
+       "mixed"
+      ],
+      "title": "Direction"
+     },
+     "kinds": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Kinds"
+     },
+     "next_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Next Date"
+     },
+     "move_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Move Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "date",
+     "time",
+     "symbol",
+     "price",
+     "direction",
+     "kinds",
+     "next_date",
+     "move_pct"
+    ],
+    "title": "SmLiveAlert"
+   },
+   "SmLiveBlock": {
+    "properties": {
+     "client": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Client"
+     },
+     "side": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Side"
+     },
+     "value_cr": {
+      "type": "number",
+      "title": "Value Cr"
+     }
+    },
+    "type": "object",
+    "required": [
+     "client",
+     "side",
+     "value_cr"
+    ],
+    "title": "SmLiveBlock"
+   },
+   "SmLiveDisclosures": {
+    "properties": {
+     "direction": {
+      "type": "string",
+      "enum": [
+       "up",
+       "down",
+       "mixed"
+      ],
+      "title": "Direction"
+     },
+     "reasons": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Reasons"
+     },
+     "deal_net_value": {
+      "type": "number",
+      "title": "Deal Net Value"
+     },
+     "insider_buy_value": {
+      "type": "number",
+      "title": "Insider Buy Value"
+     },
+     "insider_sell_value": {
+      "type": "number",
+      "title": "Insider Sell Value"
+     },
+     "promoter_buying": {
+      "type": "boolean",
+      "title": "Promoter Buying"
+     },
+     "promoter_selling": {
+      "type": "boolean",
+      "title": "Promoter Selling"
+     }
+    },
+    "type": "object",
+    "required": [
+     "direction",
+     "reasons",
+     "deal_net_value",
+     "insider_buy_value",
+     "insider_sell_value",
+     "promoter_buying",
+     "promoter_selling"
+    ],
+    "title": "SmLiveDisclosures"
+   },
+   "SmLivePrints": {
+    "properties": {
+     "count": {
+      "type": "integer",
+      "title": "Count"
+     },
+     "value_cr": {
+      "type": "number",
+      "title": "Value Cr"
+     },
+     "buy_cr": {
+      "type": "number",
+      "title": "Buy Cr"
+     },
+     "sell_cr": {
+      "type": "number",
+      "title": "Sell Cr"
+     }
+    },
+    "type": "object",
+    "required": [
+     "count",
+     "value_cr",
+     "buy_cr",
+     "sell_cr"
+    ],
+    "title": "SmLivePrints"
+   },
+   "SmLiveResponse": {
+    "properties": {
+     "generated_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Generated At"
+     },
+     "market_open": {
+      "type": "boolean",
+      "title": "Market Open"
+     },
+     "fresh": {
+      "type": "boolean",
+      "title": "Fresh"
+     },
+     "source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Source"
+     },
+     "delayed": {
+      "type": "boolean",
+      "title": "Delayed"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     },
+     "thresholds": {
+      "additionalProperties": {
+       "type": "number"
+      },
+      "type": "object",
+      "title": "Thresholds"
+     },
+     "universe": {
+      "type": "integer",
+      "title": "Universe"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/SmLiveRow"
+      },
+      "type": "array",
+      "title": "Rows"
+     },
+     "track": {
+      "$ref": "#/components/schemas/SmLiveTrack"
+     }
+    },
+    "type": "object",
+    "required": [
+     "generated_at",
+     "market_open",
+     "fresh",
+     "source",
+     "delayed",
+     "note",
+     "thresholds",
+     "universe",
+     "rows",
+     "track"
+    ],
+    "title": "SmLiveResponse"
+   },
+   "SmLiveRow": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "company": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company"
+     },
+     "last": {
+      "type": "number",
+      "title": "Last"
+     },
+     "change_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Change Pct"
+     },
+     "vwap": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vwap"
+     },
+     "rvol": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rvol"
+     },
+     "value_cr": {
+      "type": "number",
+      "title": "Value Cr"
+     },
+     "direction": {
+      "type": "string",
+      "enum": [
+       "up",
+       "down",
+       "mixed"
+      ],
+      "title": "Direction"
+     },
+     "kinds": {
+      "items": {
+       "type": "string",
+       "enum": [
+        "volume",
+        "prints",
+        "block"
+       ]
+      },
+      "type": "array",
+      "title": "Kinds"
+     },
+     "reasons": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Reasons"
+     },
+     "prints": {
+      "$ref": "#/components/schemas/SmLivePrints"
+     },
+     "book_ratio": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Book Ratio"
+     },
+     "blocks": {
+      "items": {
+       "$ref": "#/components/schemas/SmLiveBlock"
+      },
+      "type": "array",
+      "title": "Blocks"
+     },
+     "disclosures": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/SmLiveDisclosures"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "agree": {
+      "type": "boolean",
+      "title": "Agree"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "company",
+     "last",
+     "change_pct",
+     "vwap",
+     "rvol",
+     "value_cr",
+     "direction",
+     "kinds",
+     "reasons",
+     "prints",
+     "book_ratio",
+     "blocks",
+     "disclosures",
+     "agree"
+    ],
+    "title": "SmLiveRow"
+   },
+   "SmLiveStats": {
+    "properties": {
+     "alerts": {
+      "type": "integer",
+      "title": "Alerts"
+     },
+     "hit_rate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hit Rate"
+     },
+     "avg_move_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Move Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "alerts",
+     "hit_rate",
+     "avg_move_pct"
+    ],
+    "title": "SmLiveStats"
+   },
+   "SmLiveTrack": {
+    "properties": {
+     "min_to_judge": {
+      "type": "integer",
+      "title": "Min To Judge"
+     },
+     "all": {
+      "$ref": "#/components/schemas/SmLiveStats"
+     },
+     "with_agreement": {
+      "$ref": "#/components/schemas/SmLiveStats"
+     },
+     "verdict": {
+      "type": "string",
+      "title": "Verdict"
+     },
+     "recent": {
+      "items": {
+       "$ref": "#/components/schemas/SmLiveAlert"
+      },
+      "type": "array",
+      "title": "Recent"
+     }
+    },
+    "type": "object",
+    "required": [
+     "min_to_judge",
+     "all",
+     "with_agreement",
+     "verdict",
+     "recent"
+    ],
+    "title": "SmLiveTrack"
    },
    "SmOverview": {
     "properties": {

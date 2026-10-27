@@ -5,6 +5,7 @@ up to 100 symbols (the Standard plan's WebSocket limit) - the most liquid stocks
 universe - builds 5-minute bars from the ticks, and every few seconds writes:
   data/intraday/live/YYYYMMDD.parquet   completed bars of today
   data/intraday/live/forming.json       the bar currently forming per symbol, and when the last tick came
+  data/intraday/live/prints_YYYYMMDD.parquet, book.json   large trades and order-book totals (footprints.py)
 At the end of the session the completed bars are merged into the intraday store, so they are kept
 even though FYERS' REST history only covers a rolling year. The intraday scanner reads these files
 for today's setups instead of Yahoo's ~15-minute delayed data, as long as ticks keep arriving.
@@ -177,6 +178,8 @@ def _run_live(symbols: list[str], root, interval: str, log) -> int:
 
     tickers = [s if ":" in s else f"NSE:{s}-EQ" for s in symbols[:MAX_SYMBOLS]]
     builder = idata.TickBarBuilder(interval)
+    from ..footprints import FootprintRecorder
+    recorder = FootprintRecorder()            # large trades + order-book totals for Big money live (footprints.py)
     lock = threading.Lock()
     status = {"live": False, "errors": 0, "ticks": 0, "last_tick": None}
 
@@ -184,6 +187,10 @@ def _run_live(symbols: list[str], root, interval: str, log) -> int:
         if isinstance(msg, dict) and msg.get("ltp") is not None:
             with lock:
                 builder.on_tick(msg)
+                try:
+                    recorder.on_tick(msg)
+                except Exception:              # a footprint glitch must never stop the bars
+                    pass
                 status["ticks"] += 1
                 status["last_tick"] = time.time()
             if not status["live"]:
@@ -223,12 +230,18 @@ def _run_live(symbols: list[str], root, interval: str, log) -> int:
                 _write(root, done, forming, _iso(last))     # outside the lock: ticks keep flowing meanwhile
                 written += len(done)
                 write_fails = 0
+
             except Exception as e:                           # keep the bars and try again on the next round
                 with lock:
                     builder.done[:0] = done.to_dict("records")
                 write_fails += 1
                 if write_fails == 1 or write_fails % 60 == 0:
                     log(f"Live: writing bars failed ({type(e).__name__}: {e}) - retrying")
+            try:                                             # large trades / book (footprints): separate from the bars
+                with lock:
+                    recorder.flush(ist_now().date())
+            except Exception as e:
+                log(f"Live: writing footprints failed ({type(e).__name__}: {e})")
     finally:
         _stop_socket(sock)
         now = ist_now().replace(tzinfo=None)

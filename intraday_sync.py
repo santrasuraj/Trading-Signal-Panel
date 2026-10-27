@@ -6,6 +6,7 @@
                                           (started before 09:13 it waits for the open; waits for today's login)
   python intraday_sync.py --run           backtest the intraday strategies
   python intraday_sync.py --signals       live signals from the strategies whose backtest passed (every 5 min)
+  python intraday_sync.py --footprints    Big money live: unusual volume, large trades, block deals (every 5 min)
   python intraday_sync.py --usage         FYERS calls used today vs the limits
 Options combine, e.g. --archive --run (used by the 15:45 scheduled task).
 Scheduled runs (pythonw, no console) write their output to data/logs/intraday.log.
@@ -86,6 +87,8 @@ def main() -> int:
     ap.add_argument("--run", action="store_true", help="backtest the intraday strategies")
     ap.add_argument("--signals", action="store_true",
                     help="today's live signals, only from strategies whose backtest shows a real edge")
+    ap.add_argument("--footprints", action="store_true",
+                    help="Big money live: unusual volume, large trades, order book, block deals")
     ap.add_argument("--usage", action="store_true", help="FYERS calls used today vs the limits (the default)")
     ap.add_argument("--days", type=int, default=None, help="history to keep (default: intraday.history_days)")
     args = ap.parse_args()
@@ -104,7 +107,7 @@ def main() -> int:
 def _run(args) -> int:
     cfg = load_config()
     plan = str(cfg.get("fyers_plan", "standard"))
-    if args.usage or not any((args.backfill, args.archive, args.live, args.run, args.signals)):
+    if args.usage or not any((args.backfill, args.archive, args.live, args.run, args.signals, args.footprints)):
         print(json.dumps(usage(plan), indent=1))
         return 0
 
@@ -143,6 +146,10 @@ def _run(args) -> int:
 
     if args.signals:
         run_intraday_signals(cfg, frames=frames, log=lambda m: print(m, flush=True))
+    if args.footprints:
+        from scanner import footprints
+        footprints.scan(cfg, log=lambda m: print(m, flush=True), frames=frames)
+        footprints.cleanup_old_prints()
     return 0
 
 
