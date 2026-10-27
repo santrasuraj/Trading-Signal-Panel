@@ -37,6 +37,7 @@ def _read_latest(path: Path):
 
 _latest = register(FileCache(_read_latest))
 _intraday = register(FileCache(_read_json))
+_intraday_signals = register(FileCache(_read_json))
 _config = register(FileCache(lambda p: yaml.safe_load(p.read_text(encoding="utf-8")) or {}, missing={}))
 _meta = register(FileCache(_read_json, missing={}))
 
@@ -48,6 +49,10 @@ def latest() -> dict | None:
 
 def intraday() -> dict | None:
     return _intraday.get(P.intraday)
+
+
+def intraday_signals() -> dict | None:
+    return _intraday_signals.get(P.intraday_signals)
 
 
 def config() -> dict:

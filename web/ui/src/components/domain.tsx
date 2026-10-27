@@ -3,12 +3,12 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertTriangle, CandlestickChart, Check, ChevronRight, Copy, ExternalLink } from 'lucide-react'
-import type { AsOf, Order, ResultsEvent, StrategySummary } from '@/api/types'
+import type { AsOf, Order, Quote, ResultsEvent, StrategySummary } from '@/api/types'
 import { cn } from '@/lib/csv'
 import { date, pct, qty } from '@/lib/format'
 import { orderClipboard } from '@/lib/sizing'
 import { lostMoney } from '@/lib/vocab'
-import { EvidenceChip, EtfChip, HorizonChip, ProvisionalChip, ResultsChip, SidePill, StatusDot, WarnChip } from './badges'
+import { EvidenceChip, EtfChip, HorizonChip, ProvisionalChip, ResultsChip, SidePill, StatusDot, StrengthBadge, WarnChip } from './badges'
 import { DataTable, SymbolCell, type Col } from './DataTable'
 import { Chip, IconButton, Tip } from './ui'
 import { useToast } from './toast'
@@ -159,8 +159,10 @@ export function OrderFlags({ o }: { o: Order }) {
 }
 
 /** Orders for the next open (Signals, Overview, Strategy detail all use this one component). */
-export function OrdersTable({ id, orders, showStrategy, compact }: { id: string; orders: Order[]; showStrategy?: boolean; compact?: boolean }) {
+/** `live`: symbol -> live quote while the market is open (adds a 'Now' column: the live price and its move since the scan). */
+export function OrdersTable({ id, orders, showStrategy, compact, live }: { id: string; orders: Order[]; showStrategy?: boolean; compact?: boolean; live?: Record<string, Quote> }) {
   const nav = useNavigate()
+  const scored = orders.some((o) => o.strength)
   const cols: Col<Order>[] = [
     { id: 'action', header: 'Side', value: (o) => o.action, cell: (o) => <SidePill side={o.action} muted={o.comparison_only} />, width: 64, mobile: 'secondary' },
     { id: 'symbol', header: 'Symbol', value: (o) => o.symbol, cell: (o) => <SymbolCell symbol={o.symbol} company={compact ? null : o.company} />, sticky: true, minWidth: 140, mobile: 'primary' },
@@ -169,7 +171,14 @@ export function OrdersTable({ id, orders, showStrategy, compact }: { id: string;
         <StatusDot status={o.strategy_status} /><span className="max-w-[180px] truncate" title={o.strategy_name}>{o.strategy_name}</span>
       </Link>) } as Col<Order>] : []),
     ...(!compact ? [{ id: 'industry', header: 'Sector', value: (o: Order) => o.industry, cell: (o: Order) => <span className="block max-w-[150px] truncate text-muted 2xl:max-w-[240px]" title={o.industry ?? undefined}>{o.industry ?? '—'}</span>, defaultHidden: showStrategy, hideBelow: 1100 } as Col<Order>] : []),
-    { id: 'price', header: 'Last ₹', align: 'right', value: (o) => o.price, cell: (o) => <Price v={o.price} /> },
+    ...(scored ? [{ id: 'strength', header: 'Strength', title: 'Signal strength 0-100: evidence, backtest, agreement between strategies, live record, results day (hover for the parts)', value: (o: Order) => o.strength?.score ?? null, cell: (o: Order) => (o.strength ? <StrengthBadge s={o.strength} /> : <span className="text-faint">—</span>) } as Col<Order>] : []),
+    { id: 'price', header: live ? 'Scan ₹' : 'Last ₹', title: live ? 'Price the order was sized on (the scan)' : undefined, align: 'right', value: (o) => o.price, cell: (o) => <Price v={o.price} /> },
+    ...(live ? [{ id: 'now', header: 'Now ₹', title: 'Live price, and its move since the scan price', align: 'right', value: (o: Order) => live[o.symbol]?.price ?? null, cell: (o: Order) => {
+      const q = live[o.symbol]
+      if (!q) return <span className="text-faint">—</span>
+      const mv = o.price ? (q.price / o.price - 1) * 100 : null
+      return <span className="num whitespace-nowrap"><Price v={q.price} /> <span className={cn('text-2xs', mv == null ? 'text-faint' : mv > 0 ? 'text-profit' : mv < 0 ? 'text-loss' : 'text-muted')}>{pct(mv, { dp: 1 })}</span></span>
+    } } as Col<Order>] : []),
     { id: 'qty', header: 'Qty', align: 'right', value: (o) => o.qty, title: 'Shares for your capital/allocation', cell: (o) => (
       <span title={QTY_BASIS[o.qty_basis]} className={cn('num', o.qty_basis !== 'sized' && 'underline decoration-dotted decoration-faint underline-offset-2')}>{o.qty == null ? '—' : qty(o.qty)}</span>
     ), mobile: 'value' },

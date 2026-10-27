@@ -241,22 +241,6 @@ class DataHealth(Model):
 
 
 # ------------------------------------------------------------------ intraday
-class IntradayTrade(Model):
-    symbol: str
-    date: ISODate
-    side: Literal["LONG", "SHORT"]
-    entry_time: str
-    entry: float
-    stop: float | None = None
-    exit_time: str
-    exit: float
-    reason: str
-    qty: int
-    pnl: float
-    ret_pct: float
-    open_now: bool | None = None
-
-
 class IntradayMetrics(Model):
     days: int
     trades: int
@@ -286,8 +270,6 @@ class IntradayStrategy(Model):
     status: StrategyStatus
     metrics: IntradayMetrics
     equity: TimeSeries                            # rupees
-    recent_trades: list[IntradayTrade]
-    today: list[IntradayTrade]
 
 
 class IntradayData(Model):
@@ -333,6 +315,42 @@ class IntradayResponse(Model):
     strategies: list[IntradayStrategy]
     summary: str                                  # honest one-liner computed from the results (server text)
     run: IntradayRun
+
+
+class IntradaySignal(Model):
+    strategy_key: str
+    strategy_name: str
+    symbol: str
+    side: Literal["LONG", "SHORT"]
+    entry_time: str
+    entry: float
+    stop: float | None = None
+    qty: int
+    amount: float
+    state: Literal["open", "closed"]              # open = entered, not stopped or squared off by the last bar
+    exit_time: str | None = None
+    exit: float | None = None
+    last: float                                   # exit price, or the last bar's close while open
+    reason: str
+    pnl: float                                    # rupees after charges (open: if closed at `last`)
+    ret_pct: float
+
+
+class IntradayProven(Model):
+    key: str
+    name: str
+
+
+class IntradaySignalsResponse(Model):
+    generated_at: ISODateTime | None = None       # when the signals were last computed
+    backtest_at: ISODateTime | None = None        # the backtest that decided which strategies are proven
+    tested: int
+    proven: list[IntradayProven]                  # only these strategies may produce signals
+    signals: list[IntradaySignal]
+    source: str | None = None                     # today's bars: "fyers_ws" real time, "yahoo" ~15 min delayed
+    delayed: bool
+    bars_to: str | None = None
+    note: str
 
 
 class IntradayRunRequest(Model):

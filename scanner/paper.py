@@ -90,6 +90,7 @@ def record_scan(result: dict, path=None) -> int:
         expect = {k: full.get(k) for k in _EXPECT_KEYS}
         expect["nifty_cagr_pct"] = (full.get("benchmark") or {}).get("cagr_pct")
         expect["n500_cagr_pct"] = (full.get("n500_benchmark") or {}).get("cagr_pct")
+        expect["status"] = s.get("status")      # working / mixed / ... on the day: the signal track record shows it
         rules = {"max_positions": s.get("max_positions"), "min_position": result.get("min_position", 0),
                  **(s.get("rules") or {})}
         scans.append((day, s["key"], s.get("name"), s.get("kind"), result.get("generated_at"), capital,

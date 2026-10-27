@@ -5,6 +5,7 @@ from typing import Literal
 
 from .common import AsOf, ISODate, Model, StrategyStatus
 from .holdings import HoldingRow
+from .system import MarketSession
 
 SymbolKind = Literal["stock", "etf", "index"]
 IndicatorId = Literal["sma20", "sma50", "sma200", "ema21", "bb_upper", "bb_mid", "bb_lower",
@@ -161,3 +162,21 @@ class StockSnapshot(Model):
     strategies: list[StockStrategyRole]
     your_holding: HoldingRow | None = None
     corporate_actions: list[CorporateAction]
+
+
+# ------------------------------------------------------------------ live quotes
+class Quote(Model):
+    symbol: str
+    price: float
+    prev_close: float | None = None
+    change_pct: float | None = None               # vs the previous close
+    time: str                                     # quote time (FYERS), or the trading day (Yahoo / stored close)
+
+
+class QuotesResponse(Model):
+    as_of: str
+    session: MarketSession
+    source: Literal["fyers", "yahoo", "close"]    # close = market not open: last stored close, no network call
+    delayed: bool                                 # yahoo: ~15 minutes behind
+    note: str
+    quotes: list[Quote]                           # symbols with no price at all are left out

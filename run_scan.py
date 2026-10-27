@@ -3,6 +3,8 @@
   python run_scan.py               scan and print the summary
   python run_scan.py --telegram    also send the summary (or a failure alert) to Telegram
   python run_scan.py --no-update   use stored prices only (no download)
+  python run_scan.py --live-only   scan only while the market is open (today's live candle, provisional signals;
+                                   used by the scheduled task every 30 minutes in market hours)
   python run_scan.py --status FILE write progress to FILE as JSON (used by the dashboards and scheduled tasks;
                                    only the scan holding the lock writes it)
 """
@@ -51,7 +53,14 @@ def main() -> int:
     ap.add_argument("--no-update", action="store_true", help="use stored prices only")
     ap.add_argument("--status", help="write progress JSON to this file")
     ap.add_argument("--by", default="manual", help="who started the scan (shown if another scan is blocked)")
+    ap.add_argument("--live-only", action="store_true",
+                    help="exit unless the market is open now (holidays, weekends, outside 09:15-15:30)")
     args = ap.parse_args()
+    if args.live_only:
+        from scanner.intraday.live import market_open_now
+        if not market_open_now():
+            print("Market is not open now: no live scan.", flush=True)
+            return 0
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     lg = _logger()

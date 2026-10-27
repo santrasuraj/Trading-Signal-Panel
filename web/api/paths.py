@@ -34,6 +34,8 @@ class Paths:
     @property
     def intraday_status(self) -> Path: return self.results / "intraday_status.json"
     @property
+    def intraday_signals(self) -> Path: return self.results / "intraday_signals.json"
+    @property
     def nse(self) -> Path: return self.data / "nse"
     @property
     def index_history(self) -> Path: return self.nse / "index_history.parquet"

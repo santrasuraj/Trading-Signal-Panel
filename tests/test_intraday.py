@@ -130,15 +130,6 @@ def test_vwap_ignores_the_0915_volume():
     assert vw[0] == pytest.approx(119.0) and vw[1] == pytest.approx(100.0) and d.v[0] == 1e9
 
 
-def test_live_trade_still_running_is_shown_open():
-    from scanner.intraday.run import _trade_dict
-    run_ = Trade("orb15", "X", "2026-10-23", 1, 5, 100.0, 20, 101.0, 99.0, "square-off")
-    assert _trade_dict(run_, 21, FLAT_FNO)["open_now"] and _trade_dict(run_, 21, FLAT_FNO)["reason"].startswith("open")
-    assert not _trade_dict(run_, FLAT_FNO, FLAT_FNO)["open_now"]                     # after the square-off
-    stopped = Trade("orb15", "X", "2026-10-23", 1, 5, 100.0, 12, 99.0, 99.0, "stop")
-    assert _trade_dict(stopped, 21, FLAT_FNO) == {**_trade_dict(stopped), "open_now": False}
-
-
 def _session(day, px, sym="AAA"):
     ts = pd.Timestamp(day) + pd.Timedelta(hours=9, minutes=15) + pd.to_timedelta(np.arange(SLOTS) * 5, unit="m")
     return pd.DataFrame({"ts": ts, "symbol": sym, "open": px, "high": px * 1.005, "low": px * 0.995,
@@ -387,3 +378,16 @@ def test_market_open_now_skips_holidays_and_allows_a_lead(monkeypatch):
     assert not live.market_open_now() and live.market_open_now(lead_minutes=2)
     monkeypatch.setattr(live, "ist_now", lambda: datetime(2026, 10, 26, 10, 0, tzinfo=IST))   # NSE holiday
     assert not live.market_open_now()
+
+
+def test_signals_never_come_from_unproven_strategies(tmp_path, monkeypatch):
+    import scanner.intraday.run as r
+    bt = {"generated_at": "2026-10-24T11:43:20+05:30",
+          "strategies": [{"key": "orb15", "name": "ORB", "status": "not-working"},
+                         {"key": "vwap_trend", "name": "VWAP", "status": "mixed"}]}
+    monkeypatch.setattr(r, "load_intraday", lambda: bt)
+    monkeypatch.setattr(r, "SIGNALS_FILE", tmp_path / "intraday_signals.json")
+    monkeypatch.setattr(r, "load_store", lambda: pytest.fail("no proven strategy: nothing to compute"))
+    out = r.run_intraday_signals({}, log=lambda m: None)
+    assert out["signals"] == [] and out["proven"] == [] and out["tested"] == 2
+    assert json.loads((tmp_path / "intraday_signals.json").read_text(encoding="utf-8"))["note"] == out["note"]

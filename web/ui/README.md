@@ -25,14 +25,9 @@ Never edit `dist/` by hand: it is build output.
 cd web\ui
 npm ci
 npm run dev        :: http://127.0.0.1:5173, /api forwarded to the API on :8600 (QD_API=... to change)
-npm run dev:mock   :: no backend needed: /api served from src/api/mock/fixtures
-npm run fixtures   :: rebuild the mock fixtures from the real data/ folder
 npm test           :: vitest (formatting, sizing, chart mappers)
 npm run lint
 ```
-
-Mock scenarios: set `QD_MOCK` before `npm run dev:mock`, comma separated, e.g. `set QD_MOCK=live,noscreener`.
-Flags: `noscan`, `live`, `stale`, `noscreener`, `nopaper`, `slow`, `holdings`, `fail` (see `src/api/mock/server.ts`).
 
 ## Layout
 

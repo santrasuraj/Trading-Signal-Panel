@@ -1,19 +1,22 @@
 // Signals `/signals` (spec 3.4): orders for the next open by horizon, sized to capital/allocations, stops, risk,
-// results warnings; allocation bar with a session-only what-if; comparison-only groups collapsed.
+// results warnings; allocation bar with a session-only what-if; comparison-only groups collapsed. The Intraday tab
+// shows today's live signals, only from intraday strategies whose backtest shows a real edge after costs. BUY signals
+// carry a strength score (strongest first in their own card); the track record of past signals is /signals/track.
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ChevronDown, Info, SlidersHorizontal, Undo2 } from 'lucide-react'
-import { useSignals } from '@/api/hooks'
+import { ChevronDown, History, Info, ShieldCheck, SlidersHorizontal, Undo2 } from 'lucide-react'
+import { useIntradaySignals, useLiveQuotes, useSignals } from '@/api/hooks'
 import { isFailure } from '@/api/client'
-import type { Horizon, SignalGroup, SignalsResponse } from '@/api/types'
+import type { Horizon, IntradaySignal, Quote, SignalGroup, SignalsResponse } from '@/api/types'
+import { DataTable, type Col } from '@/components/DataTable'
 import { EvidenceChip, EtfChip, HorizonChip, StatusBadge, WarnChip } from '@/components/badges'
 import { BiasNote, OrdersTable, PageHeader, flatteredNote } from '@/components/domain'
-import { Banner, ErrorState, RefreshFailed, Skeleton, SkeletonRows } from '@/components/feedback'
-import { Money } from '@/components/num'
+import { Banner, EmptyState, ErrorState, RefreshFailed, Skeleton, SkeletonRows } from '@/components/feedback'
+import { Money, Pct, Price } from '@/components/num'
 import { Button, Card, Popover, Tabs } from '@/components/ui'
 import { cn } from '@/lib/csv'
-import { date, keepDatesTogether, money, num, pct, qty } from '@/lib/format'
+import { date, dateTimeIST, keepDatesTogether, money, num, pct, qty } from '@/lib/format'
 import { allocationTotal, formatAllocations, parseAllocations } from '@/lib/sizing'
 import { HORIZON, lostMoney } from '@/lib/vocab'
 
@@ -95,7 +98,7 @@ function WhatIf({ groups, base, value, onChange }: { groups: SignalGroup[]; base
   )
 }
 
-function Group({ g, cmp }: { g: SignalGroup; cmp?: boolean }) {
+function Group({ g, cmp, live }: { g: SignalGroup; cmp?: boolean; live?: Record<string, Quote> }) {
   const s = g.strategy
   return (
     <Card
@@ -120,7 +123,48 @@ function Group({ g, cmp }: { g: SignalGroup; cmp?: boolean }) {
         </span>
       }
     >
-      {g.orders.length ? <OrdersTable id={`sig.${s.key}`} orders={g.orders} /> : <div className="px-4 py-3 text-[13px] text-muted">No orders. {g.empty_reason ? keepDatesTogether(g.empty_reason) : null}</div>}
+      {g.orders.length ? <OrdersTable id={`sig.${s.key}`} orders={g.orders} live={live} /> : <div className="px-4 py-3 text-[13px] text-muted">No orders. {g.empty_reason ? keepDatesTogether(g.empty_reason) : null}</div>}
+    </Card>
+  )
+}
+
+const INTRA_COLS: Col<IntradaySignal>[] = [
+  { id: 'sym', header: 'Symbol', value: (r) => r.symbol, cell: (r) => <Link to={`/chart/${r.symbol}`} className="font-semibold hover:underline">{r.symbol}</Link>, sticky: true, mobile: 'primary' },
+  { id: 'st', header: 'Strategy', value: (r) => r.strategy_name, cell: (r) => <span className="block max-w-[180px] truncate">{r.strategy_name}</span> },
+  { id: 'side', header: 'Side', value: (r) => r.side, cell: (r) => <span className={cn('text-2xs font-bold tracking-[0.04em]', r.side === 'LONG' ? 'text-profit' : 'text-loss')}>{r.side}</span> },
+  { id: 'state', header: 'State', value: (r) => r.state, cell: (r) => <span className={cn('text-xs', r.state === 'open' ? 'font-semibold text-fg' : 'text-muted')}>{r.state === 'open' ? 'Open' : `Closed ${r.exit_time ?? ''} (${r.reason})`}</span>, mobile: 'secondary', label: 'State' },
+  { id: 'in', header: 'In', value: (r) => r.entry_time, cell: (r) => <span className="num text-muted">{r.entry_time}</span> },
+  { id: 'entry', header: 'Entry ₹', align: 'right', value: (r) => r.entry, cell: (r) => <Price v={r.entry} /> },
+  { id: 'stop', header: 'Stop ₹', align: 'right', value: (r) => r.stop, cell: (r) => <Price v={r.stop} /> },
+  { id: 'qty', header: 'Qty', align: 'right', value: (r) => r.qty, cell: (r) => <span className="num">{r.qty}</span> },
+  { id: 'last', header: 'Last ₹', title: 'Exit price, or the latest bar while open', align: 'right', value: (r) => r.last, cell: (r) => <Price v={r.last} /> },
+  { id: 'pnl', header: 'P&L ₹', title: 'After intraday charges and slippage (open: if closed at the last price)', align: 'right', value: (r) => r.pnl, cell: (r) => <Money v={r.pnl} signed color />, mobile: 'value' },
+  { id: 'ret', header: 'Return', align: 'right', value: (r) => r.ret_pct, cell: (r) => <Pct v={r.ret_pct} dp={2} />, mobile: 'change' },
+]
+
+/** Today's live intraday signals (MIS, squared off the same day), only from strategies whose backtest passed. */
+function IntradaySignals() {
+  const q = useIntradaySignals()
+  const d = q.data
+  if (q.error && !d) return <div className="card"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
+  if (!d) return <div className="card"><SkeletonRows rows={3} /></div>
+  const bars = d.source ? `${d.source}${d.delayed ? ', ~15 min delayed' : ''}` : null
+  return (
+    <Card
+      title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted" />Intraday signals today</span>}
+      subtitle={<>Only strategies whose backtest shows a real edge after costs: <span className="num">{d.proven.length} of {d.tested}</span>{d.proven.length > 0 && <> ({d.proven.map((p) => p.name).join(', ')})</>}{bars && <> · bars {bars}</>}{d.generated_at && <> · updated <span className="num">{dateTimeIST(d.generated_at)}</span></>}</>}
+      flush
+    >
+      {d.signals.length === 0 ? (
+        <EmptyState compact title={d.note}>
+          <Link to="/intraday" className="link">See each intraday strategy's backtest</Link>
+        </EmptyState>
+      ) : (
+        <>
+          <DataTable id="signals.intraday" data={d.signals} columns={INTRA_COLS} rowKey={(r) => `${r.strategy_key}${r.symbol}${r.entry_time}`} exportName="intraday-signals" />
+          <p className="border-t border-line px-4 py-2 text-2xs text-faint">{d.note} Intraday positions are squared off the same day (15:00 for F&O stocks). You decide and place every trade yourself.</p>
+        </>
+      )}
     </Card>
   )
 }
@@ -139,12 +183,18 @@ export default function Signals() {
   }, [draft, allocParam, setSp])
 
   const q = useSignals({ allocations: allocParam || undefined })
+  const intra = useIntradaySignals().data
+  const intraday = horizon === 'intraday'
   // a stale or mistyped ?allocations= (e.g. a strategy key that no longer exists) must not lock the page
   const resetWhatIf = () => { setDraft({}); setSp((p) => { const n = new URLSearchParams(p); n.delete('allocations'); return n }, { replace: true }) }
   const d = q.data
   const groups = useMemo(() => (d ? d.groups.filter((g) => horizon === 'all' || g.strategy.horizon === horizon) : []), [d, horizon])
   const main = groups.filter((g) => !g.strategy.comparison_only)
   const cmp = groups.filter((g) => g.strategy.comparison_only)
+  const lq = useLiveQuotes(main.flatMap((g) => g.orders.map((o) => o.symbol)))
+  const live = lq.live ? lq.quotes : undefined
+  const ranked = main.flatMap((g) => g.orders).filter((o) => o.action === 'BUY' && o.strength)
+    .sort((a, b) => (b.strength?.score ?? 0) - (a.strength?.score ?? 0))
   const [showCmp, setShowCmp] = useState(false)
   const count = (h: Horizon) => (d ? d.groups.filter((g) => g.strategy.horizon === h && !g.strategy.comparison_only).reduce((n, g) => n + g.orders.length, 0) : 0)
   const totals = useMemo(() => {
@@ -171,6 +221,7 @@ export default function Signals() {
     <div>
       <PageHeader
         title="Signals"
+        right={<Link to="/signals/track" className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-line px-3 text-[13px] font-medium hover:bg-raised"><History className="h-4 w-4" />Track record</Link>}
         subtitle={d ? <>Orders for the next market open · sized for {money(d.capital)} · based on prices of <span className="whitespace-nowrap">{date(d.as_of.data_date, { year: false })}</span> ({d.as_of.stale ? <span className="text-warn">stale</span> : d.as_of.live ? <span className="text-warn">live candle, provisional</span> : 'official close'})</> : <Skeleton className="h-3 w-72" />}
       />
       {q.error && !d && allocParam && isFailure(q.error) && q.error.code === 'VALIDATION' ? (
@@ -198,21 +249,34 @@ export default function Signals() {
                 { id: 'all', label: 'All', count: count('longterm') + count('swing') },
                 { id: 'longterm', label: HORIZON.longterm.label, count: count('longterm') },
                 { id: 'swing', label: HORIZON.swing.label, count: count('swing') },
-                { id: 'intraday', label: <span title="Intraday strategies are research only: no orders (see Intraday)">Intraday · research only</span>, disabled: true },
+                { id: 'intraday', label: <span title="Same-day signals, only from intraday strategies whose backtest shows a real edge after costs">Intraday</span>, count: intra?.signals.length ?? 0 },
               ]}
             />
           </div>
-          {main.length === 0 && <div className="card px-4 py-6 text-center text-[13px] text-muted">No active strategies in this horizon.</div>}
-          {main.map((g) => <Group key={g.strategy.key} g={g} />)}
+          {intraday && <IntradaySignals />}
+          {!intraday && ranked.length > 1 && (
+            <Card title="Strongest buy signals" subtitle="Every buy signal today, strongest first. Hover a score for its parts: evidence, backtest, agreement between strategies, live record, results day." flush>
+              <OrdersTable id="signals.ranked" orders={ranked} showStrategy live={live} />
+            </Card>
+          )}
+          {!intraday && main.length === 0 && <div className="card px-4 py-6 text-center text-[13px] text-muted">No active strategies in this horizon.</div>}
+          {!intraday && lq.data && main.some((g) => g.orders.length) && (
+            <p className="px-1 text-2xs text-muted">
+              <span className={cn('mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle', lq.data.delayed ? 'bg-warn' : 'bg-profit')} />
+              {lq.data.note} Updated <span className="num">{dateTimeIST(lq.data.as_of)}</span>.
+              {d.as_of.live ? ' Signals are from the latest live scan (provisional until the close).' : ' Signals are from the last close; the live scan in market hours re-checks them every 30 minutes.'}
+            </p>
+          )}
+          {main.map((g) => <Group key={g.strategy.key} g={g} live={live} />)}
 
-          <div className="card num flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-[13px]">
+          {!intraday && <div className="card num flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-[13px]">
             <span className="eyebrow">Totals</span>
             <span><span className="text-muted">Buys </span>{totals.buy} · <Money v={totals.buyAmt} /></span>
             <span><span className="text-muted">Sells </span>{totals.sell}{totals.sell > 0 && <> · {totals.sellUnknown ? <span className="text-faint" title="Some sells cannot be sized (you don't hold them and the model weight is unknown)">≥ <Money v={totals.sellAmt} /></span> : <Money v={totals.sellAmt} />}</>}</span>
             <span><span className="text-muted">Risk at stops </span><Money v={totals.risk} />{totals.noStop > 0 && <span className="text-faint" title="BUY orders without a stop are not in this total"> (+{totals.noStop} with no stop)</span>}</span>
             <span className={cn(totals.warn > 0 && 'text-warn')}><span className="text-muted">Results warnings </span>{qty(totals.warn)}</span>
             {d.sized_like_scan && <span className="ml-auto text-2xs text-faint">Same sizes as the scan (and Telegram)</span>}
-          </div>
+          </div>}
 
           {cmp.length > 0 && (
             <div>

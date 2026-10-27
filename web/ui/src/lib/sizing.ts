@@ -1,5 +1,5 @@
 // Client mirror of web/api/services/sizing.py (spec 6.7 + review A1). Used for instant what-if previews on the
-// Signals page and by the dev mock. The server stays the source of truth: whenever an /api/signals response for the
+// Signals page. The server stays the source of truth: whenever an /api/signals response for the
 // same allocations arrives, its rows replace these.
 //
 //   alloc   = allocations ? capital * pct / 100 : capital

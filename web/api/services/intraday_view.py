@@ -6,7 +6,7 @@ the UI); the summary line states plainly how many strategies lost money after co
 from __future__ import annotations
 
 from . import data, intraday_job
-from ..util import num, spct
+from ..util import num, spct, today_ist
 
 EVIDENCE = {"STRONG", "MODERATE", "WEAK", "FOLKLORE", "EXPERIMENTAL"}
 STATUS = {"working", "mixed", "not-working", "unknown"}
@@ -34,15 +34,6 @@ def _costs(params: dict | None = None) -> dict | None:
     return {"value": value, "round_trip_pct": round(total / value * 100, 4)}
 
 
-def _trade(t: dict) -> dict:
-    return {"symbol": t.get("symbol"), "date": str(t.get("date") or "")[:10],
-            "side": "SHORT" if t.get("side") == "SHORT" else "LONG", "entry_time": str(t.get("entry_time") or ""),
-            "entry": num(t.get("entry")) or 0.0, "stop": num(t.get("stop")), "exit_time": str(t.get("exit_time") or ""),
-            "exit": num(t.get("exit")) or 0.0, "reason": str(t.get("reason") or ""), "qty": int(t.get("qty") or 0),
-            "pnl": num(t.get("pnl")) or 0.0, "ret_pct": num(t.get("ret_pct")) or 0.0,
-            "open_now": t.get("open_now") if isinstance(t.get("open_now"), bool) else None}
-
-
 def _strategy(s: dict) -> dict:
     m = s.get("metrics") or {}
     ci = m.get("ci95_day_pct")
@@ -60,8 +51,6 @@ def _strategy(s: dict) -> dict:
                     "significant": bool(m.get("significant")), "start": m.get("start"), "end": m.get("end")},
         "equity": {"t": [str(d)[:10] for d, _ in eq],
                    "series": [{"id": "equity", "label": "Equity (₹)", "role": "strategy", "v": [num(v) for _, v in eq]}]},
-        "recent_trades": [_trade(t) for t in s.get("recent_trades") or []],
-        "today": [_trade(t) for t in s.get("today") or []],
     }
 
 
@@ -92,7 +81,7 @@ def summary_text(strats: list[dict], sessions: int | None) -> str:
         text += f"; {len(sig_neg)} of {n} lose money by a statistically significant margin." if sig_neg else "."
     if sig_pos and sig_neg:
         text += f" {len(sig_neg)} of {n} lose money by a statistically significant margin."
-    return text + " Intraday results are research only: no intraday orders are produced."
+    return text + " Only a strategy with a real edge after costs gives live signals (Signals page, Intraday tab)."
 
 
 def payload() -> dict:
@@ -123,9 +112,30 @@ def count() -> int:
     return len(r.get("strategies") or []) if r else 0
 
 
-def losing() -> tuple[int, int]:
-    """(strategies that lost money after costs, strategies tested) from intraday.json."""
-    r = data.intraday() or {}
-    s = r.get("strategies") or []
-    rets = [num((x.get("metrics") or {}).get("return_pct")) for x in s]
-    return sum(1 for v in rets if v is not None and v <= 0), len(s)
+def signals_payload() -> dict:
+    """GET /api/intraday/signals. Only strategies that are 'working' in the CURRENT backtest may give signals;
+    data/results/intraday_signals.json (scanner/intraday/run.run_intraday_signals) is served only when it is
+    from today and was computed against that backtest, so a strategy that has since failed never shows."""
+    bt = data.intraday() or {}
+    tested = bt.get("strategies") or []
+    proven = [{"key": str(s.get("key")), "name": str(s.get("name") or s.get("key"))}
+              for s in tested if s.get("status") == "working"]
+    out = {"generated_at": None, "backtest_at": bt.get("generated_at"), "tested": len(tested), "proven": proven,
+           "signals": [], "source": None, "delayed": False, "bars_to": None}
+    if not bt:
+        return {**out, "note": "The intraday backtest has not run yet, so no strategy is proven: no signals."}
+    if not proven:
+        return {**out, "note": f"No intraday strategy has a proven edge after costs ({len(tested)} tested): no signals. "
+                               "A strategy gives signals here only once its backtest shows a profit beyond luck."}
+    f = data.intraday_signals() or {}
+    fresh = (str(f.get("generated_at") or "")[:10] == today_ist().isoformat()
+             and f.get("backtest_at") == bt.get("generated_at"))
+    if not fresh:
+        return {**out, "note": "Signals have not been computed today yet: the intraday signals task refreshes them "
+                               "every 5 minutes in market hours (or run intraday_sync.py --signals)."}
+    keys = {p["key"] for p in proven}
+    source = f.get("source") or None
+    return {**out, "generated_at": f.get("generated_at"), "source": source,
+            "delayed": "yahoo" in (source or ""), "bars_to": f.get("bars_to"),
+            "signals": [x for x in f.get("signals") or [] if x.get("strategy_key") in keys],
+            "note": str(f.get("note") or "")}

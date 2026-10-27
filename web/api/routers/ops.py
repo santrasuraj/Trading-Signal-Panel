@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query
 
 from ..models import (ConfigResponse, CostPreview, DataHealth, FyersLoginCompleteRequest, FyersLoginCompleteResponse,
                       FyersLoginRequest, FyersLoginResponse, FyersStatus, IntradayResponse, IntradayRunAccepted,
-                      IntradayRunRequest, ScanAccepted, ScanHistory, ScanLog, ScanRequest)
+                      IntradayRunRequest, IntradaySignalsResponse, ScanAccepted, ScanHistory, ScanLog, ScanRequest)
 from ..services import alerts, fyers_svc, intraday_job, intraday_view, scan_runner, settings_svc
 
 router = APIRouter(prefix="/api", tags=["operations"])
@@ -71,6 +71,11 @@ def data_health():
 @router.get("/intraday", response_model=IntradayResponse)
 def intraday():
     return intraday_view.payload()
+
+
+@router.get("/intraday/signals", response_model=IntradaySignalsResponse)
+def intraday_signals():
+    return intraday_view.signals_payload()
 
 
 @router.post("/intraday/run", response_model=IntradayRunAccepted, status_code=202)

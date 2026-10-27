@@ -128,12 +128,6 @@ CATALOG: dict[str, dict] = {
         "sources": [S("George & Hwang (2004)")],
         "fails": ["Contrary results for emerging-market indices."],
     },
-    "legacy_rules": {
-        "id": None, "summary": "The v1 textbook rules (50-DMA volume breakout, 52-week-high breakout). Kept only as a "
-        "'what not to do' baseline.",
-        "expect": "Loses money after costs.",
-        "sources": [], "fails": ["Fixed small target/stop ratio with costs on every trade."],
-    },
     # added 25 Oct 2026 (docs/strategy_catalogue.md L1-R, L11-L13): judged only by their own backtests
     "momentum_n200": {
         "id": "L1-R", "summary": "A literal replica of NSE's Nifty200 Momentum 30 rules: a check on 'Momentum leaders' "
@@ -181,8 +175,6 @@ CATALOG: dict[str, dict] = {
 REJECTED_CATALOGUE = [
     {"key": "rsi2_pullback", "name": "RSI-2 pullback (Connors)", "horizon": "swing", "evidence": "WEAK",
      "result_text": "Lost money after realistic Indian delivery costs."},
-    {"key": "legacy_rules", "name": "Old textbook rules (baseline)", "horizon": "swing", "evidence": "EXPERIMENTAL",
-     "result_text": "Lost money after costs in testing."},
     {"key": "near_high", "name": "Near 52-week high", "horizon": "longterm", "evidence": "MODERATE",
      "result_text": "Never beat the average stock in our tests."},
 ]
@@ -203,7 +195,6 @@ _ENTRY = {
     "nr7_breakout": "After the narrowest-range day in 7 sessions, buy a close above that day's high in an uptrending leader (RS 70+).",
     "rsi2_pullback": "Buy when RSI(2) falls below {rsi2_below} in a stock above its 200-day average.",
     "near_high": "Rank uptrending stocks by distance to their 52-week high, closest first.",
-    "legacy_rules": "Buy a 50-day-average volume breakout or a 52-week-high breakout.",
     "momentum_n200": "Rank the {universe_size} most traded stocks with a year of history by the NSE momentum score (6- and 12-month return divided by volatility, z-scored); no trend or market filter.",
     "residual_momentum": "Rank stocks by residual momentum: their alpha against Nifty 50 over months 12-1 divided by its residual volatility{uptrend}.",
     "alpha_low_vol": "Rank the {universe_size} most traded stocks by the average of the percentile ranks of 1-year alpha against Nifty 50 (high first) and 1-year volatility (low first).",

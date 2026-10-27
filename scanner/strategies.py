@@ -72,7 +72,6 @@ def _alpha_lowvol_score(f: Factors, size: int) -> pd.DataFrame:
 REJECTED_REASONS = {
     "rsi2_pullback": "Lost money after realistic Indian delivery costs (short-term reversal works mostly in illiquid stocks).",
     "near_high": "Never beat the average stock in our tests.",
-    "legacy_rules": "The old v1 rules lost money in every re-test; kept only as a 'what not to do' baseline.",
 }
 
 
@@ -401,16 +400,4 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             rebalance=opt(k, "rebalance", "monthly"), use_regime=opt(k, "use_regime", True),
         ))
 
-    k = "legacy_rules"
-    if enabled(k, default=False):
-        out.append(EventStrategy(
-            key=k, name="Old textbook rules (baseline)", horizon="swing", evidence="EXPERIMENTAL",
-            description=("The v1 rules (50-DMA volume breakout, 52-week-high breakout) with 5% stop / 10% target / "
-                         "15 days. Kept only as a 'what not to do' comparison (lost money in every re-test)."),
-            entries=lambda f: (((f.p.close > f.sma50) & (f.p.close.shift(1) <= f.sma50.shift(1))
-                                & (f.vol_ratio >= 2) & (f.p.close > f.sma200))
-                               | ((f.p.close > f.high_52w_prev) & (f.vol_ratio >= 1.5))),
-            priority=lambda f: f.vol_ratio, stop_pct=5, target_pct=10, max_hold=15, max_positions=10,
-            use_regime=False,
-        ))
     return out

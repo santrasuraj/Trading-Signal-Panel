@@ -477,7 +477,7 @@ def test_daily_result_keeps_refresh_info_when_a_strategy_has_actions(monkeypatch
     cfg = {"backtest_universe": "current", "filters": {"min_price": 0, "min_turnover_cr": 0},
            "strategies": {"momentum": {"enabled": True}, "near_high": {"enabled": False},
                           "trend_breakout": {"enabled": False}, "rsi2_pullback": {"enabled": False},
-                          "low_vol": {"enabled": False}, "legacy_rules": {"enabled": False}}}
+                          "low_vol": {"enabled": False}}}
     out = daily._run_daily(cfg, True, None, lambda *_: None)
     assert out["strategies"][0]["actions"][0]["results_on"] == "2099-01-01"
     assert saved["live_source"] == "Fyers (real-time)" and saved["nse_status"] == "NSE official data to today"

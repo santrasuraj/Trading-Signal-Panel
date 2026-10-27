@@ -350,7 +350,7 @@ function AboutSection() {
           <p>Strategy numbers are backtests on past NSE data with realistic Indian costs. While backtests use today's index list they include survivorship bias: stocks that fell out of the index are missing, so results look better than reality. Live and paper results are usually worse than backtests.</p>
           <p>Orders shown are what a model portfolio would do at the next open. You decide and place every trade yourself in your broker's app; the app never places orders.</p>
           <p>Sharing these signals with others as recommendations requires SEBI Research Analyst registration.</p>
-          <p>Intraday trading: SEBI found that 71% of individual intraday traders lost money in FY23. Intraday strategies here are research only and produce no orders; the Intraday page shows how each one did after costs.</p>
+          <p>Intraday trading: SEBI found that 71% of individual intraday traders lost money in FY23. Intraday signals (Signals page, Intraday tab) come only from strategies whose backtest shows a real edge after costs; the Intraday page shows how each one did.</p>
         </div>
       </Card>
       <Card title="Data and software">

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Minus, Moon, Search, Sun, TrendingDown, TrendingUp } from 'lucide-react'
 import { useIsFetching } from '@tanstack/react-query'
-import { useStatus } from '@/api/hooks'
+import { useLiveQuotes, useStatus } from '@/api/hooks'
 import type { AppStatus } from '@/api/types'
 import { useUi } from '@/app/uiState'
 import { cn } from '@/lib/csv'
@@ -70,8 +70,17 @@ export function TopBar() {
   const { data: s } = useStatus()
   const { setPalette } = useUi()
   const { resolved, toggle } = useTheme()
-  const fetching = useIsFetching({ predicate: (q) => q.queryKey[0] !== 'status' && q.state.data !== undefined })
-  const t = s?.ticker
+  const fetching = useIsFetching({ predicate: (q) => q.queryKey[0] !== 'status' && q.queryKey[0] !== 'quotes' && q.state.data !== undefined })
+  const lq = useLiveQuotes(['NIFTY50', 'NIFTY500', 'INDIAVIX'])
+  const lv = (sym: string, v: number | null, c: number | null): [number | null, number | null] =>
+    lq.quotes[sym] ? [lq.quotes[sym].price, lq.quotes[sym].change_pct] : [v, c]
+  const t = s?.ticker && (() => {
+    const x = s.ticker
+    const [nifty, nifty_change_pct] = lv('NIFTY50', x.nifty, x.nifty_change_pct)
+    const [nifty500, nifty500_change_pct] = lv('NIFTY500', x.nifty500, x.nifty500_change_pct)
+    const [vix, vix_change_pct] = lv('INDIAVIX', x.vix, x.vix_change_pct)
+    return { ...x, nifty, nifty_change_pct, nifty500, nifty500_change_pct, vix, vix_change_pct }
+  })()
   const mobile = useIsMobile()
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-panel/95 backdrop-blur supports-[backdrop-filter]:bg-panel/85">
@@ -95,6 +104,11 @@ export function TopBar() {
           // when not even one item fits).
           <div className="qd-ticker-box hidden min-w-0 flex-1 lg:block">
           <div className="qd-ticker flex h-5 flex-wrap items-center gap-x-3 gap-y-8 overflow-hidden">
+            {lq.live && lq.data && (
+              <span title={lq.data.note} className={cn('flex shrink-0 items-center gap-1 text-2xs font-bold uppercase tracking-[0.06em]', lq.data.delayed ? 'text-warn' : 'text-profit')}>
+                <span className={cn('h-1.5 w-1.5 rounded-full', lq.data.delayed ? 'bg-warn' : 'animate-pulse bg-profit')} />{lq.data.delayed ? 'Delayed' : 'Live'}
+              </span>
+            )}
             <TickerItem label="Nifty" value={t.nifty} chg={t.nifty_change_pct} to="/market/factors" />
             <TickerItem label="N500" value={t.nifty500} chg={t.nifty500_change_pct} to="/market/factors" />
             <TickerItem label="VIX" value={t.vix} chg={t.vix_change_pct} to="/market/breadth" />

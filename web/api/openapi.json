@@ -138,6 +138,79 @@
     }
    }
   },
+  "/api/signals/track-record": {
+   "get": {
+    "tags": [
+     "overview"
+    ],
+    "summary": "Signals Track Record",
+    "description": "Every BUY signal the scanner gave (journal), followed on real prices by the strategy's own rules.",
+    "operationId": "signals_track_record_api_signals_track_record_get",
+    "parameters": [
+     {
+      "name": "strategy",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 64
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Strategy"
+      }
+     },
+     {
+      "name": "state",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "enum": [
+          "pending",
+          "not_filled",
+          "open",
+          "closed"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "State"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TrackRecordResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/strategies": {
    "get": {
     "tags": [
@@ -732,6 +805,52 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/StockSnapshot"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/quotes": {
+   "get": {
+    "tags": [
+     "lookup"
+    ],
+    "summary": "Live Quotes",
+    "description": "Live prices between scans: FYERS real time when logged in, else Yahoo (~15 min delayed); the last close\nwhile the market is shut.",
+    "operationId": "live_quotes_api_quotes_get",
+    "parameters": [
+     {
+      "name": "symbols",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 2500,
+       "description": "up to 100 NSE symbols, comma separated",
+       "title": "Symbols"
+      },
+      "description": "up to 100 NSE symbols, comma separated"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/QuotesResponse"
         }
        }
       }
@@ -1451,6 +1570,27 @@
     }
    }
   },
+  "/api/intraday/signals": {
+   "get": {
+    "tags": [
+     "operations"
+    ],
+    "summary": "Intraday Signals",
+    "operationId": "intraday_signals_api_intraday_signals_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/IntradaySignalsResponse"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/intraday/run": {
    "post": {
     "tags": [
@@ -1482,6 +1622,595 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/IntradayRunAccepted"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/smart-money/status": {
+   "get": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Status",
+    "operationId": "status_api_smart_money_status_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmStatus"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/smart-money/overview": {
+   "get": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Overview",
+    "operationId": "overview_api_smart_money_overview_get",
+    "parameters": [
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 365,
+       "minimum": 1,
+       "default": 30,
+       "title": "Days"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmOverview"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/smart-money/deals": {
+   "get": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Deals",
+    "operationId": "deals_api_smart_money_deals_get",
+    "parameters": [
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 365,
+       "minimum": 1,
+       "default": 1,
+       "title": "Days"
+      }
+     },
+     {
+      "name": "side",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "buy",
+        "sell"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Side"
+      }
+     },
+     {
+      "name": "kind",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "bulk",
+        "block"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Kind"
+      }
+     },
+     {
+      "name": "category",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "big",
+        "institutions",
+        "fii",
+        "mf",
+        "insurance",
+        "bank",
+        "pension",
+        "promoter",
+        "famous",
+        "broker",
+        "other"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Category"
+      }
+     },
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "intraday",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "title": "Intraday"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "page_size",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 500,
+       "minimum": 1,
+       "default": 100,
+       "title": "Page Size"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmDealsResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/smart-money/insider": {
+   "get": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Insider",
+    "operationId": "insider_api_smart_money_insider_get",
+    "parameters": [
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 365,
+       "minimum": 1,
+       "default": 30,
+       "title": "Days"
+      }
+     },
+     {
+      "name": "side",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "buy",
+        "sell"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Side"
+      }
+     },
+     {
+      "name": "category",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "promoter",
+        "insider"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Category"
+      }
+     },
+     {
+      "name": "mode",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "market",
+        "all"
+       ],
+       "type": "string",
+       "default": "market",
+       "title": "Mode"
+      }
+     },
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "page_size",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 500,
+       "minimum": 1,
+       "default": 100,
+       "title": "Page Size"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmInsiderResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/smart-money/holdings": {
+   "get": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Holdings",
+    "operationId": "holdings_api_smart_money_holdings_get",
+    "parameters": [
+     {
+      "name": "view",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "accumulating",
+        "exiting",
+        "all"
+       ],
+       "type": "string",
+       "default": "accumulating",
+       "title": "View"
+      }
+     },
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 365,
+       "minimum": 1,
+       "default": 30,
+       "title": "Days"
+      }
+     },
+     {
+      "name": "category",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "big",
+        "institutions",
+        "fii",
+        "mf",
+        "insurance",
+        "bank",
+        "pension",
+        "promoter",
+        "famous",
+        "broker",
+        "other"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Category"
+      }
+     },
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmHoldingsResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/smart-money/flows": {
+   "get": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Flows",
+    "operationId": "flows_api_smart_money_flows_get",
+    "parameters": [
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 3650,
+       "minimum": 1,
+       "default": 30,
+       "title": "Days"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmFlowsResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/smart-money/stock/{symbol}": {
+   "get": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Stock",
+    "operationId": "stock_api_smart_money_stock__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 730,
+       "minimum": 1,
+       "default": 365,
+       "title": "Days"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmStockResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/smart-money/refresh": {
+   "post": {
+    "tags": [
+     "smart-money"
+    ],
+    "summary": "Refresh",
+    "operationId": "refresh_api_smart_money_refresh_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/SmRefreshRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "202": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SmRefreshAccepted"
         }
        }
       }
@@ -1793,6 +2522,74 @@
      "costs_round_trip_pct"
     ],
     "title": "AsOf"
+   },
+   "BacktestTradeStats": {
+    "properties": {
+     "trades": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trades"
+     },
+     "win_rate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Win Rate"
+     },
+     "expectancy_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Expectancy Pct"
+     },
+     "profit_factor": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Profit Factor"
+     },
+     "avg_days": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Days"
+     }
+    },
+    "type": "object",
+    "required": [
+     "trades",
+     "win_rate",
+     "expectancy_pct",
+     "profit_factor",
+     "avg_days"
+    ],
+    "title": "BacktestTradeStats"
    },
    "Bars": {
     "properties": {
@@ -5103,6 +5900,24 @@
     ],
     "title": "IntradayMetrics"
    },
+   "IntradayProven": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "title": "Key"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "name"
+    ],
+    "title": "IntradayProven"
+   },
    "IntradayResponse": {
     "properties": {
      "available": {
@@ -5304,6 +6119,210 @@
     "type": "object",
     "title": "IntradayRunRequest"
    },
+   "IntradaySignal": {
+    "properties": {
+     "strategy_key": {
+      "type": "string",
+      "title": "Strategy Key"
+     },
+     "strategy_name": {
+      "type": "string",
+      "title": "Strategy Name"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "LONG",
+       "SHORT"
+      ],
+      "title": "Side"
+     },
+     "entry_time": {
+      "type": "string",
+      "title": "Entry Time"
+     },
+     "entry": {
+      "type": "number",
+      "title": "Entry"
+     },
+     "stop": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop"
+     },
+     "qty": {
+      "type": "integer",
+      "title": "Qty"
+     },
+     "amount": {
+      "type": "number",
+      "title": "Amount"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "open",
+       "closed"
+      ],
+      "title": "State"
+     },
+     "exit_time": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exit Time"
+     },
+     "exit": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exit"
+     },
+     "last": {
+      "type": "number",
+      "title": "Last"
+     },
+     "reason": {
+      "type": "string",
+      "title": "Reason"
+     },
+     "pnl": {
+      "type": "number",
+      "title": "Pnl"
+     },
+     "ret_pct": {
+      "type": "number",
+      "title": "Ret Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "strategy_key",
+     "strategy_name",
+     "symbol",
+     "side",
+     "entry_time",
+     "entry",
+     "stop",
+     "qty",
+     "amount",
+     "state",
+     "exit_time",
+     "exit",
+     "last",
+     "reason",
+     "pnl",
+     "ret_pct"
+    ],
+    "title": "IntradaySignal"
+   },
+   "IntradaySignalsResponse": {
+    "properties": {
+     "generated_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Generated At"
+     },
+     "backtest_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Backtest At"
+     },
+     "tested": {
+      "type": "integer",
+      "title": "Tested"
+     },
+     "proven": {
+      "items": {
+       "$ref": "#/components/schemas/IntradayProven"
+      },
+      "type": "array",
+      "title": "Proven"
+     },
+     "signals": {
+      "items": {
+       "$ref": "#/components/schemas/IntradaySignal"
+      },
+      "type": "array",
+      "title": "Signals"
+     },
+     "source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Source"
+     },
+     "delayed": {
+      "type": "boolean",
+      "title": "Delayed"
+     },
+     "bars_to": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bars To"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "generated_at",
+     "backtest_at",
+     "tested",
+     "proven",
+     "signals",
+     "source",
+     "delayed",
+     "bars_to",
+     "note"
+    ],
+    "title": "IntradaySignalsResponse"
+   },
    "IntradayStrategy": {
     "properties": {
      "key": {
@@ -5350,20 +6369,6 @@
      },
      "equity": {
       "$ref": "#/components/schemas/TimeSeries"
-     },
-     "recent_trades": {
-      "items": {
-       "$ref": "#/components/schemas/IntradayTrade"
-      },
-      "type": "array",
-      "title": "Recent Trades"
-     },
-     "today": {
-      "items": {
-       "$ref": "#/components/schemas/IntradayTrade"
-      },
-      "type": "array",
-      "title": "Today"
      }
     },
     "type": "object",
@@ -5375,102 +6380,9 @@
      "horizon",
      "status",
      "metrics",
-     "equity",
-     "recent_trades",
-     "today"
+     "equity"
     ],
     "title": "IntradayStrategy"
-   },
-   "IntradayTrade": {
-    "properties": {
-     "symbol": {
-      "type": "string",
-      "title": "Symbol"
-     },
-     "date": {
-      "type": "string",
-      "title": "Date"
-     },
-     "side": {
-      "type": "string",
-      "enum": [
-       "LONG",
-       "SHORT"
-      ],
-      "title": "Side"
-     },
-     "entry_time": {
-      "type": "string",
-      "title": "Entry Time"
-     },
-     "entry": {
-      "type": "number",
-      "title": "Entry"
-     },
-     "stop": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Stop"
-     },
-     "exit_time": {
-      "type": "string",
-      "title": "Exit Time"
-     },
-     "exit": {
-      "type": "number",
-      "title": "Exit"
-     },
-     "reason": {
-      "type": "string",
-      "title": "Reason"
-     },
-     "qty": {
-      "type": "integer",
-      "title": "Qty"
-     },
-     "pnl": {
-      "type": "number",
-      "title": "Pnl"
-     },
-     "ret_pct": {
-      "type": "number",
-      "title": "Ret Pct"
-     },
-     "open_now": {
-      "anyOf": [
-       {
-        "type": "boolean"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Open Now"
-     }
-    },
-    "type": "object",
-    "required": [
-     "symbol",
-     "date",
-     "side",
-     "entry_time",
-     "entry",
-     "stop",
-     "exit_time",
-     "exit",
-     "reason",
-     "qty",
-     "pnl",
-     "ret_pct",
-     "open_now"
-    ],
-    "title": "IntradayTrade"
    },
    "JournalHealth": {
     "properties": {
@@ -6340,6 +7252,16 @@
        }
       ],
       "title": "You Hold Qty"
+     },
+     "strength": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/SignalStrength"
+       },
+       {
+        "type": "null"
+       }
+      ]
      }
     },
     "type": "object",
@@ -6366,7 +7288,8 @@
      "results_warning",
      "provisional",
      "below_min_position",
-     "you_hold_qty"
+     "you_hold_qty",
+     "strength"
     ],
     "title": "Order"
    },
@@ -7234,6 +8157,107 @@
      "kind"
     ],
     "title": "PriceLine"
+   },
+   "Quote": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "price": {
+      "type": "number",
+      "title": "Price"
+     },
+     "prev_close": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Prev Close"
+     },
+     "change_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Change Pct"
+     },
+     "time": {
+      "type": "string",
+      "title": "Time"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "price",
+     "prev_close",
+     "change_pct",
+     "time"
+    ],
+    "title": "Quote"
+   },
+   "QuotesResponse": {
+    "properties": {
+     "as_of": {
+      "type": "string",
+      "title": "As Of"
+     },
+     "session": {
+      "type": "string",
+      "enum": [
+       "pre_open",
+       "open",
+       "post_close",
+       "closed",
+       "holiday",
+       "weekend"
+      ],
+      "title": "Session"
+     },
+     "source": {
+      "type": "string",
+      "enum": [
+       "fyers",
+       "yahoo",
+       "close"
+      ],
+      "title": "Source"
+     },
+     "delayed": {
+      "type": "boolean",
+      "title": "Delayed"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     },
+     "quotes": {
+      "items": {
+       "$ref": "#/components/schemas/Quote"
+      },
+      "type": "array",
+      "title": "Quotes"
+     }
+    },
+    "type": "object",
+    "required": [
+     "as_of",
+     "session",
+     "source",
+     "delayed",
+     "note",
+     "quotes"
+    ],
+    "title": "QuotesResponse"
    },
    "RankingRow": {
     "properties": {
@@ -8469,6 +9493,47 @@
     ],
     "title": "SignalGroup"
    },
+   "SignalStrength": {
+    "properties": {
+     "score": {
+      "type": "integer",
+      "title": "Score"
+     },
+     "grade": {
+      "type": "string",
+      "enum": [
+       "strong",
+       "good",
+       "fair",
+       "weak"
+      ],
+      "title": "Grade"
+     },
+     "agree": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Agree"
+     },
+     "parts": {
+      "items": {
+       "$ref": "#/components/schemas/StrengthPart"
+      },
+      "type": "array",
+      "title": "Parts"
+     }
+    },
+    "type": "object",
+    "required": [
+     "score",
+     "grade",
+     "agree",
+     "parts"
+    ],
+    "title": "SignalStrength",
+    "description": "A transparent ranking aid for BUY signals (0-100, the sum of its parts), not a forecast."
+   },
    "SignalTotals": {
     "properties": {
      "buy_count": {
@@ -8586,6 +9651,2328 @@
      "totals"
     ],
     "title": "SignalsResponse"
+   },
+   "SmDeal": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "date": {
+      "type": "string",
+      "title": "Date"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "company": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "bulk",
+       "block",
+       "both"
+      ],
+      "title": "Kind"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "BUY",
+       "SELL",
+       "FLAT"
+      ],
+      "title": "Side"
+     },
+     "client": {
+      "type": "string",
+      "title": "Client"
+     },
+     "client_key": {
+      "type": "string",
+      "title": "Client Key"
+     },
+     "category": {
+      "type": "string",
+      "enum": [
+       "fii",
+       "mf",
+       "insurance",
+       "bank",
+       "pension",
+       "promoter",
+       "famous",
+       "broker",
+       "other"
+      ],
+      "title": "Category"
+     },
+     "category_label": {
+      "type": "string",
+      "title": "Category Label"
+     },
+     "sub_label": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sub Label"
+     },
+     "investor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Investor"
+     },
+     "round_trip": {
+      "type": "boolean",
+      "title": "Round Trip"
+     },
+     "buy_qty": {
+      "type": "integer",
+      "title": "Buy Qty"
+     },
+     "sell_qty": {
+      "type": "integer",
+      "title": "Sell Qty"
+     },
+     "net_qty": {
+      "type": "integer",
+      "title": "Net Qty"
+     },
+     "buy_value": {
+      "type": "number",
+      "title": "Buy Value"
+     },
+     "sell_value": {
+      "type": "number",
+      "title": "Sell Value"
+     },
+     "net_value": {
+      "type": "number",
+      "title": "Net Value"
+     },
+     "avg_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Price"
+     },
+     "pct_equity": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pct Equity"
+     },
+     "counterparties": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Counterparties"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "date",
+     "symbol",
+     "company",
+     "kind",
+     "side",
+     "client",
+     "client_key",
+     "category",
+     "category_label",
+     "sub_label",
+     "investor",
+     "round_trip",
+     "buy_qty",
+     "sell_qty",
+     "net_qty",
+     "buy_value",
+     "sell_value",
+     "net_value",
+     "avg_price",
+     "pct_equity",
+     "counterparties"
+    ],
+    "title": "SmDeal",
+    "description": "One client's net bulk/block trading in one stock on one day (NSE's rows for that client summed)."
+   },
+   "SmDealCounts": {
+    "properties": {
+     "buys": {
+      "type": "integer",
+      "title": "Buys"
+     },
+     "sells": {
+      "type": "integer",
+      "title": "Sells"
+     },
+     "intraday": {
+      "type": "integer",
+      "title": "Intraday"
+     },
+     "by_category": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "By Category"
+     }
+    },
+    "type": "object",
+    "required": [
+     "buys",
+     "sells",
+     "intraday",
+     "by_category"
+    ],
+    "title": "SmDealCounts"
+   },
+   "SmDealsResponse": {
+    "properties": {
+     "freshness": {
+      "$ref": "#/components/schemas/SmFreshness"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "since": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Since"
+     },
+     "until": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Until"
+     },
+     "intraday": {
+      "type": "boolean",
+      "title": "Intraday"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     },
+     "page": {
+      "type": "integer",
+      "title": "Page"
+     },
+     "page_size": {
+      "type": "integer",
+      "title": "Page Size"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/SmDeal"
+      },
+      "type": "array",
+      "title": "Rows"
+     },
+     "counts": {
+      "$ref": "#/components/schemas/SmDealCounts"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "freshness",
+     "days",
+     "since",
+     "until",
+     "intraday",
+     "total",
+     "page",
+     "page_size",
+     "rows",
+     "counts",
+     "note"
+    ],
+    "title": "SmDealsResponse"
+   },
+   "SmEvent": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "date": {
+      "type": "string",
+      "title": "Date"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "company": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company"
+     },
+     "event": {
+      "type": "string",
+      "enum": [
+       "deal_buy",
+       "deal_sell",
+       "insider_buy",
+       "insider_sell",
+       "insider_exit",
+       "pledge_invoked",
+       "new_holder",
+       "holder_added",
+       "holder_cut",
+       "holder_dropped",
+       "category_up",
+       "category_down",
+       "category_exit"
+      ],
+      "title": "Event"
+     },
+     "direction": {
+      "type": "string",
+      "enum": [
+       "up",
+       "down"
+      ],
+      "title": "Direction"
+     },
+     "source": {
+      "type": "string",
+      "enum": [
+       "bulk",
+       "block",
+       "insider",
+       "shareholding"
+      ],
+      "title": "Source"
+     },
+     "who": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Who"
+     },
+     "investor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Investor"
+     },
+     "category": {
+      "type": "string",
+      "enum": [
+       "fii",
+       "mf",
+       "insurance",
+       "bank",
+       "pension",
+       "promoter",
+       "famous",
+       "broker",
+       "other"
+      ],
+      "title": "Category"
+     },
+     "category_label": {
+      "type": "string",
+      "title": "Category Label"
+     },
+     "sub_label": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sub Label"
+     },
+     "value": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Value"
+     },
+     "qty": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Qty"
+     },
+     "pct_before": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pct Before"
+     },
+     "pct_after": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pct After"
+     },
+     "change_pts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Change Pts"
+     },
+     "pct_equity": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pct Equity"
+     },
+     "period": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Period"
+     },
+     "prev_period": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Prev Period"
+     },
+     "exit_kind": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "full_exit",
+         "below_1pct",
+         "sold_part",
+         "category_exit"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exit Kind"
+     },
+     "text": {
+      "type": "string",
+      "title": "Text"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "date",
+     "symbol",
+     "company",
+     "event",
+     "direction",
+     "source",
+     "who",
+     "investor",
+     "category",
+     "category_label",
+     "sub_label",
+     "value",
+     "qty",
+     "pct_before",
+     "pct_after",
+     "change_pts",
+     "pct_equity",
+     "period",
+     "prev_period",
+     "exit_kind",
+     "text"
+    ],
+    "title": "SmEvent",
+    "description": "One thing a big investor did that the disclosures show (server-written plain-English `text`)."
+   },
+   "SmFlowDay": {
+    "properties": {
+     "date": {
+      "type": "string",
+      "title": "Date"
+     },
+     "fii_buy_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fii Buy Cr"
+     },
+     "fii_sell_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fii Sell Cr"
+     },
+     "fii_net_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fii Net Cr"
+     },
+     "dii_buy_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dii Buy Cr"
+     },
+     "dii_sell_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dii Sell Cr"
+     },
+     "dii_net_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dii Net Cr"
+     }
+    },
+    "type": "object",
+    "required": [
+     "date",
+     "fii_buy_cr",
+     "fii_sell_cr",
+     "fii_net_cr",
+     "dii_buy_cr",
+     "dii_sell_cr",
+     "dii_net_cr"
+    ],
+    "title": "SmFlowDay"
+   },
+   "SmFlowsResponse": {
+    "properties": {
+     "freshness": {
+      "$ref": "#/components/schemas/SmFreshness"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "since": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Since"
+     },
+     "first_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Date"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/SmFlowDay"
+      },
+      "type": "array",
+      "title": "Rows"
+     },
+     "fii_net_cr_total": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fii Net Cr Total"
+     },
+     "dii_net_cr_total": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dii Net Cr Total"
+     },
+     "fii_streak": {
+      "type": "integer",
+      "title": "Fii Streak"
+     },
+     "dii_streak": {
+      "type": "integer",
+      "title": "Dii Streak"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "freshness",
+     "days",
+     "since",
+     "first_date",
+     "rows",
+     "fii_net_cr_total",
+     "dii_net_cr_total",
+     "fii_streak",
+     "dii_streak",
+     "note"
+    ],
+    "title": "SmFlowsResponse"
+   },
+   "SmFreshness": {
+    "properties": {
+     "deals": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Deals"
+     },
+     "insider": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Insider"
+     },
+     "flows": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Flows"
+     },
+     "holdings_period": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Holdings Period"
+     },
+     "refreshed_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Refreshed At"
+     },
+     "stale": {
+      "type": "boolean",
+      "title": "Stale"
+     }
+    },
+    "type": "object",
+    "required": [
+     "deals",
+     "insider",
+     "flows",
+     "holdings_period",
+     "refreshed_at",
+     "stale"
+    ],
+    "title": "SmFreshness"
+   },
+   "SmHolder": {
+    "properties": {
+     "holder": {
+      "type": "string",
+      "title": "Holder"
+     },
+     "holder_key": {
+      "type": "string",
+      "title": "Holder Key"
+     },
+     "group": {
+      "type": "string",
+      "enum": [
+       "promoter",
+       "public"
+      ],
+      "title": "Group"
+     },
+     "category": {
+      "type": "string",
+      "enum": [
+       "fii",
+       "mf",
+       "insurance",
+       "bank",
+       "pension",
+       "promoter",
+       "famous",
+       "broker",
+       "other"
+      ],
+      "title": "Category"
+     },
+     "category_label": {
+      "type": "string",
+      "title": "Category Label"
+     },
+     "sub_label": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sub Label"
+     },
+     "investor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Investor"
+     },
+     "pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pct"
+     },
+     "prev_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Prev Pct"
+     },
+     "change_pts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Change Pts"
+     },
+     "shares": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shares"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "new",
+       "added",
+       "cut",
+       "same",
+       "dropped"
+      ],
+      "title": "Status"
+     }
+    },
+    "type": "object",
+    "required": [
+     "holder",
+     "holder_key",
+     "group",
+     "category",
+     "category_label",
+     "sub_label",
+     "investor",
+     "pct",
+     "prev_pct",
+     "change_pts",
+     "shares",
+     "status"
+    ],
+    "title": "SmHolder"
+   },
+   "SmHoldingPeriod": {
+    "properties": {
+     "period": {
+      "type": "string",
+      "title": "Period"
+     },
+     "broadcast": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Broadcast"
+     },
+     "source": {
+      "type": "string",
+      "enum": [
+       "xbrl",
+       "master"
+      ],
+      "title": "Source"
+     },
+     "total_shares": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Total Shares"
+     },
+     "promoter_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Promoter Pct"
+     },
+     "public_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Public Pct"
+     },
+     "fii_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fii Pct"
+     },
+     "dii_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dii Pct"
+     },
+     "mf_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mf Pct"
+     },
+     "insurance_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Insurance Pct"
+     },
+     "banks_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Banks Pct"
+     },
+     "pension_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pension Pct"
+     },
+     "aif_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Aif Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "period",
+     "broadcast",
+     "source",
+     "total_shares",
+     "promoter_pct",
+     "public_pct",
+     "fii_pct",
+     "dii_pct",
+     "mf_pct",
+     "insurance_pct",
+     "banks_pct",
+     "pension_pct",
+     "aif_pct"
+    ],
+    "title": "SmHoldingPeriod"
+   },
+   "SmHoldingsResponse": {
+    "properties": {
+     "freshness": {
+      "$ref": "#/components/schemas/SmFreshness"
+     },
+     "view": {
+      "type": "string",
+      "enum": [
+       "accumulating",
+       "exiting",
+       "all"
+      ],
+      "title": "View"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "since": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Since"
+     },
+     "latest_period": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Latest Period"
+     },
+     "previous_period": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Previous Period"
+     },
+     "coverage": {
+      "type": "integer",
+      "title": "Coverage"
+     },
+     "stocks": {
+      "items": {
+       "$ref": "#/components/schemas/SmStock"
+      },
+      "type": "array",
+      "title": "Stocks"
+     },
+     "events": {
+      "items": {
+       "$ref": "#/components/schemas/SmEvent"
+      },
+      "type": "array",
+      "title": "Events"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "freshness",
+     "view",
+     "days",
+     "since",
+     "latest_period",
+     "previous_period",
+     "coverage",
+     "stocks",
+     "events",
+     "note"
+    ],
+    "title": "SmHoldingsResponse"
+   },
+   "SmInsiderCounts": {
+    "properties": {
+     "buys": {
+      "type": "integer",
+      "title": "Buys"
+     },
+     "sells": {
+      "type": "integer",
+      "title": "Sells"
+     },
+     "buy_value": {
+      "type": "number",
+      "title": "Buy Value"
+     },
+     "sell_value": {
+      "type": "number",
+      "title": "Sell Value"
+     },
+     "pledge_invoked": {
+      "type": "integer",
+      "title": "Pledge Invoked"
+     },
+     "full_exits": {
+      "type": "integer",
+      "title": "Full Exits"
+     }
+    },
+    "type": "object",
+    "required": [
+     "buys",
+     "sells",
+     "buy_value",
+     "sell_value",
+     "pledge_invoked",
+     "full_exits"
+    ],
+    "title": "SmInsiderCounts"
+   },
+   "SmInsiderResponse": {
+    "properties": {
+     "freshness": {
+      "$ref": "#/components/schemas/SmFreshness"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "since": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Since"
+     },
+     "until": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Until"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     },
+     "page": {
+      "type": "integer",
+      "title": "Page"
+     },
+     "page_size": {
+      "type": "integer",
+      "title": "Page Size"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/SmInsiderTrade"
+      },
+      "type": "array",
+      "title": "Rows"
+     },
+     "counts": {
+      "$ref": "#/components/schemas/SmInsiderCounts"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "freshness",
+     "days",
+     "since",
+     "until",
+     "total",
+     "page",
+     "page_size",
+     "rows",
+     "counts",
+     "note"
+    ],
+    "title": "SmInsiderResponse"
+   },
+   "SmInsiderTrade": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "company": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company"
+     },
+     "person": {
+      "type": "string",
+      "title": "Person"
+     },
+     "role": {
+      "type": "string",
+      "enum": [
+       "promoter",
+       "insider",
+       "other"
+      ],
+      "title": "Role"
+     },
+     "person_category": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Person Category"
+     },
+     "category": {
+      "type": "string",
+      "enum": [
+       "fii",
+       "mf",
+       "insurance",
+       "bank",
+       "pension",
+       "promoter",
+       "famous",
+       "broker",
+       "other"
+      ],
+      "title": "Category"
+     },
+     "category_label": {
+      "type": "string",
+      "title": "Category Label"
+     },
+     "sub_label": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sub Label"
+     },
+     "investor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Investor"
+     },
+     "side": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "BUY",
+         "SELL"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Side"
+     },
+     "mode": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mode"
+     },
+     "mode_kind": {
+      "type": "string",
+      "enum": [
+       "market",
+       "pledge",
+       "pledge_invoked",
+       "off_market",
+       "esop",
+       "gift",
+       "inter_se",
+       "preferential",
+       "other"
+      ],
+      "title": "Mode Kind"
+     },
+     "is_market": {
+      "type": "boolean",
+      "title": "Is Market"
+     },
+     "qty": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Qty"
+     },
+     "value": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Value"
+     },
+     "avg_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Price"
+     },
+     "before_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Before Pct"
+     },
+     "after_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "After Pct"
+     },
+     "change_pts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Change Pts"
+     },
+     "before_shares": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Before Shares"
+     },
+     "after_shares": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "After Shares"
+     },
+     "trade_from": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trade From"
+     },
+     "trade_to": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trade To"
+     },
+     "disclosed": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Disclosed"
+     },
+     "delay_days": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Delay Days"
+     },
+     "fully_exited": {
+      "type": "boolean",
+      "title": "Fully Exited"
+     },
+     "xbrl": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Xbrl"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "symbol",
+     "company",
+     "person",
+     "role",
+     "person_category",
+     "category",
+     "category_label",
+     "sub_label",
+     "investor",
+     "side",
+     "mode",
+     "mode_kind",
+     "is_market",
+     "qty",
+     "value",
+     "avg_price",
+     "before_pct",
+     "after_pct",
+     "change_pts",
+     "before_shares",
+     "after_shares",
+     "trade_from",
+     "trade_to",
+     "disclosed",
+     "delay_days",
+     "fully_exited",
+     "xbrl"
+    ],
+    "title": "SmInsiderTrade"
+   },
+   "SmKpis": {
+    "properties": {
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "since": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Since"
+     },
+     "big_buy_value": {
+      "type": "number",
+      "title": "Big Buy Value"
+     },
+     "big_sell_value": {
+      "type": "number",
+      "title": "Big Sell Value"
+     },
+     "inst_net_value": {
+      "type": "number",
+      "title": "Inst Net Value"
+     },
+     "stocks_bought": {
+      "type": "integer",
+      "title": "Stocks Bought"
+     },
+     "stocks_sold": {
+      "type": "integer",
+      "title": "Stocks Sold"
+     },
+     "insider_buy_value": {
+      "type": "number",
+      "title": "Insider Buy Value"
+     },
+     "insider_sell_value": {
+      "type": "number",
+      "title": "Insider Sell Value"
+     },
+     "exits": {
+      "type": "integer",
+      "title": "Exits"
+     },
+     "intraday_rows": {
+      "type": "integer",
+      "title": "Intraday Rows"
+     },
+     "fii_net_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fii Net Cr"
+     },
+     "dii_net_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dii Net Cr"
+     },
+     "flows_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Flows Date"
+     }
+    },
+    "type": "object",
+    "required": [
+     "days",
+     "since",
+     "big_buy_value",
+     "big_sell_value",
+     "inst_net_value",
+     "stocks_bought",
+     "stocks_sold",
+     "insider_buy_value",
+     "insider_sell_value",
+     "exits",
+     "intraday_rows",
+     "fii_net_cr",
+     "dii_net_cr",
+     "flows_date"
+    ],
+    "title": "SmKpis"
+   },
+   "SmOverview": {
+    "properties": {
+     "freshness": {
+      "$ref": "#/components/schemas/SmFreshness"
+     },
+     "run": {
+      "$ref": "#/components/schemas/SmRefreshRun"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "kpis": {
+      "$ref": "#/components/schemas/SmKpis"
+     },
+     "top_bought": {
+      "items": {
+       "$ref": "#/components/schemas/SmStock"
+      },
+      "type": "array",
+      "title": "Top Bought"
+     },
+     "top_sold": {
+      "items": {
+       "$ref": "#/components/schemas/SmStock"
+      },
+      "type": "array",
+      "title": "Top Sold"
+     },
+     "latest_deals_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Latest Deals Date"
+     },
+     "latest_deals": {
+      "items": {
+       "$ref": "#/components/schemas/SmDeal"
+      },
+      "type": "array",
+      "title": "Latest Deals"
+     },
+     "latest_insider": {
+      "items": {
+       "$ref": "#/components/schemas/SmInsiderTrade"
+      },
+      "type": "array",
+      "title": "Latest Insider"
+     },
+     "exits": {
+      "items": {
+       "$ref": "#/components/schemas/SmEvent"
+      },
+      "type": "array",
+      "title": "Exits"
+     },
+     "flows": {
+      "items": {
+       "$ref": "#/components/schemas/SmFlowDay"
+      },
+      "type": "array",
+      "title": "Flows"
+     },
+     "has_data": {
+      "type": "boolean",
+      "title": "Has Data"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Errors"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "freshness",
+     "run",
+     "days",
+     "kpis",
+     "top_bought",
+     "top_sold",
+     "latest_deals_date",
+     "latest_deals",
+     "latest_insider",
+     "exits",
+     "flows",
+     "has_data",
+     "errors",
+     "note"
+    ],
+    "title": "SmOverview"
+   },
+   "SmRefreshAccepted": {
+    "properties": {
+     "accepted": {
+      "type": "boolean",
+      "title": "Accepted"
+     },
+     "run": {
+      "$ref": "#/components/schemas/SmRefreshRun"
+     }
+    },
+    "type": "object",
+    "required": [
+     "accepted",
+     "run"
+    ],
+    "title": "SmRefreshAccepted"
+   },
+   "SmRefreshRequest": {
+    "properties": {
+     "days": {
+      "type": "integer",
+      "maximum": 730.0,
+      "minimum": 30.0,
+      "title": "Days",
+      "default": 365
+     }
+    },
+    "type": "object",
+    "title": "SmRefreshRequest"
+   },
+   "SmRefreshRun": {
+    "properties": {
+     "state": {
+      "type": "string",
+      "enum": [
+       "idle",
+       "running",
+       "done",
+       "failed"
+      ],
+      "title": "State"
+     },
+     "running": {
+      "type": "boolean",
+      "title": "Running"
+     },
+     "message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message"
+     },
+     "started_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started At"
+     },
+     "finished_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Finished At"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Errors"
+     }
+    },
+    "type": "object",
+    "required": [
+     "state",
+     "running",
+     "message",
+     "started_at",
+     "finished_at",
+     "errors"
+    ],
+    "title": "SmRefreshRun"
+   },
+   "SmSource": {
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "ok",
+       "partial",
+       "failed",
+       "skipped",
+       "never"
+      ],
+      "title": "Status"
+     },
+     "message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message"
+     },
+     "rows_added": {
+      "type": "integer",
+      "title": "Rows Added",
+      "default": 0
+     },
+     "last_ok_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Ok At"
+     },
+     "latest_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Latest Date"
+     }
+    },
+    "type": "object",
+    "required": [
+     "status",
+     "message",
+     "rows_added",
+     "last_ok_at",
+     "latest_date"
+    ],
+    "title": "SmSource"
+   },
+   "SmSources": {
+    "properties": {
+     "deals": {
+      "$ref": "#/components/schemas/SmSource"
+     },
+     "insider": {
+      "$ref": "#/components/schemas/SmSource"
+     },
+     "flows": {
+      "$ref": "#/components/schemas/SmSource"
+     },
+     "holdings": {
+      "$ref": "#/components/schemas/SmSource"
+     }
+    },
+    "type": "object",
+    "required": [
+     "deals",
+     "insider",
+     "flows",
+     "holdings"
+    ],
+    "title": "SmSources"
+   },
+   "SmStatus": {
+    "properties": {
+     "run": {
+      "$ref": "#/components/schemas/SmRefreshRun"
+     },
+     "freshness": {
+      "$ref": "#/components/schemas/SmFreshness"
+     },
+     "sources": {
+      "$ref": "#/components/schemas/SmSources"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Errors"
+     }
+    },
+    "type": "object",
+    "required": [
+     "run",
+     "freshness",
+     "sources",
+     "errors"
+    ],
+    "title": "SmStatus"
+   },
+   "SmStock": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "company": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company"
+     },
+     "direction": {
+      "type": "string",
+      "enum": [
+       "up",
+       "down",
+       "mixed"
+      ],
+      "title": "Direction"
+     },
+     "up_events": {
+      "type": "integer",
+      "title": "Up Events"
+     },
+     "down_events": {
+      "type": "integer",
+      "title": "Down Events"
+     },
+     "up_score": {
+      "type": "integer",
+      "title": "Up Score"
+     },
+     "down_score": {
+      "type": "integer",
+      "title": "Down Score"
+     },
+     "deal_buy_value": {
+      "type": "number",
+      "title": "Deal Buy Value"
+     },
+     "deal_sell_value": {
+      "type": "number",
+      "title": "Deal Sell Value"
+     },
+     "deal_net_value": {
+      "type": "number",
+      "title": "Deal Net Value"
+     },
+     "inst_buyers": {
+      "type": "integer",
+      "title": "Inst Buyers"
+     },
+     "inst_sellers": {
+      "type": "integer",
+      "title": "Inst Sellers"
+     },
+     "famous_buyers": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Famous Buyers"
+     },
+     "famous_sellers": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Famous Sellers"
+     },
+     "insider_buy_value": {
+      "type": "number",
+      "title": "Insider Buy Value"
+     },
+     "insider_sell_value": {
+      "type": "number",
+      "title": "Insider Sell Value"
+     },
+     "promoter_buying": {
+      "type": "boolean",
+      "title": "Promoter Buying"
+     },
+     "promoter_selling": {
+      "type": "boolean",
+      "title": "Promoter Selling"
+     },
+     "pledge_invoked": {
+      "type": "boolean",
+      "title": "Pledge Invoked"
+     },
+     "exits": {
+      "type": "integer",
+      "title": "Exits"
+     },
+     "fii_chg_pts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fii Chg Pts"
+     },
+     "dii_chg_pts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dii Chg Pts"
+     },
+     "mf_chg_pts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mf Chg Pts"
+     },
+     "promoter_chg_pts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Promoter Chg Pts"
+     },
+     "period": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Period"
+     },
+     "last_date": {
+      "type": "string",
+      "title": "Last Date"
+     },
+     "reasons": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Reasons"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "company",
+     "direction",
+     "up_events",
+     "down_events",
+     "up_score",
+     "down_score",
+     "deal_buy_value",
+     "deal_sell_value",
+     "deal_net_value",
+     "inst_buyers",
+     "inst_sellers",
+     "famous_buyers",
+     "famous_sellers",
+     "insider_buy_value",
+     "insider_sell_value",
+     "promoter_buying",
+     "promoter_selling",
+     "pledge_invoked",
+     "exits",
+     "fii_chg_pts",
+     "dii_chg_pts",
+     "mf_chg_pts",
+     "promoter_chg_pts",
+     "period",
+     "last_date",
+     "reasons"
+    ],
+    "title": "SmStock"
+   },
+   "SmStockResponse": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "company": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company"
+     },
+     "freshness": {
+      "$ref": "#/components/schemas/SmFreshness"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "has_data": {
+      "type": "boolean",
+      "title": "Has Data"
+     },
+     "summary": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/SmStock"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "deals": {
+      "items": {
+       "$ref": "#/components/schemas/SmDeal"
+      },
+      "type": "array",
+      "title": "Deals"
+     },
+     "insider": {
+      "items": {
+       "$ref": "#/components/schemas/SmInsiderTrade"
+      },
+      "type": "array",
+      "title": "Insider"
+     },
+     "holdings": {
+      "items": {
+       "$ref": "#/components/schemas/SmHoldingPeriod"
+      },
+      "type": "array",
+      "title": "Holdings"
+     },
+     "holders_period": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Holders Period"
+     },
+     "holders_prev_period": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Holders Prev Period"
+     },
+     "holders": {
+      "items": {
+       "$ref": "#/components/schemas/SmHolder"
+      },
+      "type": "array",
+      "title": "Holders"
+     },
+     "events": {
+      "items": {
+       "$ref": "#/components/schemas/SmEvent"
+      },
+      "type": "array",
+      "title": "Events"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "company",
+     "freshness",
+     "days",
+     "has_data",
+     "summary",
+     "deals",
+     "insider",
+     "holdings",
+     "holders_period",
+     "holders_prev_period",
+     "holders",
+     "events",
+     "note"
+    ],
+    "title": "SmStockResponse"
    },
    "SparklinesResponse": {
     "properties": {
@@ -9662,6 +13049,46 @@
     ],
     "title": "StrategyTradesCount"
    },
+   "StrengthPart": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "enum": [
+       "evidence",
+       "status",
+       "agreement",
+       "track",
+       "results"
+      ],
+      "title": "Key"
+     },
+     "label": {
+      "type": "string",
+      "title": "Label"
+     },
+     "points": {
+      "type": "number",
+      "title": "Points"
+     },
+     "max": {
+      "type": "number",
+      "title": "Max"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "label",
+     "points",
+     "max",
+     "note"
+    ],
+    "title": "StrengthPart"
+   },
    "SymbolInfo": {
     "properties": {
      "symbol": {
@@ -9964,6 +13391,435 @@
      "method"
     ],
     "title": "TimingRange"
+   },
+   "TrackRecordResponse": {
+    "properties": {
+     "as_of": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "As Of"
+     },
+     "min_closed": {
+      "type": "integer",
+      "title": "Min Closed"
+     },
+     "overall": {
+      "$ref": "#/components/schemas/TrackStats"
+     },
+     "strategies": {
+      "items": {
+       "$ref": "#/components/schemas/TrackStrategy"
+      },
+      "type": "array",
+      "title": "Strategies"
+     },
+     "signals": {
+      "items": {
+       "$ref": "#/components/schemas/TrackSignal"
+      },
+      "type": "array",
+      "title": "Signals"
+     },
+     "total": {
+      "type": "integer",
+      "title": "Total"
+     }
+    },
+    "type": "object",
+    "required": [
+     "as_of",
+     "min_closed",
+     "overall",
+     "strategies",
+     "signals",
+     "total"
+    ],
+    "title": "TrackRecordResponse"
+   },
+   "TrackSignal": {
+    "properties": {
+     "strategy_key": {
+      "type": "string",
+      "title": "Strategy Key"
+     },
+     "strategy_name": {
+      "type": "string",
+      "title": "Strategy Name"
+     },
+     "signal_date": {
+      "type": "string",
+      "title": "Signal Date"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "reason": {
+      "type": "string",
+      "title": "Reason"
+     },
+     "signal_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Signal Price"
+     },
+     "status_then": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "working",
+         "mixed",
+         "not-working",
+         "unknown"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status Then"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "pending",
+       "not_filled",
+       "open",
+       "closed"
+      ],
+      "title": "State"
+     },
+     "note": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Note"
+     },
+     "qty": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Qty"
+     },
+     "entry_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Entry Date"
+     },
+     "entry_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Entry Price"
+     },
+     "exit_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exit Date"
+     },
+     "exit_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exit Price"
+     },
+     "exit_reason": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exit Reason"
+     },
+     "last_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Price"
+     },
+     "stop": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "pnl": {
+      "type": "number",
+      "title": "Pnl"
+     },
+     "ret_pct": {
+      "type": "number",
+      "title": "Ret Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "strategy_key",
+     "strategy_name",
+     "signal_date",
+     "symbol",
+     "reason",
+     "signal_price",
+     "status_then",
+     "state",
+     "note",
+     "qty",
+     "entry_date",
+     "entry_price",
+     "exit_date",
+     "exit_price",
+     "exit_reason",
+     "last_price",
+     "stop",
+     "days",
+     "pnl",
+     "ret_pct"
+    ],
+    "title": "TrackSignal",
+    "description": "One BUY signal the scanner gave (journal), followed on real prices by the strategy's own rules."
+   },
+   "TrackStats": {
+    "properties": {
+     "signals": {
+      "type": "integer",
+      "title": "Signals"
+     },
+     "closed": {
+      "type": "integer",
+      "title": "Closed"
+     },
+     "open": {
+      "type": "integer",
+      "title": "Open"
+     },
+     "pending": {
+      "type": "integer",
+      "title": "Pending"
+     },
+     "not_filled": {
+      "type": "integer",
+      "title": "Not Filled"
+     },
+     "win_rate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Win Rate"
+     },
+     "avg_win_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Win Pct"
+     },
+     "avg_loss_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Loss Pct"
+     },
+     "expectancy_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Expectancy Pct"
+     },
+     "profit_factor": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Profit Factor"
+     },
+     "avg_days": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Days"
+     },
+     "realised_pnl": {
+      "type": "number",
+      "title": "Realised Pnl"
+     },
+     "open_pnl": {
+      "type": "number",
+      "title": "Open Pnl"
+     },
+     "level": {
+      "type": "string",
+      "enum": [
+       "good",
+       "bad",
+       "unknown"
+      ],
+      "title": "Level"
+     },
+     "verdict": {
+      "type": "string",
+      "title": "Verdict"
+     }
+    },
+    "type": "object",
+    "required": [
+     "signals",
+     "closed",
+     "open",
+     "pending",
+     "not_filled",
+     "win_rate",
+     "avg_win_pct",
+     "avg_loss_pct",
+     "expectancy_pct",
+     "profit_factor",
+     "avg_days",
+     "realised_pnl",
+     "open_pnl",
+     "level",
+     "verdict"
+    ],
+    "title": "TrackStats"
+   },
+   "TrackStrategy": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "title": "Key"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "status": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "working",
+         "mixed",
+         "not-working",
+         "unknown"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status"
+     },
+     "live": {
+      "$ref": "#/components/schemas/TrackStats"
+     },
+     "backtest": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/BacktestTradeStats"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "name",
+     "status",
+     "live",
+     "backtest"
+    ],
+    "title": "TrackStrategy"
    },
    "TradeRow": {
     "properties": {

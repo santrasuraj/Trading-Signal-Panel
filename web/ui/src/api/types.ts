@@ -98,6 +98,11 @@ export interface Features {
   rejected_tested: boolean;             // B4
   config_edit: boolean;                 // P2
 }
+// GET /api/quotes?symbols=  live prices between scans (FYERS real time, else Yahoo ~15 min delayed; last close when shut)
+export interface Quote { symbol: string; price: number; prev_close: number | null; change_pct: number | null; time: string }
+export interface QuotesResponse {
+  as_of: string; session: MarketSession; source: 'fyers' | 'yahoo' | 'close'; delayed: boolean; note: string; quotes: Quote[];
+}
 export interface Ticker {
   nifty: number | null; nifty_change_pct: number | null;
   nifty500: number | null; nifty500_change_pct: number | null;   // indices.factors 'Nifty 500' (chg_1d is 1-dp in source)
@@ -294,13 +299,38 @@ export interface Order {
   provisional: boolean;
   below_min_position: boolean;               // BUY amount < min_position (the backtest would skip it)
   you_hold_qty: number | null;
+  strength?: SignalStrength | null;          // BUY orders of strategies that are not comparison-only
 }
+// A transparent 0-100 ranking aid for BUY signals: the sum of its parts (web/api/services/signal_quality.py)
+export interface StrengthPart { key: 'evidence' | 'status' | 'agreement' | 'track' | 'results'; label: string; points: number; max: number; note: string }
+export interface SignalStrength { score: number; grade: 'strong' | 'good' | 'fair' | 'weak'; agree: string[]; parts: StrengthPart[] }
 export interface Allocation { strategy_key: string; pct: number; capital: number }
 export interface SignalGroup {
   strategy: StrategySummary;
   sizing: { capital: number; per_position: number; max_positions: number; sizing: 'equal' | 'risk'; risk_pct: number | null };
   orders: Order[];
   empty_reason: string | null;
+}
+// GET /api/signals/track-record?strategy=&state=  every BUY signal the scanner gave, followed on real prices
+export type TrackState = 'pending' | 'not_filled' | 'open' | 'closed'
+export interface TrackSignal {
+  strategy_key: string; strategy_name: string; signal_date: ISODate; symbol: string; reason: string; signal_price: number | null;
+  status_then: StrategyStatus | null; state: TrackState; note: string | null; qty: number | null;
+  entry_date: ISODate | null; entry_price: number | null; exit_date: ISODate | null; exit_price: number | null; exit_reason: string | null;
+  last_price: number | null; stop: number | null; days: number; pnl: number; ret_pct: number;
+}
+export interface TrackStats {
+  signals: number; closed: number; open: number; pending: number; not_filled: number;
+  win_rate: number | null; avg_win_pct: number | null; avg_loss_pct: number | null; expectancy_pct: number | null;
+  profit_factor: number | null; avg_days: number | null; realised_pnl: number; open_pnl: number;
+  level: 'good' | 'bad' | 'unknown'; verdict: string;
+}
+export interface TrackStrategy {
+  key: string; name: string; status: StrategyStatus | null; live: TrackStats;
+  backtest: { trades: number | null; win_rate: number | null; expectancy_pct: number | null; profit_factor: number | null; avg_days: number | null } | null;
+}
+export interface TrackRecordResponse {
+  as_of: ISODate | null; min_closed: number; overall: TrackStats; strategies: TrackStrategy[]; signals: TrackSignal[]; total: number;
 }
 // GET /api/signals?horizon=&allocations=momentum:60,earnings_gap:40   (debounce what-if drags >= 250 ms)
 export interface SignalsResponse {
@@ -503,10 +533,6 @@ export interface DataHealth {               // GET /api/data/health
 }
 
 // ------------------------------------------------------------------ 13. intraday (reads data/results/intraday.json from scanner/intraday/run.py; always 200)
-export interface IntradayTrade {
-  symbol: string; date: ISODate; side: 'LONG' | 'SHORT'; entry_time: string; entry: number; stop: number | null;
-  exit_time: string; exit: number; reason: string; qty: number; pnl: number; ret_pct: number; open_now: boolean | null;
-}
 export interface IntradayStrategy {
   key: string; name: string; description: string; evidence: Evidence; horizon: 'intraday'; status: StrategyStatus;
   metrics: {                                 // scanner/intraday/engine.intraday_metrics
@@ -516,7 +542,17 @@ export interface IntradayStrategy {
     ci95_day_pct: [number, number] | null; t_stat: number | null; significant: boolean; start: ISODate | null; end: ISODate | null;
   };
   equity: TimeSeries;                        // rupees
-  recent_trades: IntradayTrade[]; today: IntradayTrade[];
+}
+// Live intraday signals (GET /api/intraday/signals): only from strategies that are 'working' in the current backtest
+export interface IntradaySignal {
+  strategy_key: string; strategy_name: string; symbol: string; side: 'LONG' | 'SHORT'; entry_time: string; entry: number;
+  stop: number | null; qty: number; amount: number; state: 'open' | 'closed'; exit_time: string | null; exit: number | null;
+  last: number; reason: string; pnl: number; ret_pct: number;
+}
+export interface IntradaySignalsResponse {
+  generated_at: ISODateTime | null; backtest_at: ISODateTime | null; tested: number;
+  proven: { key: string; name: string }[]; signals: IntradaySignal[];
+  source: string | null; delayed: boolean; bars_to: string | null; note: string;
 }
 // Background re-run of the intraday backtest (web/api/services/intraday_job.run_status)
 export interface IntradayRun {

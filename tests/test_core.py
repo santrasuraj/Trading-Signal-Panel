@@ -363,8 +363,12 @@ def test_working_status_needs_money_made_and_recent_trading():
     assert working_status({"full": {"cagr_pct": 12.0}, "12m": win(-9.0, 80.0), "6m": win(-6.0, 90.0)})[0] == "not-working"
 
 
-def test_scan_lock_blocks_second_scan():
+def test_scan_lock_blocks_second_scan(tmp_path, monkeypatch):
+    from scanner import lock
     from scanner.lock import ScanBusy, scan_lock
+    # never the real data/.scan.lock: a scan running meanwhile would block this test (and lose its lock info)
+    monkeypatch.setattr(lock, "LOCK_FILE", tmp_path / ".scan.lock")
+    monkeypatch.setattr(lock, "INFO_FILE", tmp_path / ".scan.lock.json")
     with scan_lock("test"):
         with pytest.raises(ScanBusy):
             with scan_lock("test2"):

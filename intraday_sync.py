@@ -4,7 +4,8 @@
   python intraday_sync.py --archive       after the close: today's bars from FYERS into the store (~150 calls)
   python intraday_sync.py --live          real-time 5-minute bars from the FYERS WebSocket until 15:31
                                           (started before 09:13 it waits for the open; waits for today's login)
-  python intraday_sync.py --run           backtest the intraday strategies + today's setups
+  python intraday_sync.py --run           backtest the intraday strategies
+  python intraday_sync.py --signals       live signals from the strategies whose backtest passed (every 5 min)
   python intraday_sync.py --usage         FYERS calls used today vs the limits
 Options combine, e.g. --archive --run (used by the 15:45 scheduled task).
 Scheduled runs (pythonw, no console) write their output to data/logs/intraday.log.
@@ -20,7 +21,7 @@ from contextlib import contextmanager
 
 from scanner.fyers_limits import usage
 from scanner.intraday import fyers_sync, live
-from scanner.intraday.run import INTRADAY_DIR, intraday_universe, run_intraday_all
+from scanner.intraday.run import INTRADAY_DIR, intraday_universe, run_intraday_all, run_intraday_signals
 from scanner.lock import ScanBusy, _try_lock, _unlock
 from scanner.providers import get_fyers
 from scanner.settings import LOG_DIR, RESULTS_DIR, ist_now, load_config
@@ -82,7 +83,9 @@ def main() -> int:
     ap.add_argument("--backfill", action="store_true", help="~1 year of 5-minute history from FYERS (resumable)")
     ap.add_argument("--archive", action="store_true", help="after the close: today's bars from FYERS into the store")
     ap.add_argument("--live", action="store_true", help="real-time 5-minute bars from the FYERS WebSocket until 15:31")
-    ap.add_argument("--run", action="store_true", help="backtest the intraday strategies + today's setups")
+    ap.add_argument("--run", action="store_true", help="backtest the intraday strategies")
+    ap.add_argument("--signals", action="store_true",
+                    help="today's live signals, only from strategies whose backtest shows a real edge")
     ap.add_argument("--usage", action="store_true", help="FYERS calls used today vs the limits (the default)")
     ap.add_argument("--days", type=int, default=None, help="history to keep (default: intraday.history_days)")
     args = ap.parse_args()
@@ -101,7 +104,7 @@ def main() -> int:
 def _run(args) -> int:
     cfg = load_config()
     plan = str(cfg.get("fyers_plan", "standard"))
-    if args.usage or not any((args.backfill, args.archive, args.live, args.run)):
+    if args.usage or not any((args.backfill, args.archive, args.live, args.run, args.signals)):
         print(json.dumps(usage(plan), indent=1))
         return 0
 
@@ -137,6 +140,9 @@ def _run(args) -> int:
         except ScanBusy as e:
             print(e)
             return 2
+
+    if args.signals:
+        run_intraday_signals(cfg, frames=frames, log=lambda m: print(m, flush=True))
     return 0
 
 

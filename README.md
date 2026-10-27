@@ -48,7 +48,6 @@ says so and asks for the pasted address at once; otherwise it waits up to 5 minu
 | Near 52-week high (off: tested and rejected) | Holds uptrending stocks closest to their 52-week high, reviewed monthly. | Academic (George & Hwang; Indian study by Raju 2023). Works best as a filter, not on its own. Never beat the average stock here. |
 | **Low volatility** | Holds the 20 steadiest large, liquid stocks, reviewed quarterly (Nifty100 Low Vol 30 method). | Lost less in crashes (2008: −43% vs −54%). Defensive; lags in strong rallies. |
 | RSI-2 pullback (off: tested and rejected) | Buys sharp dips in uptrending stocks. | Short-term reversal mostly works in illiquid stocks. After realistic costs it fails here. |
-| Old textbook rules (off: tested and rejected) | The v1 rules (50-DMA / 52-week breakouts, 5% stop / 10% target). | **Lost money** in every test (−15.9%/year in the 24 Oct 2026 point-in-time scan). Kept only for comparison. |
 
 Also re-tested after every scan (rules in `scanner/strategies.py`; numbers on the dashboard):
 
@@ -264,7 +263,8 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
 - **Result so far (60 Yahoo sessions, 29 Jul – 23 Oct 2026):** all nine strategies **lose money after costs**, eight of them by a statistically significant margin. This matches SEBI's July 2024 study, which found that 71% of individual intraday traders lost money.
 - **Three pre-registered research tests** were added on 25 Oct 2026 (large-cap gap fade, stocks-in-play ORB-15, NIFTYBEES last-half-hour momentum; `docs/intraday_data.md` §5). They have no results yet and none is expected to beat Indian MIS costs; they are there to measure that honestly, never to produce orders.
 - **One year of FYERS history** gives a much stronger test. Run `5_intraday_backfill.bat` once after logging in. A daily 15:45 task keeps it growing; FYERS itself only keeps a rolling year.
-- **Real-time setups:** `4_intraday_live.bat` builds live 5-minute bars from the FYERS WebSocket. The scheduled task starts it at 09:14.
+- **Live bars:** `4_intraday_live.bat` builds live 5-minute bars from the FYERS WebSocket. The scheduled task starts it at 09:14.
+- **Live signals, only from proven strategies:** every 5 minutes from 09:20 to 15:05 (`intraday_sync.py --signals`), the strategies whose backtest shows a real edge after costs (a profit beyond luck over 40+ sessions) are run on today's bars. Their trades appear on the Signals page, Intraday tab. A strategy that loses money or can't be told from luck never gives a signal; while none qualifies, the tab says so.
 
 ---
 
@@ -272,7 +272,7 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
 
 1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token. Then send any message to your new bot, and message **@userinfobot** to get your chat ID.
 2. Put both in `.env` (`TELEGRAM_BOT_TOKEN=...`, `TELEGRAM_CHAT_ID=...`).
-3. Right-click **`setup_schedule.ps1`** and choose **Run with PowerShell**. This sets up weekday scans at 8:30 AM, 3:40 PM and 7:15 PM that send a summary to your phone, plus the two intraday jobs (section 5). Run it again after updating the app, so the tasks get the current settings.
+3. Right-click **`setup_schedule.ps1`** and choose **Run with PowerShell**. This sets up weekday scans at 8:30 AM, 3:40 PM and 7:15 PM that send a summary to your phone, a live scan every 30 minutes from 9:45 AM to 3:15 PM (provisional signals on today's live candle, no Telegram), plus the three intraday jobs (section 5). While the market is open, the top bar and the Signals page also show live prices every 30 seconds (FYERS real time when logged in, else Yahoo ~15 min delayed). Run it again after updating the app, so the tasks get the current settings.
 
 If a scan fails, you get a Telegram alert; a scheduled scan skipped because another scan was running sends a short
 note too. Details go to `data\logs\scanner.log` (a scheduled scan that cannot even start, e.g. a missing

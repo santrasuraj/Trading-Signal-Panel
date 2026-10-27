@@ -3,7 +3,7 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
 import { api, isFailure, type ChartParams, type ScreenerParams, type TradesParams } from './client'
-import type { AppStatus, CurveRange, HoldingInput, IntradayResponse } from './types'
+import type { AppStatus, CurveRange, HoldingInput, IntradayResponse, Quote, TrackState } from './types'
 
 export const keys = {
   status: ['status'] as const,
@@ -21,6 +21,8 @@ export const keys = {
   stock: (s: string) => ['stock', s] as const,
   holdings: ['holdings'] as const,
   paper: ['paper'] as const,
+  trackRecord: (p: object) => ['signals', 'track', p] as const,
+  quotes: (s: string) => ['quotes', s] as const,
   paperDetail: (k: string) => ['paper', k] as const,
   movers: ['market', 'movers'] as const,
   sectors: ['market', 'sectors'] as const,
@@ -33,6 +35,7 @@ export const keys = {
   costs: (v: number) => ['costs', v] as const,
   dataHealth: ['data', 'health'] as const,
   intraday: ['intraday'] as const,
+  intradaySignals: ['intraday', 'signals'] as const,
 }
 
 /** Never retry client errors or missing features; retry network/5xx twice with backoff. */
@@ -83,6 +86,23 @@ export const useChart = (s: string, p: ChartParams) =>
   useQuery({ queryKey: keys.chart(s, p), queryFn: () => api.chart(s, p), staleTime: 10 * 60_000, placeholderData: keepPreviousData, enabled: !!s })
 export const useStock = (s: string) => useQuery({ queryKey: keys.stock(s), queryFn: () => api.stock(s), staleTime: Infinity, enabled: !!s })
 export const useHoldings = () => useQuery({ queryKey: keys.holdings, queryFn: api.holdings, staleTime: Infinity })
+/** Live prices while the market is open: polled every 30 s (the server caches each symbol: FYERS 30 s, Yahoo 60 s). Off while
+ *  the market is shut or the tab is hidden. Returns a symbol -> quote map plus the response (source, delay). */
+export function useLiveQuotes(symbols: string[]) {
+  const open = useStatus().data?.clock.session === 'open'
+  const list = [...new Set(symbols)].sort().slice(0, 100)
+  const q = useQuery({
+    queryKey: keys.quotes(list.join(',')), queryFn: () => api.quotes(list), enabled: open && list.length > 0,
+    refetchInterval: 30_000, staleTime: 20_000, retry: false, placeholderData: keepPreviousData,
+  })
+  const map: Record<string, Quote> = {}
+  if (open) for (const x of q.data?.quotes ?? []) map[x.symbol] = x
+  return { live: open && !!q.data, quotes: map, data: open ? q.data : undefined }
+}
+
+/** The signal track record changes only with a new scan (the ScanWatcher invalidates every query then). */
+export const useTrackRecord = (p: { strategy?: string; state?: TrackState } = {}) =>
+  useQuery({ queryKey: keys.trackRecord(p), queryFn: () => api.trackRecord(p), staleTime: Infinity, placeholderData: keepPreviousData })
 export const usePaper = () => useQuery({ queryKey: keys.paper, queryFn: api.paper, staleTime: Infinity })
 export const usePaperDetail = (k: string) => useQuery({ queryKey: keys.paperDetail(k), queryFn: () => api.paperDetail(k), staleTime: Infinity, enabled: !!k })
 export const useMovers = () => useQuery({ queryKey: keys.movers, queryFn: api.movers, ...scan })
@@ -100,6 +120,10 @@ export const useDataHealth = () => useQuery({ queryKey: keys.dataHealth, queryFn
 /** Polls every 5 s only while a background re-run (POST /api/intraday/run) is in progress. */
 export const useIntraday = () =>
   useQuery({ queryKey: keys.intraday, queryFn: api.intraday, staleTime: 60_000, refetchInterval: (q) => (q.state.data?.run?.running ? 5000 : false) })
+
+/** Today's live intraday signals: the server recomputes them every 5 minutes in market hours, so poll every minute. */
+export const useIntradaySignals = () =>
+  useQuery({ queryKey: keys.intradaySignals, queryFn: api.intradaySignals, staleTime: 30_000, refetchInterval: 60_000 })
 
 export function useStartScan() {
   const qc = useQueryClient()

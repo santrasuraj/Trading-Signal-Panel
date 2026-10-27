@@ -51,8 +51,6 @@ def format_daily(r: dict, top_n: int = 10) -> str:
         lines.append("⚠ " + r["results_note"] + " - results warnings are missing today.")
     held = {h.get("symbol") for h in r.get("holdings", [])}
     for s in r["strategies"]:
-        if s["status"] == "not-working" and s["key"] == "legacy_rules":
-            continue
         y1 = s["metrics"].get("12m") or {}
         full = s["metrics"]["full"]
         lines.append("")

@@ -158,8 +158,6 @@ strategies:
   nr7_breakout:
     enabled: false           # retired 25 Oct 2026 (still re-tested and shown under "Tested & rejected")
     rejected_reason: "Lost money: -9.7%/yr after costs in the point-in-time test (Aug 2019 - Oct 2026), max drawdown -62%, profit factor 0.89 over 2,632 trades - costs of very frequent short trades eat any edge."
-  legacy_rules:
-    enabled: false           # the old v1 rules (-12%/yr); enable only to compare
 
 telegram:
   top_n: 10

@@ -5,7 +5,7 @@
 import type {
   ApiError, AppStatus, BreadthResponse, ChartResponse, ChartRange, ChartTf, ClientErrorCode, ConfigResponse, CostPreviewResponse,
   CurveRange, CurveResponse, DataHealth, FactorsResponse, FyersImportResponse, FyersLoginCompleteResponse, FyersLoginMode,
-  FyersLoginResponse, FyersStatus, HealthResponse, HoldingInput, HoldingsPutResponse, HoldingsResponse, IndicatorId, IntradayResponse, IntradayRunAccepted,
+  FyersLoginResponse, FyersStatus, HealthResponse, HoldingInput, HoldingsPutResponse, HoldingsResponse, IndicatorId, IntradayResponse, IntradayRunAccepted, IntradaySignalsResponse, QuotesResponse, TrackRecordResponse, TrackState,
   MoversResponse, OverviewResponse, PaperDetail, PaperListResponse, ResultsResponse, ScanHistoryResponse, ScanLogResponse,
   ScanStartResponse, ScreenerResponse, SectorsResponse, SignalsResponse, SparklinesResponse, StockSnapshot, StrategyDetail,
   StrategyListResponse, SymbolsResponse, TradesPage,
@@ -110,6 +110,8 @@ export const api = {
   importFyers: () => fetchJson<FyersImportResponse>('/api/holdings/import/fyers', { method: 'POST' }),
 
   paper: () => fetchJson<PaperListResponse>('/api/paper'),
+  quotes: (symbols: string[]) => fetchJson<QuotesResponse>(`/api/quotes${qs({ symbols: symbols.join(',') })}`),
+  trackRecord: (p: { strategy?: string; state?: TrackState } = {}) => fetchJson<TrackRecordResponse>(`/api/signals/track-record${qs(p)}`),
   paperDetail: (key: string) => fetchJson<PaperDetail>(`/api/paper/${enc(key)}`),
 
   movers: () => fetchJson<MoversResponse>('/api/market/movers'),
@@ -130,5 +132,6 @@ export const api = {
   costPreview: (value: number) => fetchJson<CostPreviewResponse>(`/api/costs/preview${qs({ value: Math.round(value) })}`),
   dataHealth: () => fetchJson<DataHealth>('/api/data/health'),
   intraday: () => fetchJson<IntradayResponse>('/api/intraday'),
+  intradaySignals: () => fetchJson<IntradaySignalsResponse>('/api/intraday/signals'),
   intradayRun: (update = true) => fetchJson<IntradayRunAccepted>('/api/intraday/run', { method: 'POST', body: body({ update }) }),
 }

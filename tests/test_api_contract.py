@@ -851,6 +851,74 @@ def test_intraday_is_honest(client):
         assert d["summary"].startswith(f"All {len(losers)} intraday strategies lost money after costs")
 
 
+def test_buy_signals_carry_a_strength_that_adds_up(client):
+    d = get_ok(client, "/api/signals", M.SignalsResponse)
+    buys = [o for g in d["groups"] for o in g["orders"] if o["action"] == "BUY" and not o["comparison_only"]]
+    assert buys, "the fixture scan has buy orders"
+    for o in buys:
+        s = o["strength"]
+        assert 0 <= s["score"] <= 100 and s["score"] == round(sum(p["points"] for p in s["parts"]))
+        assert {p["key"] for p in s["parts"]} == {"evidence", "status", "agreement", "track", "results"}
+    assert all(o["strength"] is None for g in d["groups"] for o in g["orders"]
+               if o["action"] == "SELL" or o["comparison_only"])
+
+
+def test_signal_track_record_follows_journaled_buys(client):
+    d = get_ok(client, "/api/signals/track-record", M.TrackRecordResponse)
+    assert d["min_closed"] == 10 and d["total"] == len(d["signals"])
+    assert sum(s["live"]["signals"] for s in d["strategies"]) == d["overall"]["signals"] == d["total"]
+    for r in d["signals"]:
+        if r["state"] in ("open", "closed"):
+            assert r["entry_date"] > r["signal_date"] and r["qty"] >= 1      # fills at the NEXT open
+    dates = [r["signal_date"] for r in d["signals"]]
+    assert dates == sorted(dates, reverse=True)
+    if d["signals"]:
+        key = d["signals"][0]["strategy_key"]
+        f = get_ok(client, f"/api/signals/track-record?strategy={key}&state=open", M.TrackRecordResponse)
+        assert all(r["strategy_key"] == key and r["state"] == "open" for r in f["signals"]) and f["total"] == d["total"]
+    assert client.get("/api/signals/track-record?state=bogus").status_code == 422
+
+
+def test_quotes_endpoint_shape_and_validation(client):
+    d = get_ok(client, "/api/quotes?symbols=NIFTY50,IGIL", M.QuotesResponse)
+    if d["session"] != "open":
+        assert d["source"] == "close" and {x["symbol"] for x in d["quotes"]} <= {"NIFTY50", "IGIL"}
+    assert client.get("/api/quotes?symbols=bad%20one").status_code == 422
+    assert client.get("/api/quotes").status_code == 422
+
+
+def test_intraday_signals_need_a_proven_strategy(client):
+    d = get_ok(client, "/api/intraday/signals", M.IntradaySignalsResponse)
+    if not d["proven"]:
+        assert d["signals"] == [] and d["note"].startswith("No intraday strategy has a proven edge after costs")
+
+
+def test_intraday_signals_only_from_proven_strategies_of_the_current_backtest(mclient, env):
+    from web.api.util import now_ist
+    res = env / "data" / "results"
+    bt = json.loads((res / "intraday.json").read_text(encoding="utf-8"))
+    for i, s in enumerate(bt["strategies"]):
+        s["status"] = "working" if i == 0 else "not-working"
+    good, bad = bt["strategies"][0]["key"], bt["strategies"][1]["key"]
+    (res / "intraday.json").write_text(json.dumps(bt), encoding="utf-8")
+    sig = {"strategy_name": "x", "symbol": "AAA", "side": "LONG", "entry_time": "09:30", "entry": 100.0, "stop": 99.0,
+           "qty": 10, "amount": 1000.0, "state": "open", "exit_time": None, "exit": None, "last": 101.0,
+           "reason": "open", "pnl": 8.0, "ret_pct": 0.8}
+    f = {"generated_at": now_ist().isoformat(timespec="seconds"), "backtest_at": bt["generated_at"],
+         "signals": [{**sig, "strategy_key": good}, {**sig, "strategy_key": bad, "symbol": "BBB"}],
+         "source": "yahoo", "bars_to": "2026-10-23T11:25:00", "note": "1 signal today."}
+    (res / "intraday_signals.json").write_text(json.dumps(f), encoding="utf-8")
+    caches.clear_all()
+    d = get_ok(mclient, "/api/intraday/signals", M.IntradaySignalsResponse)
+    assert [p["key"] for p in d["proven"]] == [good] and d["delayed"]
+    assert [x["symbol"] for x in d["signals"]] == ["AAA"]          # a strategy that is not proven never shows
+    f["backtest_at"] = "2020-01-01T00:00:00+05:30"                   # computed against an older backtest
+    (res / "intraday_signals.json").write_text(json.dumps(f), encoding="utf-8")
+    caches.clear_all()
+    d = get_ok(mclient, "/api/intraday/signals", M.IntradaySignalsResponse)
+    assert d["signals"] == [] and "not been computed today" in d["note"]
+
+
 def test_intraday_run_starts_background_job(mclient, env, monkeypatch):
     from web.api.services import intraday_job
 

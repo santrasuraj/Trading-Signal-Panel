@@ -1,11 +1,13 @@
-"""2. overview + 4. signals."""
+"""2. overview + 4. signals (+ their strength and the signal track record)."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Literal
 
-from ..models import Horizon, OverviewResponse, SignalsResponse
+from fastapi import APIRouter, Query
+
+from ..models import Horizon, OverviewResponse, SignalsResponse, TrackRecordResponse
 from ..services import alerts, clock, data, fyers_svc, intraday_view, market_derived, paper_svc, scan_runner
-from ..services import results as results_svc, sizing, strategies as st
+from ..services import results as results_svc, signal_quality, sizing, strategies as st, track_svc
 from ..util import fmt_date, num, today_ist
 
 router = APIRouter(prefix="/api", tags=["overview"])
@@ -58,6 +60,7 @@ def overview():
     alloc, _, _ = sizing.resolve(None, [s["key"] for s in active])
     held = data.holdings_qty()
     orders = [o for s in active for o in sizing.orders_for(s, lt, alloc, held, today)]
+    signal_quality.attach(orders, lt, active, track_svc.stats_by_strategy())
     empty: dict = {}
     for h in ("longterm", "swing"):
         mine = [s for s in active if s["horizon"] == h and not st.comparison_only(s)]
@@ -70,11 +73,7 @@ def overview():
         else:
             reviews = sorted(summaries[s["key"]]["next_rebalance"] for s in mine if summaries[s["key"]]["next_rebalance"])
             empty[h] = "No entry signals today." + (f" Next review {fmt_date(reviews[0], year=False)}." if reviews else "")
-    lost, n_intra = intraday_view.losing()
-    empty["intraday"] = ("Intraday backtest not run yet." if not n_intra
-                         else "Intraday strategies are research only: every one tested loses money after costs."
-                         if lost == n_intra
-                         else f"Intraday strategies are research only: {lost} of {n_intra} tested lose money after costs.")
+    empty["intraday"] = intraday_view.signals_payload()["note"]
     prev = alerts.previous_scan(lt)
     paper_list = list(papers.values())
     al = alerts.build(lt, as_of, clk, fyers_svc.status(lt=lt), scan_runner.status(), list(summaries.values()),
@@ -113,6 +112,10 @@ def signals(horizon: Horizon | None = None, allocations: str | None = None):
                                   "risk_pct": num(r.get("risk_pct")) if r.get("sizing") == "risk" else None},
                        "orders": orders, "empty_reason": None if orders else sizing.empty_reason(summ)})
     groups.sort(key=lambda g: g["strategy"]["comparison_only"])        # stable: daily.py order within each
+    track = track_svc.stats_by_strategy()
+    every = [s for s in st.all_strategies(lt) if s["lifecycle"] == "active"]   # agreement ignores ?horizon=
+    for g in groups:
+        signal_quality.attach(g["orders"], lt, every, track)
     acting = [o for g in groups if not g["strategy"]["comparison_only"] for o in g["orders"]]
     buys = [o for o in acting if o["action"] == "BUY"]
     sells = [o for o in acting if o["action"] == "SELL"]
@@ -141,3 +144,10 @@ def signals(horizon: Horizon | None = None, allocations: str | None = None):
                    "risk_amount": round(sum(o["risk_amount"] or 0 for o in buys), 2),
                    "results_warnings": sum(1 for o in acting if o["results_warning"])},
     }
+
+
+@router.get("/signals/track-record", response_model=TrackRecordResponse)
+def signals_track_record(strategy: str | None = Query(None, max_length=64),
+                         state: Literal["pending", "not_filled", "open", "closed"] | None = None):
+    """Every BUY signal the scanner gave (journal), followed on real prices by the strategy's own rules."""
+    return track_svc.payload(strategy, state)
