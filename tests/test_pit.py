@@ -297,6 +297,31 @@ def test_daily_backtest_uses_point_in_time_universe(monkeypatch, frames_factory)
     assert out["n500"].iloc[-1] == 100.0 and out["f"].p.index_close.iloc[-1] == 1000.0
 
 
+def test_minimum_price_uses_prices_as_traded(monkeypatch, frames_factory):
+    """A later split must not decide whether a stock was tradable before it: SPLIT traded at 800, had a 1:1
+    bonus on day 100 and a 1:10 split on day 200, so its stored (adjusted) history is 40 throughout - under
+    the 50 minimum, but only from day 200 did it really trade there. LOW really traded at 40 all along."""
+    n = 300
+    fr = frames_factory({"SPLIT": [40.0] * n, "LOW": [40.0] * n})
+    fr["deliv_pct"] = fr["close"] * np.nan
+    idx = fr["close"].index
+    uni = pd.DataFrame(True, index=idx, columns=["SPLIT", "LOW"])
+    adj = [{"date": str(idx[100].date()), "symbol": "SPLIT", "factor": 0.5, "reason": "bonus"},
+           {"date": str(idx[200].date()), "symbol": "SPLIT", "factor": 0.1, "reason": "split"}]
+    data = pit.PitData(fr, uni, {"rule": {"size": 2}, "members_no_longer_trading": 0,
+                                 "last_day": str(idx[-1].date()), "adjustments": adj})
+    traded = pit.as_traded(data, fr["close"])
+    assert traded["SPLIT"].iloc[[99, 100, 199, 200]].tolist() == pytest.approx([800, 400, 400, 40])
+    assert (traded["LOW"] == 40).all()
+    monkeypatch.setattr(pit, "update", lambda days, keep, **k: data)
+    store_fr = {f: pd.DataFrame({"NIFTY50": 1000.0, "NIFTY500": 100.0}, index=idx)
+                for f in ("open", "high", "low", "close", "volume", "deliv_pct")}
+    cfg = {"backtest_universe": "point_in_time", "filters": {"min_price": 50, "min_turnover_cr": 0}}
+    trad = pit.backtest_setup(cfg, store_fr, {}, ["SPLIT"], {}, log=lambda *_: None)["trad"]
+    assert trad["SPLIT"].iloc[30:200].all() and not trad["SPLIT"].iloc[200:].any()   # 30: turnover average warm-up
+    assert not trad["LOW"].any()
+
+
 def test_point_in_time_backtest_keeps_etfs_and_live_factor_inputs(monkeypatch, frames_factory):
     """ETFs are funds, never universe members - but the ETF strategies trade them from the store's prices,
     and sector rotation / earnings gaps need the same industry and results inputs as the live panel."""

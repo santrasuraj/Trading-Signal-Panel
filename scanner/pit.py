@@ -540,6 +540,19 @@ def apply_adjustments(fr: dict[str, pd.DataFrame], adjustments: list[dict]) -> N
         fr[f] = pd.DataFrame(arr, index=idx, columns=cols)
 
 
+def as_traded(data: PitData, prices: pd.DataFrame) -> pd.DataFrame:
+    """`prices` (dates x symbols, adjusted like data.frames) as they traded that day: every later corporate
+    action in data.info["adjustments"] undone (see apply_adjustments). Columns without one are unchanged."""
+    idx, cols = prices.index, prices.columns
+    pos = {s: j for j, s in enumerate(cols)}
+    factor = np.ones(prices.shape)
+    for a in data.info.get("adjustments", ()):
+        j = pos.get(a["symbol"])
+        if j is not None:
+            factor[:idx.searchsorted(pd.Timestamp(a["date"])), j] *= a["factor"]
+    return prices / factor
+
+
 def build(days: list[date], keep_symbols: list[str] = (), download: bool = True, log=print,
           size: int = UNIVERSE_SIZE, reference: pd.DataFrame | None = None,
           reuse: PitData | None = None) -> PitData:
@@ -728,7 +741,8 @@ def backtest_setup(cfg: dict, frames: dict, info: dict, current: list[str], live
     bp = panel_from_wide(backtest_frames(data, frames, etfs), list(data.members) + etfs, etfs=set(etfs),
                          universe=data.universe)
     bf = Factors(bp, etfs=set(etfs), industry=industry, results_dates=results_dates)
-    btrad = tradable_mask(bf, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)))
+    btrad = tradable_mask(bf, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)),
+                          price=as_traded(data, bp.close))     # a later split must not decide the minimum price
     out.update({
         "universe": "point_in_time", "f": bf, "trad": btrad, "ew": equal_weight_index(bf, btrad & ~bf.etf_mask),
         "n500": (frames["close"][INDEX_N500].reindex(bp.dates) if INDEX_N500 in frames["close"].columns else None),
@@ -788,7 +802,10 @@ def compare(cfg: dict | None = None, keys=("momentum", "trend_breakout", "low_vo
         frames = {f: v.loc[:end] for f, v in frames.items()}
         p = panel_from_wide(frames, syms, universe=uni.loc[:end] if uni is not None else None)
         f = Factors(p)
-        trad = tradable_mask(f, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)))
+        # The minimum price on as-traded prices in every setup (like for like); for the store's Yahoo-adjusted
+        # prices NSE's own actions are a close stand-in for the ones Yahoo applied.
+        trad = tradable_mask(f, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)),
+                             price=as_traded(data, p.close))
         ew = equal_weight_index(f, trad)
         n500 = frames["close"][INDEX_N500].reindex(p.dates) if INDEX_N500 in frames["close"].columns else None
         log(f"{label}: {len(syms)} stocks, {int(trad.sum(axis=1).median())} tradable on a typical day")

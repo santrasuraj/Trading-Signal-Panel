@@ -46,15 +46,33 @@ INDEX_COLUMNS = ("NIFTY50", "INDIAVIX", "NIFTY500")
 
 
 ETF_PRINT_TOL_PCT = 2.0
+# ETFs that track Indian shares: when their open print is stray, the market's own opening gap (Nifty 50) is the
+# best estimate of where they really opened. Others (gold, Nasdaq) get no gap estimate: their previous close.
+MARKET_LINKED_ETFS = frozenset({"NIFTYBEES", "JUNIORBEES", "BANKBEES"})
 
 
-def clean_etf_prints(wide: dict[str, pd.DataFrame], etfs, tol_pct: float = ETF_PRINT_TOL_PCT) -> None:
+def market_open_gap(frames: dict[str, pd.DataFrame], index_symbol: str = "NIFTY50") -> pd.Series | None:
+    """The index's open / its previous close, per day (None without the index's prices)."""
+    if index_symbol not in frames["open"].columns or index_symbol not in frames["close"].columns:
+        return None
+    o = frames["open"][index_symbol].astype(float).sort_index()
+    c = frames["close"][index_symbol].astype(float).sort_index()
+    return o / c.ffill().shift(1)
+
+
+def clean_etf_prints(wide: dict[str, pd.DataFrame], etfs, tol_pct: float = ETF_PRINT_TOL_PCT,
+                     market_gap: pd.Series | None = None) -> None:
     """NSE's daily file often has a stray odd-lot pre-open trade as an ETF's open (and so as its high or low),
     far from what the fund traded at all day: JUNIORBEES on 3 Jan 2022 'opened' at 386 between closes of 444 and
     447. A backtest that fills at the next open would book a phantom +15% (or -15%). For ETF columns only, an
-    open beyond BOTH the previous and today's close by more than tol_pct is moved to the nearest edge of that
-    band, and high / low are capped at it (real ETF moves - gaps included - stay inside the band because the
-    band contains today's close). Stocks are never touched: their gaps are real. In place."""
+    open beyond BOTH the previous and today's close by more than tol_pct is stray, and high / low are capped at
+    that band (real ETF moves - gaps included - stay inside it because it contains today's close). Stocks are
+    never touched: their gaps are real. In place.
+
+    A stray open is replaced by what was known at the open, never by the day's close: the previous close moved
+    by the market's opening gap (`market_gap`, see market_open_gap) for MARKET_LINKED_ETFS, the previous close
+    for the others. Moving it to the band's edge instead filled a crash day that recovered near its close:
+    on 13 Mar 2020 Nifty 50 opened -5% but the backtest bought NIFTYBEES at -2%."""
     cols = [c for c in wide["close"].columns if c in set(etfs or ())]
     if not cols:
         return
@@ -62,7 +80,13 @@ def clean_etf_prints(wide: dict[str, pd.DataFrame], etfs, tol_pct: float = ETF_P
     pc = c.shift(1).fillna(c)
     lo = np.minimum(pc, c) * (1 - tol_pct / 100)
     hi = np.maximum(pc, c) * (1 + tol_pct / 100)
-    o = wide["open"][cols].clip(lower=lo, upper=hi)
+    o = wide["open"][cols]
+    gap = (market_gap.reindex(c.index) if market_gap is not None else pd.Series(np.nan, index=c.index))
+    gap = gap.where(gap > 0).fillna(1.0)
+    est = pc.copy()
+    linked = [col for col in cols if col in MARKET_LINKED_ETFS]
+    est[linked] = pc[linked].mul(gap, axis=0)
+    o = o.where(~((o < lo) | (o > hi)), est)
     wide["open"][cols] = o
     wide["high"][cols] = np.maximum(wide["high"][cols].clip(upper=hi), np.maximum(o, c))
     wide["low"][cols] = np.minimum(wide["low"][cols].clip(lower=lo), np.minimum(o, c))
@@ -92,7 +116,7 @@ def panel_from_wide(frames: dict[str, pd.DataFrame], symbols: list[str] | None =
     wide["close"] = filled_close
     wide["volume"] = wide["volume"].where(~gap, 0.0)
     if etfs:
-        clean_etf_prints(wide, etfs)
+        clean_etf_prints(wide, etfs, market_gap=market_open_gap(frames, index_symbol))
     index_close = (close_all[index_symbol].reindex(dates).astype(float) if index_symbol in close_all.columns
                    else pd.Series(np.nan, index=dates))
     if universe is not None:

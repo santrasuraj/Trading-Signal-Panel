@@ -142,9 +142,29 @@ def test_etf_stray_open_prints_are_cleaned_and_stocks_are_not():
               "volume": frame([1.0, 1.0, 1.0], [1.0, 1.0, 1.0])}
     p = panel_from_wide(frames, ["JUNIORBEES", "STOCK"], etfs={"JUNIORBEES"})
     o, lo, hi = p.open["JUNIORBEES"], p.low["JUNIORBEES"], p.high["JUNIORBEES"]
-    assert abs(o.iloc[2] - 443.8 * 0.98) < 0.01 and abs(o.iloc[1] - 443.8 * 1.02) < 0.01
+    # no index prices here, so no market gap: a stray open becomes the previous close
+    assert abs(o.iloc[2] - 443.8) < 0.01 and abs(o.iloc[1] - 437.2) < 0.01
     assert (lo <= o).all() and (o <= hi).all() and (lo <= p.close["JUNIORBEES"]).all()
     assert p.open["STOCK"].iloc[2] == 112.0 and p.low["STOCK"].iloc[2] == 104.0     # a real stock gap stays
+
+
+def test_stray_etf_open_uses_the_markets_opening_gap_not_the_close():
+    """13 Mar 2020: Nifty 50 opened -5% and recovered to close higher; NIFTYBEES printed -11% at the open. The
+    fill is the market's real opening gap (-5%), not the edge of a band around the day's close (-2%), which
+    was not known at the open. GOLDBEES does not follow Nifty: its stray open becomes its previous close."""
+    from scanner.panel import panel_from_wide
+    idx = pd.to_datetime(["2020-03-11", "2020-03-12", "2020-03-13"])
+    frame = lambda b, g, n: pd.DataFrame({"NIFTYBEES": b, "GOLDBEES": g, "NIFTY50": n}, index=idx)  # noqa: E731
+    frames = {"open": frame([108.0, 104.0, 91.26], [38.0, 38.0, 35.0], [10400.0, 9900.0, 9500.0]),
+              "high": frame([109.0, 105.0, 120.85], [38.5, 38.5, 39.0], [10500.0, 10000.0, 10100.0]),
+              "low": frame([107.0, 102.0, 91.26], [37.5, 37.5, 35.0], [10300.0, 9500.0, 8550.0]),
+              "close": frame([108.0, 102.99, 106.36], [38.0, 38.2, 38.4], [10450.0, 10000.0, 10350.0]),
+              "volume": frame([1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0])}
+    p = panel_from_wide(frames, ["NIFTYBEES", "GOLDBEES"], etfs={"NIFTYBEES", "GOLDBEES"})
+    assert p.open["NIFTYBEES"].iloc[2] == pytest.approx(102.99 * 0.95)
+    assert p.open["GOLDBEES"].iloc[2] == pytest.approx(38.2)
+    assert p.low["NIFTYBEES"].iloc[2] <= p.open["NIFTYBEES"].iloc[2] <= p.high["NIFTYBEES"].iloc[2]
+    assert p.open["NIFTYBEES"].iloc[1] == 104.0                     # inside the band: a real open stays
 
 
 def test_factor_index_lookup_ignores_case():

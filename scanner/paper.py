@@ -30,8 +30,8 @@ import numpy as np
 import pandas as pd
 
 from .costs import CostModel
-from .engine import Trade, _curve_stats, _trade_stats
-from .panel import TRADING_DAYS, clean_etf_prints
+from .engine import STALE_EXIT_DAYS, Trade, _curve_stats, _trade_stats
+from .panel import TRADING_DAYS, clean_etf_prints, market_open_gap
 from .providers import INDEX_N500, INDEX_NIFTY
 from .settings import DATA_DIR
 
@@ -151,6 +151,8 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
     O, H, L, C = (arr(f) for f in ("open", "high", "low", "close"))
     V = arr("volume")
     C_ff = pd.DataFrame(C).ffill().to_numpy()
+    seen = np.where(O > 0, np.arange(T)[:, None], -1)
+    last_seen = np.maximum.accumulate(seen, axis=0)   # row of each stock's latest real trade
     # As engine.simulate: one price all day on real volume = locked at a circuit band. No buy at an upper-circuit
     # lock and no sell or stop at a lower-circuit lock (the order would sit unfilled): it waits for the next day.
     prev_c = np.vstack([np.full((1, C.shape[1]), np.nan), C[:-1]])
@@ -247,6 +249,12 @@ def paper_trade(key: str, journal: dict[str, pd.DataFrame], frames: dict[str, pd
             sells, buys = plan(d)
             for s, r in sells.items():
                 pending_sell.setdefault(s, r)
+
+        # 0) Holdings that stopped trading (delisted, merged away, long suspension): sold at their last traded
+        #    price, as engine.simulate - a sell order needs an open, so it would otherwise wait forever.
+        for s in [s for s in pos if t - last_seen[t, col[s]] >= STALE_EXIT_DAYS and not math.isnan(C_ff[t, col[s]])]:
+            close_position(t, s, C_ff[t, col[s]], "stopped trading")
+            pending_sell.pop(s, None)
 
         # 1) Sells at the open first (a missing open or a lower-circuit lock keeps the order for the next day),
         #    then buys.
@@ -458,7 +466,7 @@ def _clean_etfs(frames: dict[str, pd.DataFrame], etfs) -> dict[str, pd.DataFrame
     if not cols:
         return frames
     wide = {f: frames[f][cols].astype(float) for f in ("open", "high", "low", "close")}
-    clean_etf_prints(wide, cols)
+    clean_etf_prints(wide, cols, market_gap=market_open_gap(frames))
     out = dict(frames)
     for f in ("open", "high", "low"):
         df = frames[f].astype(float)
