@@ -2251,6 +2251,492 @@
      }
     }
    }
+  },
+  "/api/options/status": {
+   "get": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Status",
+    "operationId": "status_api_options_status_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OptStatus"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options/chain/{symbol}": {
+   "get": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Chain",
+    "description": "One stored chain (the newest, or `expiry`), analysed; `window`: minutes over which OI change is measured.",
+    "operationId": "chain_api_options_chain__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "expiry",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Expiry"
+      }
+     },
+     {
+      "name": "window",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 180,
+       "minimum": 5,
+       "default": 15,
+       "title": "Window"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OptChainResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options/history/{symbol}": {
+   "get": {
+    "tags": [
+     "options"
+    ],
+    "summary": "History",
+    "description": "The chain's day so far: spot, max pain, PCR, ATM IV, straddle and the top OI levels per stored chain.",
+    "operationId": "history_api_options_history__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "expiry",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Expiry"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OptHistoryResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options/research": {
+   "get": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Research",
+    "description": "Do PCR, max pain and the straddle's expected move hold up on the stored days? (scanner/options_research.py)",
+    "operationId": "research_api_options_research_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OptResearchResponse"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options/refresh": {
+   "post": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Refresh",
+    "operationId": "refresh_api_options_refresh_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/OptRefreshRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "202": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OptRefreshAccepted"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/fno/status": {
+   "get": {
+    "tags": [
+     "fno"
+    ],
+    "summary": "Status",
+    "operationId": "status_api_fno_status_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FnoStatus"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/fno/positions": {
+   "get": {
+    "tags": [
+     "fno"
+    ],
+    "summary": "Positions",
+    "operationId": "positions_api_fno_positions_get",
+    "parameters": [
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 250,
+       "minimum": 1,
+       "default": 20,
+       "title": "Days"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FnoPositionsResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/fno/futures": {
+   "get": {
+    "tags": [
+     "fno"
+    ],
+    "summary": "Futures",
+    "operationId": "futures_api_fno_futures_get",
+    "parameters": [
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Date"
+      }
+     },
+     {
+      "name": "kind",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "stock",
+        "index"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Kind"
+      }
+     },
+     {
+      "name": "buildup",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "long_buildup",
+        "short_buildup",
+        "short_covering",
+        "long_unwinding"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Buildup"
+      }
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "oi_chg",
+        "chg",
+        "value",
+        "pcr"
+       ],
+       "type": "string",
+       "default": "oi_chg",
+       "title": "Sort"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 1000,
+       "minimum": 1,
+       "default": 300,
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FnoFuturesResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/fno/refresh": {
+   "post": {
+    "tags": [
+     "fno"
+    ],
+    "summary": "Refresh",
+    "operationId": "refresh_api_fno_refresh_post",
+    "parameters": [
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 250,
+       "minimum": 1,
+       "default": 30,
+       "title": "Days"
+      }
+     }
+    ],
+    "responses": {
+     "202": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FnoRefreshAccepted"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/levels/{symbol}": {
+   "get": {
+    "tags": [
+     "levels"
+    ],
+    "summary": "Levels",
+    "operationId": "levels_api_levels__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LevelsResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -3914,6 +4400,551 @@
      "min_turnover_cr"
     ],
     "title": "FiltersConfig"
+   },
+   "FnoClientSeries": {
+    "properties": {
+     "fut_long": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Fut Long"
+     },
+     "fut_short": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Fut Short"
+     },
+     "fut_net": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Fut Net"
+     },
+     "fut_net_chg": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Fut Net Chg"
+     },
+     "fut_long_pct": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Fut Long Pct"
+     },
+     "call_net": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Call Net"
+     },
+     "put_net": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Put Net"
+     },
+     "stk_fut_net": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Stk Fut Net"
+     }
+    },
+    "type": "object",
+    "required": [
+     "fut_long",
+     "fut_short",
+     "fut_net",
+     "fut_net_chg",
+     "fut_long_pct",
+     "call_net",
+     "put_net",
+     "stk_fut_net"
+    ],
+    "title": "FnoClientSeries",
+    "description": "Columnar, one value per date in FnoPositionsResponse.dates (contracts)."
+   },
+   "FnoFuture": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "index",
+       "stock"
+      ],
+      "title": "Kind"
+     },
+     "close": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Close"
+     },
+     "chg_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Chg Pct"
+     },
+     "oi_contracts": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Contracts"
+     },
+     "oi_chg_contracts": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Chg Contracts"
+     },
+     "oi_chg_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Chg Pct"
+     },
+     "volume": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Volume"
+     },
+     "value_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Value Cr"
+     },
+     "lot": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lot"
+     },
+     "basis_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Basis Pct"
+     },
+     "buildup": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "long_buildup",
+         "short_buildup",
+         "short_covering",
+         "long_unwinding"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Buildup"
+     },
+     "pcr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pcr"
+     },
+     "call_wall": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Call Wall"
+     },
+     "put_wall": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Put Wall"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "kind",
+     "close",
+     "chg_pct",
+     "oi_contracts",
+     "oi_chg_contracts",
+     "oi_chg_pct",
+     "volume",
+     "value_cr",
+     "lot",
+     "basis_pct",
+     "buildup",
+     "pcr",
+     "call_wall",
+     "put_wall"
+    ],
+    "title": "FnoFuture"
+   },
+   "FnoFuturesResponse": {
+    "properties": {
+     "date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Date"
+     },
+     "dates": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Dates"
+     },
+     "counts": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Counts"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/FnoFuture"
+      },
+      "type": "array",
+      "title": "Rows"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "date",
+     "dates",
+     "counts",
+     "rows",
+     "note"
+    ],
+    "title": "FnoFuturesResponse"
+   },
+   "FnoPositionsResponse": {
+    "properties": {
+     "dates": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Dates"
+     },
+     "clients": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/FnoClientSeries"
+      },
+      "type": "object",
+      "title": "Clients"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "dates",
+     "clients",
+     "note"
+    ],
+    "title": "FnoPositionsResponse"
+   },
+   "FnoRefreshAccepted": {
+    "properties": {
+     "accepted": {
+      "type": "boolean",
+      "title": "Accepted"
+     },
+     "run": {
+      "$ref": "#/components/schemas/FnoRefreshRun"
+     }
+    },
+    "type": "object",
+    "required": [
+     "accepted",
+     "run"
+    ],
+    "title": "FnoRefreshAccepted"
+   },
+   "FnoRefreshRun": {
+    "properties": {
+     "state": {
+      "type": "string",
+      "enum": [
+       "idle",
+       "running",
+       "done",
+       "failed"
+      ],
+      "title": "State"
+     },
+     "running": {
+      "type": "boolean",
+      "title": "Running"
+     },
+     "message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message"
+     },
+     "started_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started At"
+     },
+     "finished_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Finished At"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Errors"
+     }
+    },
+    "type": "object",
+    "required": [
+     "state",
+     "running",
+     "message",
+     "started_at",
+     "finished_at",
+     "errors"
+    ],
+    "title": "FnoRefreshRun"
+   },
+   "FnoStatus": {
+    "properties": {
+     "run": {
+      "$ref": "#/components/schemas/FnoRefreshRun"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "first_day": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Day"
+     },
+     "last_day": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Day"
+     },
+     "last_refresh_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Refresh At"
+     },
+     "pending": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Pending"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Errors"
+     }
+    },
+    "type": "object",
+    "required": [
+     "run",
+     "days",
+     "first_day",
+     "last_day",
+     "last_refresh_at",
+     "pending",
+     "errors"
+    ],
+    "title": "FnoStatus"
    },
    "FullMetrics": {
     "properties": {
@@ -6493,6 +7524,58 @@
     ],
     "title": "Leader"
    },
+   "LevelsResponse": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "daily": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LvDaily"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "intraday": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LvIntraday"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "intraday_source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Intraday Source"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "daily",
+     "intraday",
+     "intraday_source",
+     "note"
+    ],
+    "title": "LevelsResponse"
+   },
    "LogsHealth": {
     "properties": {
      "path": {
@@ -6522,6 +7605,1024 @@
      "last_error"
     ],
     "title": "LogsHealth"
+   },
+   "LvChartPattern": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "title": "Key"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "bias": {
+      "type": "string",
+      "enum": [
+       "bullish",
+       "bearish",
+       "neutral"
+      ],
+      "title": "Bias"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "forming",
+       "confirmed"
+      ],
+      "title": "Status"
+     },
+     "direction": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "up",
+         "down"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Direction"
+     },
+     "confirmed_bars_ago": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Confirmed Bars Ago"
+     },
+     "what": {
+      "type": "string",
+      "title": "What"
+     },
+     "start": {
+      "type": "string",
+      "title": "Start"
+     },
+     "end": {
+      "type": "string",
+      "title": "End"
+     },
+     "breakout": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Breakout"
+     },
+     "invalidation": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Invalidation"
+     },
+     "target": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target"
+     },
+     "target_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target Pct"
+     },
+     "series": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Series"
+     },
+     "points": {
+      "items": {
+       "$ref": "#/components/schemas/LvPoint"
+      },
+      "type": "array",
+      "title": "Points"
+     },
+     "lines": {
+      "items": {
+       "$ref": "#/components/schemas/LvLine"
+      },
+      "type": "array",
+      "title": "Lines"
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "name",
+     "bias",
+     "status",
+     "direction",
+     "confirmed_bars_ago",
+     "what",
+     "start",
+     "end",
+     "breakout",
+     "invalidation",
+     "target",
+     "target_pct",
+     "series",
+     "points",
+     "lines"
+    ],
+    "title": "LvChartPattern"
+   },
+   "LvDaily": {
+    "properties": {
+     "date": {
+      "type": "string",
+      "title": "Date"
+     },
+     "close": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Close"
+     },
+     "atr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Atr"
+     },
+     "atr_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Atr Pct"
+     },
+     "day": {
+      "$ref": "#/components/schemas/LvDay"
+     },
+     "pivots": {
+      "$ref": "#/components/schemas/LvPivots"
+     },
+     "cpr_width_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cpr Width Pct"
+     },
+     "high_52w": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "High 52W"
+     },
+     "low_52w": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Low 52W"
+     },
+     "from_high_52w_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "From High 52W Pct"
+     },
+     "levels": {
+      "$ref": "#/components/schemas/LvLevels"
+     },
+     "trend": {
+      "$ref": "#/components/schemas/LvTrend"
+     },
+     "patterns": {
+      "items": {
+       "$ref": "#/components/schemas/LvPattern"
+      },
+      "type": "array",
+      "title": "Patterns"
+     },
+     "chart_patterns": {
+      "items": {
+       "$ref": "#/components/schemas/LvChartPattern"
+      },
+      "type": "array",
+      "title": "Chart Patterns"
+     }
+    },
+    "type": "object",
+    "required": [
+     "date",
+     "close",
+     "atr",
+     "atr_pct",
+     "day",
+     "pivots",
+     "cpr_width_pct",
+     "high_52w",
+     "low_52w",
+     "from_high_52w_pct",
+     "levels",
+     "trend",
+     "patterns",
+     "chart_patterns"
+    ],
+    "title": "LvDaily"
+   },
+   "LvDay": {
+    "properties": {
+     "open": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Open"
+     },
+     "high": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "High"
+     },
+     "low": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Low"
+     },
+     "close": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Close"
+     },
+     "prev_close": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Prev Close"
+     },
+     "prev_high": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Prev High"
+     },
+     "prev_low": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Prev Low"
+     }
+    },
+    "type": "object",
+    "required": [
+     "open",
+     "high",
+     "low",
+     "close",
+     "prev_close",
+     "prev_high",
+     "prev_low"
+    ],
+    "title": "LvDay"
+   },
+   "LvIntraday": {
+    "properties": {
+     "date": {
+      "type": "string",
+      "title": "Date"
+     },
+     "bars": {
+      "type": "integer",
+      "title": "Bars"
+     },
+     "last_bar": {
+      "type": "string",
+      "title": "Last Bar"
+     },
+     "last": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last"
+     },
+     "open": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Open"
+     },
+     "high": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "High"
+     },
+     "low": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Low"
+     },
+     "vwap": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vwap"
+     },
+     "vwap_upper": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vwap Upper"
+     },
+     "vwap_lower": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vwap Lower"
+     },
+     "above_vwap": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Above Vwap"
+     },
+     "or_high": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Or High"
+     },
+     "or_low": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Or Low"
+     },
+     "or_state": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "above",
+         "below",
+         "inside"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Or State"
+     },
+     "profile": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LvProfile"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "patterns": {
+      "items": {
+       "$ref": "#/components/schemas/LvPattern"
+      },
+      "type": "array",
+      "title": "Patterns"
+     }
+    },
+    "type": "object",
+    "required": [
+     "date",
+     "bars",
+     "last_bar",
+     "last",
+     "open",
+     "high",
+     "low",
+     "vwap",
+     "vwap_upper",
+     "vwap_lower",
+     "above_vwap",
+     "or_high",
+     "or_low",
+     "or_state",
+     "profile",
+     "patterns"
+    ],
+    "title": "LvIntraday"
+   },
+   "LvLevel": {
+    "properties": {
+     "price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Price"
+     },
+     "touches": {
+      "type": "integer",
+      "title": "Touches"
+     },
+     "last": {
+      "type": "string",
+      "title": "Last"
+     },
+     "dist_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dist Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "price",
+     "touches",
+     "last",
+     "dist_pct"
+    ],
+    "title": "LvLevel"
+   },
+   "LvLevels": {
+    "properties": {
+     "resistance": {
+      "items": {
+       "$ref": "#/components/schemas/LvLevel"
+      },
+      "type": "array",
+      "title": "Resistance"
+     },
+     "support": {
+      "items": {
+       "$ref": "#/components/schemas/LvLevel"
+      },
+      "type": "array",
+      "title": "Support"
+     }
+    },
+    "type": "object",
+    "required": [
+     "resistance",
+     "support"
+    ],
+    "title": "LvLevels"
+   },
+   "LvLine": {
+    "properties": {
+     "i1": {
+      "type": "integer",
+      "title": "I1"
+     },
+     "p1": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "P1"
+     },
+     "i2": {
+      "type": "integer",
+      "title": "I2"
+     },
+     "p2": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "P2"
+     }
+    },
+    "type": "object",
+    "required": [
+     "i1",
+     "p1",
+     "i2",
+     "p2"
+    ],
+    "title": "LvLine"
+   },
+   "LvPattern": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "title": "Key"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "bias": {
+      "type": "string",
+      "enum": [
+       "bullish",
+       "bearish",
+       "neutral"
+      ],
+      "title": "Bias"
+     },
+     "what": {
+      "type": "string",
+      "title": "What"
+     },
+     "bars_ago": {
+      "type": "integer",
+      "title": "Bars Ago"
+     },
+     "at": {
+      "type": "string",
+      "title": "At"
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "name",
+     "bias",
+     "what",
+     "bars_ago",
+     "at"
+    ],
+    "title": "LvPattern"
+   },
+   "LvPivots": {
+    "properties": {
+     "p": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "P"
+     },
+     "bc": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bc"
+     },
+     "tc": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tc"
+     },
+     "r1": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "R1"
+     },
+     "r2": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "R2"
+     },
+     "r3": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "R3"
+     },
+     "s1": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "S1"
+     },
+     "s2": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "S2"
+     },
+     "s3": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "S3"
+     }
+    },
+    "type": "object",
+    "required": [
+     "p",
+     "bc",
+     "tc",
+     "r1",
+     "r2",
+     "r3",
+     "s1",
+     "s2",
+     "s3"
+    ],
+    "title": "LvPivots"
+   },
+   "LvPoint": {
+    "properties": {
+     "i": {
+      "type": "integer",
+      "title": "I"
+     },
+     "price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Price"
+     },
+     "label": {
+      "type": "string",
+      "title": "Label"
+     }
+    },
+    "type": "object",
+    "required": [
+     "i",
+     "price",
+     "label"
+    ],
+    "title": "LvPoint"
+   },
+   "LvProfile": {
+    "properties": {
+     "poc": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Poc"
+     },
+     "vah": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vah"
+     },
+     "val": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Val"
+     }
+    },
+    "type": "object",
+    "required": [
+     "poc",
+     "vah",
+     "val"
+    ],
+    "title": "LvProfile"
+   },
+   "LvTrend": {
+    "properties": {
+     "above_sma20": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Above Sma20"
+     },
+     "above_sma50": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Above Sma50"
+     },
+     "above_sma200": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Above Sma200"
+     },
+     "sma20": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sma20"
+     },
+     "sma50": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sma50"
+     },
+     "sma200": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sma200"
+     },
+     "structure": {
+      "type": "string",
+      "enum": [
+       "up",
+       "down",
+       "mixed"
+      ],
+      "title": "Structure"
+     },
+     "supertrend": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Supertrend"
+     },
+     "supertrend_dir": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "up",
+         "down"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Supertrend Dir"
+     }
+    },
+    "type": "object",
+    "required": [
+     "above_sma20",
+     "above_sma50",
+     "above_sma200",
+     "sma20",
+     "sma50",
+     "sma200",
+     "structure",
+     "supertrend",
+     "supertrend_dir"
+    ],
+    "title": "LvTrend"
    },
    "MarketClock": {
     "properties": {
@@ -7085,6 +9186,1378 @@
      "complete_upto"
     ],
     "title": "NseHealth"
+   },
+   "OptChainRef": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "expiry": {
+      "type": "string",
+      "title": "Expiry"
+     },
+     "day": {
+      "type": "string",
+      "title": "Day"
+     },
+     "time": {
+      "type": "string",
+      "title": "Time"
+     },
+     "spot": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Spot"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "expiry",
+     "day",
+     "time",
+     "spot"
+    ],
+    "title": "OptChainRef"
+   },
+   "OptChainResponse": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "expiry": {
+      "type": "string",
+      "title": "Expiry"
+     },
+     "expiries": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Expiries"
+     },
+     "time": {
+      "type": "string",
+      "title": "Time"
+     },
+     "source": {
+      "type": "string",
+      "title": "Source"
+     },
+     "stale": {
+      "type": "boolean",
+      "title": "Stale"
+     },
+     "spot": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Spot"
+     },
+     "forward": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forward"
+     },
+     "atm": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Atm"
+     },
+     "days_to_expiry": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Days To Expiry"
+     },
+     "summary": {
+      "$ref": "#/components/schemas/OptSummary"
+     },
+     "levels": {
+      "$ref": "#/components/schemas/OptLevels"
+     },
+     "readings": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Readings"
+     },
+     "window_minutes": {
+      "type": "integer",
+      "title": "Window Minutes"
+     },
+     "window_since": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Window Since"
+     },
+     "lot": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lot"
+     },
+     "unusual": {
+      "items": {
+       "$ref": "#/components/schemas/OptUnusual"
+      },
+      "type": "array",
+      "title": "Unusual"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/OptRow"
+      },
+      "type": "array",
+      "title": "Rows"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "expiry",
+     "expiries",
+     "time",
+     "source",
+     "stale",
+     "spot",
+     "forward",
+     "atm",
+     "days_to_expiry",
+     "summary",
+     "levels",
+     "readings",
+     "window_minutes",
+     "window_since",
+     "lot",
+     "unusual",
+     "rows",
+     "note"
+    ],
+    "title": "OptChainResponse"
+   },
+   "OptExpectedMoveClaim": {
+    "properties": {
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "verdict": {
+      "type": "string",
+      "title": "Verdict"
+     },
+     "inside_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Inside Pct"
+     },
+     "fair_pct": {
+      "type": "number",
+      "title": "Fair Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "verdict",
+     "inside_pct",
+     "fair_pct"
+    ],
+    "title": "OptExpectedMoveClaim"
+   },
+   "OptHistoryResponse": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "expiry": {
+      "type": "string",
+      "title": "Expiry"
+     },
+     "day": {
+      "type": "string",
+      "title": "Day"
+     },
+     "t": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "T"
+     },
+     "spot": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Spot"
+     },
+     "max_pain": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Max Pain"
+     },
+     "pcr_oi": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Pcr Oi"
+     },
+     "atm_iv_pct": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Atm Iv Pct"
+     },
+     "straddle": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Straddle"
+     },
+     "support": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Support"
+     },
+     "resistance": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Resistance"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "expiry",
+     "day",
+     "t",
+     "spot",
+     "max_pain",
+     "pcr_oi",
+     "atm_iv_pct",
+     "straddle",
+     "support",
+     "resistance"
+    ],
+    "title": "OptHistoryResponse"
+   },
+   "OptLastRefresh": {
+    "properties": {
+     "started_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started At"
+     },
+     "chains": {
+      "type": "integer",
+      "title": "Chains"
+     },
+     "refused": {
+      "type": "boolean",
+      "title": "Refused"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Errors"
+     }
+    },
+    "type": "object",
+    "required": [
+     "started_at",
+     "chains",
+     "refused",
+     "errors"
+    ],
+    "title": "OptLastRefresh"
+   },
+   "OptLeg": {
+    "properties": {
+     "ltp": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ltp"
+     },
+     "chg": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Chg"
+     },
+     "oi": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi"
+     },
+     "oi_chg": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Chg"
+     },
+     "oi_chg_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Chg Pct"
+     },
+     "oi_chg_window": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Chg Window"
+     },
+     "volume": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Volume"
+     },
+     "iv_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iv Pct"
+     },
+     "iv_nse_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iv Nse Pct"
+     },
+     "bid": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bid"
+     },
+     "ask": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ask"
+     },
+     "buy_qty": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Buy Qty"
+     },
+     "sell_qty": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sell Qty"
+     },
+     "delta": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Delta"
+     },
+     "gamma": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Gamma"
+     },
+     "theta": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Theta"
+     },
+     "vega": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vega"
+     },
+     "buildup": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "long_buildup",
+         "short_buildup",
+         "short_covering",
+         "long_unwinding"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Buildup"
+     }
+    },
+    "type": "object",
+    "required": [
+     "ltp",
+     "chg",
+     "oi",
+     "oi_chg",
+     "oi_chg_pct",
+     "oi_chg_window",
+     "volume",
+     "iv_pct",
+     "iv_nse_pct",
+     "bid",
+     "ask",
+     "buy_qty",
+     "sell_qty",
+     "delta",
+     "gamma",
+     "theta",
+     "vega",
+     "buildup"
+    ],
+    "title": "OptLeg"
+   },
+   "OptLevel": {
+    "properties": {
+     "strike": {
+      "type": "number",
+      "title": "Strike"
+     },
+     "oi": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi"
+     },
+     "oi_chg": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Chg"
+     }
+    },
+    "type": "object",
+    "required": [
+     "strike",
+     "oi",
+     "oi_chg"
+    ],
+    "title": "OptLevel"
+   },
+   "OptLevels": {
+    "properties": {
+     "resistance": {
+      "items": {
+       "$ref": "#/components/schemas/OptLevel"
+      },
+      "type": "array",
+      "title": "Resistance"
+     },
+     "support": {
+      "items": {
+       "$ref": "#/components/schemas/OptLevel"
+      },
+      "type": "array",
+      "title": "Support"
+     },
+     "call_adds": {
+      "items": {
+       "$ref": "#/components/schemas/OptLevel"
+      },
+      "type": "array",
+      "title": "Call Adds"
+     },
+     "put_adds": {
+      "items": {
+       "$ref": "#/components/schemas/OptLevel"
+      },
+      "type": "array",
+      "title": "Put Adds"
+     }
+    },
+    "type": "object",
+    "required": [
+     "resistance",
+     "support",
+     "call_adds",
+     "put_adds"
+    ],
+    "title": "OptLevels"
+   },
+   "OptMaxPainClaim": {
+    "properties": {
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "verdict": {
+      "type": "string",
+      "title": "Verdict"
+     },
+     "hit_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hit Pct"
+     },
+     "fair_pct": {
+      "type": "number",
+      "title": "Fair Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "verdict",
+     "hit_pct",
+     "fair_pct"
+    ],
+    "title": "OptMaxPainClaim"
+   },
+   "OptPcrClaim": {
+    "properties": {
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "verdict": {
+      "type": "string",
+      "title": "Verdict"
+     },
+     "corr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Corr"
+     },
+     "top_minus_bottom_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Top Minus Bottom Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "verdict",
+     "corr",
+     "top_minus_bottom_pct"
+    ],
+    "title": "OptPcrClaim"
+   },
+   "OptRefreshAccepted": {
+    "properties": {
+     "accepted": {
+      "type": "boolean",
+      "title": "Accepted"
+     },
+     "run": {
+      "$ref": "#/components/schemas/OptRefreshRun"
+     }
+    },
+    "type": "object",
+    "required": [
+     "accepted",
+     "run"
+    ],
+    "title": "OptRefreshAccepted"
+   },
+   "OptRefreshRequest": {
+    "properties": {
+     "symbols": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Symbols"
+     }
+    },
+    "type": "object",
+    "title": "OptRefreshRequest"
+   },
+   "OptRefreshRun": {
+    "properties": {
+     "state": {
+      "type": "string",
+      "enum": [
+       "idle",
+       "running",
+       "done",
+       "failed"
+      ],
+      "title": "State"
+     },
+     "running": {
+      "type": "boolean",
+      "title": "Running"
+     },
+     "message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message"
+     },
+     "started_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started At"
+     },
+     "finished_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Finished At"
+     },
+     "errors": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Errors"
+     }
+    },
+    "type": "object",
+    "required": [
+     "state",
+     "running",
+     "message",
+     "started_at",
+     "finished_at",
+     "errors"
+    ],
+    "title": "OptRefreshRun"
+   },
+   "OptResearchResponse": {
+    "properties": {
+     "min_days": {
+      "type": "integer",
+      "title": "Min Days"
+     },
+     "studies": {
+      "items": {
+       "$ref": "#/components/schemas/OptStudy"
+      },
+      "type": "array",
+      "title": "Studies"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "min_days",
+     "studies",
+     "note"
+    ],
+    "title": "OptResearchResponse"
+   },
+   "OptRow": {
+    "properties": {
+     "strike": {
+      "type": "number",
+      "title": "Strike"
+     },
+     "atm": {
+      "type": "boolean",
+      "title": "Atm"
+     },
+     "ce": {
+      "$ref": "#/components/schemas/OptLeg"
+     },
+     "pe": {
+      "$ref": "#/components/schemas/OptLeg"
+     }
+    },
+    "type": "object",
+    "required": [
+     "strike",
+     "atm",
+     "ce",
+     "pe"
+    ],
+    "title": "OptRow"
+   },
+   "OptStatus": {
+    "properties": {
+     "run": {
+      "$ref": "#/components/schemas/OptRefreshRun"
+     },
+     "live_running": {
+      "type": "boolean",
+      "title": "Live Running"
+     },
+     "market_open": {
+      "type": "boolean",
+      "title": "Market Open"
+     },
+     "interval_seconds": {
+      "type": "integer",
+      "title": "Interval Seconds"
+     },
+     "underlyings": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Underlyings"
+     },
+     "chains": {
+      "items": {
+       "$ref": "#/components/schemas/OptChainRef"
+      },
+      "type": "array",
+      "title": "Chains"
+     },
+     "last_refresh": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OptLastRefresh"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "run",
+     "live_running",
+     "market_open",
+     "interval_seconds",
+     "underlyings",
+     "chains",
+     "last_refresh",
+     "note"
+    ],
+    "title": "OptStatus"
+   },
+   "OptStudy": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "days": {
+      "type": "integer",
+      "title": "Days"
+     },
+     "first_day": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Day"
+     },
+     "max_pain": {
+      "$ref": "#/components/schemas/OptMaxPainClaim"
+     },
+     "expected_move": {
+      "$ref": "#/components/schemas/OptExpectedMoveClaim"
+     },
+     "pcr": {
+      "$ref": "#/components/schemas/OptPcrClaim"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "days",
+     "first_day",
+     "max_pain",
+     "expected_move",
+     "pcr"
+    ],
+    "title": "OptStudy"
+   },
+   "OptSummary": {
+    "properties": {
+     "pcr_oi": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pcr Oi"
+     },
+     "pcr_volume": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pcr Volume"
+     },
+     "max_pain": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Pain"
+     },
+     "max_pain_gap_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Pain Gap Pct"
+     },
+     "atm_iv_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Atm Iv Pct"
+     },
+     "straddle": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Straddle"
+     },
+     "expected_move_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Expected Move Pct"
+     },
+     "one_sd_pts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "One Sd Pts"
+     },
+     "range_low": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Range Low"
+     },
+     "range_high": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Range High"
+     },
+     "skew_25d": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Skew 25D"
+     },
+     "ce_oi": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ce Oi"
+     },
+     "ce_oi_chg": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ce Oi Chg"
+     },
+     "ce_volume": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ce Volume"
+     },
+     "pe_oi": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pe Oi"
+     },
+     "pe_oi_chg": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pe Oi Chg"
+     },
+     "pe_volume": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pe Volume"
+     }
+    },
+    "type": "object",
+    "required": [
+     "pcr_oi",
+     "pcr_volume",
+     "max_pain",
+     "max_pain_gap_pct",
+     "atm_iv_pct",
+     "straddle",
+     "expected_move_pct",
+     "one_sd_pts",
+     "range_low",
+     "range_high",
+     "skew_25d",
+     "ce_oi",
+     "ce_oi_chg",
+     "ce_volume",
+     "pe_oi",
+     "pe_oi_chg",
+     "pe_volume"
+    ],
+    "title": "OptSummary"
+   },
+   "OptUnusual": {
+    "properties": {
+     "strike": {
+      "type": "number",
+      "title": "Strike"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "ce",
+       "pe"
+      ],
+      "title": "Side"
+     },
+     "ltp": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ltp"
+     },
+     "volume": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Volume"
+     },
+     "oi": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi"
+     },
+     "vol_oi": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vol Oi"
+     },
+     "oi_chg_window": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Chg Window"
+     },
+     "oi_chg_window_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi Chg Window Pct"
+     },
+     "value_cr": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Value Cr"
+     },
+     "why": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Why"
+     }
+    },
+    "type": "object",
+    "required": [
+     "strike",
+     "side",
+     "ltp",
+     "volume",
+     "oi",
+     "vol_oi",
+     "oi_chg_window",
+     "oi_chg_window_pct",
+     "value_cr",
+     "why"
+    ],
+    "title": "OptUnusual"
    },
    "Order": {
     "properties": {

@@ -18,6 +18,7 @@ import { cn } from '@/lib/csv'
 import { date, daysBetween, num, qty, todayIST } from '@/lib/format'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 import { typingTarget, useIsMobile } from '@/lib/useMedia'
+import { PriceAction } from '@/components/PriceAction'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
 type Ind = IndicatorId | 'volume'
@@ -227,6 +228,7 @@ export default function ChartPage() {
         </Card>
         {panel && <Card flush className="min-w-0 self-start"><SidePanel symbol={symbol} /></Card>}
       </div>
+      <PriceAction symbol={symbol} />
       <p className="text-2xs text-faint">Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data. Markers: ▲ model buy, ▼ model sell, ● open model position, ■ corporate action, small ● results day. Keys: 1-6 range, d/w timeframe, [ ] symbol.</p>
     </div>
   )

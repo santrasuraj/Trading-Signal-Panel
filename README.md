@@ -268,6 +268,53 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
 
 ---
 
+## 5b. Options, F&O positioning and price action (positioning, not signals)
+
+Three Quant Desk pages describe what the derivatives market is doing. None of them gives buy or sell orders: no
+backtest in this app shows that PCR, max pain, open-interest levels or candle patterns predict prices.
+
+- **Options** (`scanner/options.py`): NSE's public option chain for the indices and F&O stocks in
+  `options.underlyings` (default NIFTY, BANKNIFTY; add a stock with the box on the page). The 09:12 task
+  (`intraday_sync.py --options`) stores a chain every `options.interval_seconds` in market hours; an unchanged
+  chain (same NSE time stamp) is not stored twice. The page shows:
+  - spot and forward, the put-call ratio and max pain;
+  - at-the-money implied volatility and the 25-delta skew;
+  - the straddle's expected move and the 1-SD range;
+  - open interest by strike, now, since yesterday or over the last 5-60 minutes;
+  - OI levels and build-ups per strike;
+  - **unusual activity**: strikes that traded more contracts than are open, or whose open interest jumped 10%+
+    within the window, ranked by premium traded.
+
+  Implied volatility and greeks are computed on the put-call-parity forward (Black-76). NSE's own IV column uses the
+  spot and gives calls and puts of one strike different values, so it is shown for reference only.
+  FYERS is not used for chains yet: its response has not been checked against a real one.
+- **Does it work?** (`scanner/options_research.py`, Options page): three popular claims checked on the stored
+  end-of-day chains:
+  - whether the price is pulled towards max pain by expiry (vs a 50% coin flip);
+  - whether expiry closes land inside spot ± straddle (about 57% if options are fairly priced);
+  - whether the put-call ratio says anything about the next day.
+
+  Each needs 60 days before it gets a verdict. Option signals would come only from a claim that holds.
+- **F&O positions** (`scanner/fno.py`): NSE's participant-wise open interest, the contracts FII, DII, Pro (brokers'
+  own money) and Client hold long and short in index and stock futures and options. NSE publishes totals per group
+  after the close and names no one. Also the day's futures build-ups (price vs open interest), basis, put-call
+  ratio and call / put walls for every F&O underlying, from the F&O bhavcopy. The 19:30 task
+  (`intraday_sync.py --fno`) adds each day; the first **Fetch** loads the last 30 trading days (about 30 MB).
+- **Price action** (`scanner/levels.py`, under each chart): pivots and the CPR for the next session, swing support
+  and resistance of the last year (with how often each level formed), trend versus the 20/50/200-day averages,
+  higher highs / lower lows, Supertrend, daily candle patterns and **chart patterns** (double top / bottom, head
+  and shoulders, triangles, wedges, rectangles, flags: forming or confirmed, with the breakout level, where the
+  pattern is void and the textbook target; about half of all stocks show one at any time, and none has been
+  tested here). When the stock has 5-minute bars it adds
+  today's VWAP with 1-SD bands, the 15-minute opening range, the volume profile (point of control, value area) and
+  intraday patterns.
+
+What no one can show: who is behind a trade while it happens, or when a big trader will exit. NSE names buyers
+and sellers only later (block / bulk deals the same evening, insider disclosures within two days, shareholding
+each quarter: see Smart money).
+
+---
+
 ## 6. Telegram alerts and automatic scans (optional)
 
 1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token. Then send any message to your new bot, and message **@userinfobot** to get your chat ID.
@@ -322,6 +369,10 @@ scanner/
   holdings.py    holdings file, corporate-action-adjusted buy price
   lock.py        one scan at a time across processes
   intraday/      5-minute bars (Yahoo, FYERS history and live WebSocket), MIS backtests -> intraday.json
+  options.py     NSE option chains: parsing, Black-76 IV / greeks, PCR, max pain, OI levels, unusual activity
+  options_research.py  do PCR / max pain / the straddle's expected move hold up on the stored days?
+  fno.py         NSE participant-wise OI and F&O bhavcopy: FII/DII/Pro/Client positions, futures build-ups
+  levels.py      price action: pivots, swing S/R, trend, candle patterns, VWAP / opening range / volume profile
 web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), started by 3_dashboard.bat
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)

@@ -1,0 +1,251 @@
+// F&O positioning `/fno/:tab` (scanner/fno.py): NSE's participant-wise open interest (FII, DII, Pro, Client) and the
+// day's futures build-ups with each underlying's put-call ratio and call / put walls. End-of-day data, published by
+// NSE after the close; "Fetch" posts /api/fno/refresh. Positioning, never a signal.
+
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { RefreshCw, Scale } from 'lucide-react'
+import { isFailure } from '@/api/client'
+import {
+  fnoKeys, useFnoFutures, useFnoPositions, useFnoRefresh, useFnoStatus,
+  type FnoBuildup, type FnoClient, type FnoFuturesParams, type FnoStatus,
+} from '@/api/fno'
+import { BUILDUP_LABEL } from '@/api/options'
+import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
+import { EmptyState, ErrorState, SkeletonKpis, SkeletonRows } from '@/components/feedback'
+import { useToast } from '@/components/toast'
+import { Button, Card, Segmented, Tabs, Tip } from '@/components/ui'
+import { cn } from '@/lib/csv'
+import { DASH, date, num, ok, pct, qty } from '@/lib/format'
+
+type Tab = 'positions' | 'futures'
+const CLIENT_LABEL: Record<FnoClient, string> = { fii: 'FII', dii: 'DII', pro: 'Pro', client: 'Client' }
+const CLIENT_HELP: Record<FnoClient, string> = {
+  fii: 'Foreign portfolio investors', dii: 'Domestic institutions (mutual funds, insurers, banks)',
+  pro: "Brokers trading their own money", client: 'Everyone else: retail traders, HNIs, corporates',
+}
+const signed = (x: number | null | undefined) => (ok(x) ? `${x > 0 ? '+' : ''}${qty(x)}` : DASH)
+const FUT_HELP: Record<FnoBuildup, string> = {
+  long_buildup: 'Price up, open interest up: new long positions.',
+  short_buildup: 'Price down, open interest up: new short positions.',
+  short_covering: 'Price up, open interest down: shorts closing.',
+  long_unwinding: 'Price down, open interest down: longs closing.',
+}
+const BUILD_TONE: Record<FnoBuildup, string> = {
+  long_buildup: 'text-profit border-profit/40', short_buildup: 'text-loss border-loss/40',
+  short_covering: 'text-info border-info/40', long_unwinding: 'text-warn border-warn/40',
+}
+
+function useWatcher(st: FnoStatus | undefined) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const was = useRef(false)
+  useEffect(() => {
+    if (!st) return
+    if (was.current && !st.run.running) {
+      toast({ tone: st.run.state === 'failed' ? 'bad' : 'good', title: st.run.state === 'failed' ? 'F&O data not fetched' : 'F&O data updated', detail: st.run.message ?? undefined })
+      void qc.invalidateQueries({ queryKey: fnoKeys.all })
+    }
+    was.current = st.run.running
+  }, [st, qc, toast])
+}
+
+function FetchButton({ st }: { st: FnoStatus | undefined }) {
+  const r = useFnoRefresh()
+  const toast = useToast()
+  return (
+    <Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} loading={r.isPending || !!st?.run.running}
+      title="Fetch NSE's participant files and F&O bhavcopy for the last 30 trading days not stored yet (published ~6-8 PM)"
+      onClick={() => r.mutate(undefined, { onError: (e) => toast({ tone: 'bad', title: isFailure(e) ? e.message : 'Could not start the refresh' }) })}>
+      {st?.run.running ? (st.run.message ?? 'Fetching…') : 'Fetch'}
+    </Button>
+  )
+}
+
+// ------------------------------------------------------------------ positions
+function LongPctBars({ dates, v }: { dates: string[]; v: (number | null)[] }) {
+  return (
+    <div className="flex h-24 items-end gap-[3px]" role="img" aria-label="Index futures long share by day">
+      {v.map((x, i) => (
+        <Tip key={dates[i]} text={`${date(dates[i])}: ${ok(x) ? `${num(x, 1)}% long` : 'no data'}`}>
+          <div className="flex h-24 w-3 flex-col justify-end">
+            <div className={cn('w-full rounded-sm', ok(x) && x >= 50 ? 'bg-profit' : 'bg-loss')} style={{ height: `${ok(x) ? Math.max(4, x) : 0}%` }} />
+          </div>
+        </Tip>
+      ))}
+    </div>
+  )
+}
+
+function Positions() {
+  const [client, setClient] = useState<FnoClient>('fii')
+  const q = useFnoPositions(20)
+  if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+  if (!q.data) return <><SkeletonKpis n={5} /><SkeletonRows rows={8} cols={7} /></>
+  const { dates, clients } = q.data
+  if (!dates.length) return null
+  const s = clients[client]
+  const last = dates.length - 1
+  const rows = dates.map((d, i) => ({ d, i })).reverse()
+  return (
+    <div className="space-y-4">
+      <Segmented ariaLabel="Participant" value={client} onChange={setClient}
+        items={(Object.keys(CLIENT_LABEL) as FnoClient[]).map((c) => ({ id: c, label: CLIENT_LABEL[c], title: CLIENT_HELP[c] }))} />
+      <KpiStrip min={160}>
+        <KpiTile label={`${CLIENT_LABEL[client]} index futures long`} value={ok(s.fut_long_pct[last]) ? `${num(s.fut_long_pct[last], 1)}%` : DASH}
+          sub={ok(s.fut_long_pct[last]) && ok(s.fut_long_pct[last - 1]) ? `${pct((s.fut_long_pct[last] as number) - (s.fut_long_pct[last - 1] as number), { dp: 1 })} pts vs the day before` : undefined}
+          title="Long contracts / (long + short) in index futures" />
+        <KpiTile label="Index futures net" value={signed(s.fut_net[last])} sub={`change ${signed(s.fut_net_chg[last])}`} title="Long minus short contracts" />
+        <KpiTile label="Index calls net" value={signed(s.call_net[last])} title="Calls bought minus calls written (contracts)" />
+        <KpiTile label="Index puts net" value={signed(s.put_net[last])} title="Puts bought minus puts written (contracts)" />
+        <KpiTile label="Stock futures net" value={signed(s.stk_fut_net[last])} />
+      </KpiStrip>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card title="Index futures: long share by day" subtitle={`${CLIENT_LABEL[client]} · green = more long than short`}>
+          <LongPctBars dates={dates} v={s.fut_long_pct} />
+          <div className="mt-1 flex justify-between text-2xs text-faint"><span>{date(dates[0], { year: false })}</span><span>{date(dates[last], { year: false })}</span></div>
+        </Card>
+        <Card className="lg:col-span-2" title="All groups on the last day" subtitle={date(dates[last])}>
+          <table className="w-full text-[13px]">
+            <thead><tr className="border-b border-line text-2xs text-muted">
+              <th className="py-1.5 text-left font-medium">Group</th>
+              <th className="py-1.5 text-right font-medium">Index fut. long %</th>
+              <th className="py-1.5 text-right font-medium">Index fut. net</th>
+              <th className="py-1.5 text-right font-medium">Δ net</th>
+              <th className="py-1.5 text-right font-medium">Calls net</th>
+              <th className="py-1.5 text-right font-medium">Puts net</th>
+            </tr></thead>
+            <tbody>
+              {(Object.keys(CLIENT_LABEL) as FnoClient[]).map((c) => {
+                const x = clients[c]
+                return (
+                  <tr key={c} className={cn('border-b border-line/60 last:border-0', c === client && 'bg-accent/5')}>
+                    <td className="py-1 font-semibold" title={CLIENT_HELP[c]}>{CLIENT_LABEL[c]}</td>
+                    <td className="num py-1 text-right">{num(x.fut_long_pct[last], 1)}%</td>
+                    <td className="num py-1 text-right">{signed(x.fut_net[last])}</td>
+                    <td className={cn('num py-1 text-right', ok(x.fut_net_chg[last]) && (x.fut_net_chg[last] as number) < 0 ? 'text-loss' : 'text-profit')}>{signed(x.fut_net_chg[last])}</td>
+                    <td className="num py-1 text-right">{signed(x.call_net[last])}</td>
+                    <td className="num py-1 text-right">{signed(x.put_net[last])}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <p className="mt-2 text-2xs text-muted">Every contract has a buyer and a seller, so the four groups' nets add up to zero.</p>
+        </Card>
+      </div>
+      <Card title={`${CLIENT_LABEL[client]} day by day`} subtitle="Contracts open at each close" flush>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-[13px]">
+            <thead><tr className="border-b border-line text-2xs text-muted">
+              {['Date', 'Fut. long', 'Fut. short', 'Net', 'Δ net', 'Long %', 'Calls net', 'Puts net'].map((h, i) => <th key={h} className={cn('px-3 py-1.5 font-medium', i ? 'text-right' : 'text-left')}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {rows.map(({ d, i }) => (
+                <tr key={d} className="border-b border-line/60 last:border-0">
+                  <td className="num px-3 py-1">{date(d)}</td>
+                  <td className="num px-3 py-1 text-right">{qty(s.fut_long[i])}</td>
+                  <td className="num px-3 py-1 text-right">{qty(s.fut_short[i])}</td>
+                  <td className="num px-3 py-1 text-right">{signed(s.fut_net[i])}</td>
+                  <td className={cn('num px-3 py-1 text-right', ok(s.fut_net_chg[i]) && (s.fut_net_chg[i] as number) < 0 ? 'text-loss' : 'text-profit')}>{signed(s.fut_net_chg[i])}</td>
+                  <td className="num px-3 py-1 text-right">{num(s.fut_long_pct[i], 1)}%</td>
+                  <td className="num px-3 py-1 text-right">{signed(s.call_net[i])}</td>
+                  <td className="num px-3 py-1 text-right">{signed(s.put_net[i])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      <p className="text-2xs text-muted">{q.data.note}</p>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------------ futures build-ups
+function Futures() {
+  const [p, setP] = useState<FnoFuturesParams>({ kind: 'all', buildup: 'all', sort: 'oi_chg' })
+  const q = useFnoFutures(p)
+  if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+  if (!q.data) return <SkeletonRows rows={12} cols={10} />
+  const f = q.data
+  const builds = Object.keys(BUILDUP_LABEL) as FnoBuildup[]
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {f.dates.length > 1 && (
+          <select aria-label="Day" className="input h-8 w-[140px]" value={p.date ?? f.date ?? ''} onChange={(e) => setP({ ...p, date: e.target.value === f.dates[0] ? undefined : e.target.value })}>
+            {f.dates.map((d) => <option key={d} value={d}>{date(d)}</option>)}
+          </select>
+        )}
+        <Segmented ariaLabel="Build-up" value={p.buildup ?? 'all'} onChange={(b) => setP({ ...p, buildup: b })}
+          items={[{ id: 'all' as const, label: 'All' }, ...builds.map((b) => ({ id: b, label: `${BUILDUP_LABEL[b]} ${f.counts[b] ?? 0}`, title: FUT_HELP[b] }))]} />
+        <Segmented ariaLabel="Kind" value={p.kind ?? 'all'} onChange={(k) => setP({ ...p, kind: k })}
+          items={[{ id: 'all', label: 'All' }, { id: 'stock', label: 'Stocks' }, { id: 'index', label: 'Indices' }]} />
+        <Segmented ariaLabel="Sort" value={p.sort ?? 'oi_chg'} onChange={(s) => setP({ ...p, sort: s })}
+          items={[{ id: 'oi_chg', label: 'ΔOI %' }, { id: 'chg', label: 'Price %' }, { id: 'value', label: 'Value' }, { id: 'pcr', label: 'PCR' }]} />
+      </div>
+      <Card flush title={`Futures on ${f.date ? date(f.date) : DASH}`} subtitle={`${f.rows.length} underlyings`}>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-[13px]">
+            <thead className="sticky top-0 bg-panel"><tr className="border-b border-line text-2xs text-muted">
+              {['Symbol', 'Future', 'Chg %', 'OI (contracts)', 'ΔOI %', 'Build-up', 'Basis %', 'PCR', 'Call wall', 'Put wall', 'Value ₹ cr'].map((h, i) => (
+                <th key={h} className={cn('px-3 py-1.5 font-medium', i === 0 || h === 'Build-up' ? 'text-left' : 'text-right')}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {f.rows.map((r) => (
+                <tr key={r.symbol} className="border-b border-line/60 last:border-0 hover:bg-raised">
+                  <td className="px-3 py-1 font-semibold"><Link className="hover:underline" to={r.kind === 'stock' ? `/chart/${encodeURIComponent(r.symbol)}` : `/options/${encodeURIComponent(r.symbol)}`}>{r.symbol}</Link></td>
+                  <td className="num px-3 py-1 text-right">{num(r.close, 2)}</td>
+                  <td className={cn('num px-3 py-1 text-right', ok(r.chg_pct) && r.chg_pct < 0 ? 'text-loss' : 'text-profit')}>{pct(r.chg_pct, { dp: 2 })}</td>
+                  <td className="num px-3 py-1 text-right">{qty(r.oi_contracts)}</td>
+                  <td className="num px-3 py-1 text-right">{pct(r.oi_chg_pct, { dp: 1 })}</td>
+                  <td className="px-3 py-1">{r.buildup ? <Tip text={FUT_HELP[r.buildup]}><span className={cn('rounded border px-1.5 text-2xs font-semibold', BUILD_TONE[r.buildup])}>{BUILDUP_LABEL[r.buildup]}</span></Tip> : <span className="text-faint">{DASH}</span>}</td>
+                  <td className="num px-3 py-1 text-right">{num(r.basis_pct, 2)}</td>
+                  <td className="num px-3 py-1 text-right">{num(r.pcr, 2)}</td>
+                  <td className="num px-3 py-1 text-right text-loss">{num(r.call_wall, 0)}</td>
+                  <td className="num px-3 py-1 text-right text-profit">{num(r.put_wall, 0)}</td>
+                  <td className="num px-3 py-1 text-right text-muted">{num(r.value_cr, 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      <p className="text-2xs text-muted">{f.note}</p>
+    </div>
+  )
+}
+
+export default function Fno() {
+  const { tab: raw } = useParams()
+  const tab: Tab = raw === 'futures' ? 'futures' : 'positions'
+  const navigate = useNavigate()
+  const st = useFnoStatus()
+  useWatcher(st.data)
+  const empty = st.data && st.data.days === 0
+  const header = (
+    <PageHeader
+      title={<span className="flex items-center gap-2"><Scale className="h-5 w-5 text-muted" />F&O positioning</span>}
+      subtitle={st.data?.last_day ? `NSE end-of-day files · ${st.data.days} days stored, to ${date(st.data.last_day)}${st.data.pending.length ? ' · today not published yet' : ''}` : 'NSE end-of-day derivatives files'}
+      right={<FetchButton st={st.data} />}
+    >
+      <Tabs<Tab> value={tab} onChange={(t) => navigate(`/fno/${t}`)} items={[{ id: 'positions', label: 'FII / DII positions' }, { id: 'futures', label: 'Futures build-up' }]} />
+    </PageHeader>
+  )
+  if (st.error) return <div>{header}<ErrorState error={st.error} onRetry={() => void st.refetch()} /></div>
+  if (empty) {
+    return (
+      <div>
+        {header}
+        <EmptyState icon={<Scale className="h-6 w-6" />} title="No F&O data stored yet" action={<FetchButton st={st.data} />}>
+          Fetch downloads NSE's participant-wise open interest and the F&O bhavcopy for the last 30 trading days (about
+          30 MB, a minute or two). The 19:30 scheduled task (setup_schedule.ps1) then adds each new day.
+        </EmptyState>
+      </div>
+    )
+  }
+  return <div>{header}{tab === 'futures' ? <Futures /> : <Positions />}</div>
+}

@@ -69,6 +69,14 @@ class Paths:
     def login_bat(self) -> Path: return self.root / "1_login.bat"
     @property
     def run_scan(self) -> Path: return self.root / "run_scan.py"
+    @property
+    def options(self) -> Path: return self.data / "options"
+    @property
+    def fno(self) -> Path: return self.data / "fno"
+    @property
+    def intraday_bars(self) -> Path: return self.data / "intraday" / "bars"
+    @property
+    def intraday_live(self) -> Path: return self.data / "intraday" / "live"
 
     def universe(self, name: str) -> Path:
         return self.data / f"universe_{name}.csv"
@@ -79,12 +87,14 @@ P = Paths(settings.ROOT, settings.DATA_DIR)
 
 def configure(root: Path, data: Path) -> None:
     """Repoint the API and the scanner modules it calls at another root/data folder (tests)."""
-    from scanner import fyers_limits, holdings, lock, paper, providers, store
+    from scanner import fno, fyers_limits, holdings, lock, options, paper, providers, store
 
     from . import errors        # lazy: errors imports this module
 
     P.root, P.data = Path(root), Path(data)
     store.STORE_DIR = P.store
+    options.OPTIONS_DIR = P.options
+    fno.FNO_DIR = P.fno
     paper.JOURNAL_FILE = P.journal
     holdings.HOLDINGS_FILE = P.holdings
     lock.LOCK_FILE, lock.INFO_FILE = P.lock, P.lock_info

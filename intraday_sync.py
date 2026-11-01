@@ -7,6 +7,9 @@
   python intraday_sync.py --run           backtest the intraday strategies
   python intraday_sync.py --signals       live signals from the strategies whose backtest passed (every 5 min)
   python intraday_sync.py --footprints    Big money live: unusual volume, large trades, block deals (every 5 min)
+  python intraday_sync.py --options       option chains from NSE every options.interval_seconds until 15:31
+                                          (outside the session: once, the last chains)
+  python intraday_sync.py --fno           F&O positioning: participant OI and the F&O bhavcopy, last 30 days not stored
   python intraday_sync.py --usage         FYERS calls used today vs the limits
 Options combine, e.g. --archive --run (used by the 15:45 scheduled task).
 Scheduled runs (pythonw, no console) write their output to data/logs/intraday.log.
@@ -89,6 +92,10 @@ def main() -> int:
                     help="today's live signals, only from strategies whose backtest shows a real edge")
     ap.add_argument("--footprints", action="store_true",
                     help="Big money live: unusual volume, large trades, order book, block deals")
+    ap.add_argument("--options", action="store_true",
+                    help="option chains from NSE every options.interval_seconds in the session (else once)")
+    ap.add_argument("--fno", action="store_true",
+                    help="F&O positioning from NSE's end-of-day files (participant OI, futures build-ups)")
     ap.add_argument("--usage", action="store_true", help="FYERS calls used today vs the limits (the default)")
     ap.add_argument("--days", type=int, default=None, help="history to keep (default: intraday.history_days)")
     args = ap.parse_args()
@@ -107,9 +114,18 @@ def main() -> int:
 def _run(args) -> int:
     cfg = load_config()
     plan = str(cfg.get("fyers_plan", "standard"))
-    if args.usage or not any((args.backfill, args.archive, args.live, args.run, args.signals, args.footprints)):
+    jobs = (args.backfill, args.archive, args.live, args.run, args.signals, args.footprints)
+    if args.fno and not any((*jobs, args.options)):     # no price store needed
+        from scanner import fno
+        rep = fno.refresh(log=lambda m: print(m, flush=True))
+        for e in rep["errors"] + rep["pending"]:
+            print(f"  ! {e}", flush=True)
+        return 0 if rep["added"] or not rep["errors"] else 1
+    if args.usage or not any((*jobs, args.options)):
         print(json.dumps(usage(plan), indent=1))
         return 0
+    if args.options and not any(jobs):      # no price store needed
+        return _options(cfg)
 
     frames = load_store()
     symbols, _ = intraday_universe(cfg, frames)
@@ -150,7 +166,21 @@ def _run(args) -> int:
         from scanner import footprints
         footprints.scan(cfg, log=lambda m: print(m, flush=True), frames=frames)
         footprints.cleanup_old_prints()
+    if args.options:
+        return _options(cfg)
     return 0
+
+
+def _options(cfg) -> int:
+    """Option chains (scanner/options.py): every options.interval_seconds while the market is open, else once."""
+    from scanner import options
+    _wait_for_open()
+    if live.market_open_now(lead_minutes=LIVE_LEAD_MINUTES):
+        return options.run_live(cfg, log=lambda m: print(m, flush=True))
+    rep = options.refresh(cfg, log=lambda m: print(m, flush=True))
+    for e in rep["errors"]:
+        print(f"  ! {e}", flush=True)
+    return 0 if rep["chains"] else 1
 
 
 if __name__ == "__main__":

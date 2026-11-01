@@ -158,6 +158,12 @@ GET_ENDPOINTS = [
     ("/api/scan/log?lines=20", M.ScanLog), ("/api/fyers/status", M.FyersStatus), ("/api/config", M.ConfigResponse),
     ("/api/costs/preview?value=33333", M.CostPreview), ("/api/data/health", M.DataHealth),
     ("/api/intraday", M.IntradayResponse),
+    ("/api/options/status", M.OptStatus),
+    ("/api/options/research", M.OptResearchResponse),
+    ("/api/fno/status", M.FnoStatus),
+    ("/api/fno/positions", M.FnoPositionsResponse),
+    ("/api/fno/futures", M.FnoFuturesResponse),
+    ("/api/levels/NIFTY50", M.LevelsResponse),
 ]
 
 
@@ -175,7 +181,8 @@ def test_openapi_lists_every_contract_path(client):
         p = p.replace("/IGIL", "/{symbol}").replace("/NIFTY50", "/{symbol}")
         assert p in paths, p
     for p in ("/api/holdings/import/fyers", "/api/scan", "/api/fyers/login", "/api/fyers/login/complete",
-              "/api/intraday/run"):
+              "/api/intraday/run", "/api/options/refresh", "/api/options/chain/{symbol}",
+              "/api/options/history/{symbol}", "/api/fno/refresh"):
         assert p in paths, p
     # every response field is "required" in the schema, so generated TS has no optional fields
     assert set(spec["components"]["schemas"]["AsOf"]["required"]) >= {"live_source", "complete_upto", "stale"}

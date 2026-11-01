@@ -67,9 +67,13 @@ Write-Host "Created task: NSE Scanner live (weekdays 09:45-15:15, every 30 minut
 #   Their output goes to data\logs\intraday.log.
 $liveSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 7) -MultipleInstances IgnoreNew
+#   09:12  option chains from NSE every options.interval_seconds until 15:31 (config.yaml `options:`; no FYERS calls)
+#   19:30  F&O positioning: NSE's participant-wise OI and F&O bhavcopy (published after the close)
 $jobs = @(
     @{ Time = "09:14"; Args = "intraday_sync.py --live"; Name = "NSE Scanner intraday live"; Settings = $liveSettings },
-    @{ Time = "15:45"; Args = "intraday_sync.py --archive --run"; Name = "NSE Scanner intraday archive"; Settings = $settings }
+    @{ Time = "09:12"; Args = "intraday_sync.py --options"; Name = "NSE Scanner option chains"; Settings = $liveSettings },
+    @{ Time = "15:45"; Args = "intraday_sync.py --archive --run"; Name = "NSE Scanner intraday archive"; Settings = $settings },
+    @{ Time = "19:30"; Args = "intraday_sync.py --fno"; Name = "NSE Scanner F&O positioning"; Settings = $settings }
 )
 foreach ($j in $jobs) {
     $action = New-ScheduledTaskAction -Execute $pythonw -Argument $j.Args -WorkingDirectory $root
