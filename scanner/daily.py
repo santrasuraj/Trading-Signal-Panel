@@ -26,7 +26,7 @@ from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
 from .panel import Factors, panel_from_wide
 from .providers import INDEX_N500, INDEX_NIFTY, INDEX_VIX, get_fyers
-from .settings import RESULTS_DIR, ROOT, SESSION_END, SESSION_START, ist_now, load_config
+from .settings import RESULTS_DIR, ROOT, SESSION_START, ist_now, load_config
 from .store import _replace, load_store, refresh_store
 from .strategies import build_strategies, strategy_lifecycle, tradable_mask
 from .universe import get_universe, industry_map
@@ -44,24 +44,6 @@ TRADES_FILE = RESULTS_DIR / "trades.parquet"       # B1: every closed trade of e
 SCREENER_FILE = RESULTS_DIR / "screener.parquet"   # B2: one row per tradable stock at scan time
 KEEP_SCAN_FILES = 60
 SCHEMA = 3            # latest.json content version (the file format itself stays `version: 2`)
-
-# Typical NSE cumulative volume by minutes since 09:15 (U-shaped day: heavy open and close).
-_VOLUME_CURVE = [(0, 0.0), (15, 0.12), (30, 0.20), (60, 0.32), (120, 0.48), (180, 0.60),
-                 (240, 0.72), (300, 0.84), (345, 0.93), (375, 1.0)]
-
-
-def expected_volume_fraction(now=None) -> float | None:
-    """Share of a normal day's volume traded by now, or None outside market hours."""
-    now = now or ist_now()
-    if now.weekday() >= 5:
-        return None
-    start = now.replace(hour=SESSION_START[0], minute=SESSION_START[1], second=0, microsecond=0)
-    mins = (now - start).total_seconds() / 60
-    if mins <= 0 or (now.hour, now.minute) >= SESSION_END:
-        return None
-    xs, ys = zip(*_VOLUME_CURVE)
-    return max(float(np.interp(mins, xs, ys)), 0.05)
-
 
 def _load_json(path) -> dict:
     try:
@@ -237,13 +219,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         raise RuntimeError("No price data yet. Check your internet connection and run the scan again.")
 
     live = bool(info.get("live_day"))
-    vol_frac = expected_volume_fraction() if live else None
-    if live and vol_frac:
-        # Project today's partial volume to a full day so volume filters aren't fooled.
-        frames = dict(frames)
-        v = frames["volume"].copy()
-        v.iloc[-1] = v.iloc[-1] / vol_frac
-        frames["volume"] = v
+    # During the session today's volume is the real volume traded so far - never scaled up to a guessed full day:
+    # a volume-confirmed signal shows only once that volume has actually traded.
 
     log("Testing strategies and computing signals...")
     p = panel_from_wide(frames, symbols, etfs=set(etfs))   # ETF stray open prints cleaned (fills at the open)

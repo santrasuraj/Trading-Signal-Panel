@@ -24,7 +24,12 @@ A personal, evidence-based tool for the Indian stock market. Every day it:
 | **After about 7 PM** | **Best time to decide.** NSE's official end-of-day data is published, so signals are final. |
 
 Orders marked *provisional* are based on live or delayed quotes, not NSE's official close (that includes the 3:40 PM
-scan). They can change until the official data is published, after about 6 PM.
+scan). They can change until the official data is published, after about 6 PM. During the session today's volume is
+the real volume traded so far, never an estimate of the full day, so a breakout that needs heavy volume shows only once
+that volume has actually traded.
+
+No demo, sample or simulated data anywhere: every price, volume, open interest and disclosure comes from NSE, FYERS
+or Yahoo. Backtests and paper trading are calculations on those real prices, and every page labels them as such.
 
 ### Fyers login, step by step
 1. Click **Log in to Fyers** in Quant Desk (or double-click `1_login.bat`). The Fyers login page opens.
