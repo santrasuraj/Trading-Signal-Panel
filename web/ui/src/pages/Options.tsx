@@ -10,8 +10,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Layers, RefreshCw } from 'lucide-react'
 import { isFailure } from '@/api/client'
 import {
-  BUILDUP_HELP, BUILDUP_LABEL, optKeys, useOptChain, useOptHistory, useOptRefresh, useOptResearch, useOptStatus,
-  type OptBuildup, type OptChainResponse, type OptHistoryResponse, type OptLeg, type OptLevel, type OptRow, type OptStatus,
+  BUILDUP_HELP, BUILDUP_LABEL, optKeys, useOptBigTrades, useOptChain, useOptHistory, useOptRefresh, useOptResearch, useOptStatus,
+  type OptBigInstrument, type OptBuildup, type OptChainResponse, type OptHistoryResponse, type OptLeg, type OptLevel, type OptRow, type OptStatus,
 } from '@/api/options'
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { Banner, EmptyState, ErrorState, SkeletonKpis, SkeletonRows } from '@/components/feedback'
@@ -352,6 +352,91 @@ function Unusual({ c }: { c: OptChainResponse }) {
   )
 }
 
+// ------------------------------------------------------------------ big trades live (FYERS feed)
+const KIND: Record<OptBigInstrument['kind'], string> = { fut: 'FUT', ce: 'CE', pe: 'PE' }
+const instName = (x: { underlying: string; kind: OptBigInstrument['kind']; strike: number | null }) =>
+  `${x.underlying} ${x.kind === 'fut' ? 'FUT' : `${num(x.strike, 0)} ${KIND[x.kind]}`}`
+
+function BigTrades({ marketOpen }: { marketOpen: boolean }) {
+  const q = useOptBigTrades(marketOpen)
+  if (q.error) return <ErrorState compact error={q.error} onRetry={() => void q.refetch()} />
+  if (!q.data) return <SkeletonRows rows={4} cols={6} />
+  const b = q.data
+  const th = `futures ≥ ₹${num(b.thresholds.future_print_cr, 0)} cr, options ≥ ₹${num(b.thresholds.option_print_lakh, 0)} lakh premium`
+  if (!b.instruments.length) {
+    return (
+      <EmptyState compact title="No live F&O feed yet">
+        The 09:14 live service streams the index futures and near-the-money options of config.yaml (live_fno) once you are
+        logged in to FYERS today (Settings › Fyers), and keeps every trade of {th}.
+      </EmptyState>
+    )
+  }
+  const active = b.instruments.filter((i) => i.prints > 0).sort((x, y) => Math.abs(y.net_cr) - Math.abs(x.net_cr))
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted">
+        {b.live ? <span className="text-profit">Live</span> : <span>Not live{b.updated_at ? ` - last update ${dateTimeIST(b.updated_at)}` : ''}</span>}
+        {' · '}{b.instruments.length} instruments streamed · large = {th}
+      </p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="overflow-x-auto">
+          <div className="eyebrow mb-1">By instrument, today</div>
+          {active.length ? (
+            <table className="w-full min-w-[420px] text-[13px]">
+              <thead><tr className="border-b border-line text-2xs text-muted">
+                <th className="py-1.5 text-left font-medium">Instrument</th>
+                <th className="py-1.5 text-right font-medium">Trades</th>
+                <th className="py-1.5 text-right font-medium" title="Traded at the ask: likely started by a buyer">At ask ₹ cr</th>
+                <th className="py-1.5 text-right font-medium" title="Traded at the bid: likely started by a seller">At bid ₹ cr</th>
+                <th className="py-1.5 text-right font-medium">Net</th>
+              </tr></thead>
+              <tbody>
+                {active.map((i) => (
+                  <tr key={i.ticker} className="border-b border-line/60 last:border-0">
+                    <td className="py-1 font-semibold">{instName(i)}</td>
+                    <td className="num py-1 text-right">{i.prints}</td>
+                    <td className="num py-1 text-right text-profit">{num(i.buy_cr, 2)}</td>
+                    <td className="num py-1 text-right text-loss">{num(i.sell_cr, 2)}</td>
+                    <td className={cn('num py-1 text-right font-semibold', i.net_cr > 0 ? 'text-profit' : i.net_cr < 0 ? 'text-loss' : 'text-muted')}>{i.net_cr > 0 ? '+' : ''}{num(i.net_cr, 2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p className="text-xs text-muted">No trade above the thresholds yet today.</p>}
+        </div>
+        <div className="overflow-x-auto">
+          <div className="eyebrow mb-1">Latest large trades</div>
+          {b.recent.length ? (
+            <table className="w-full min-w-[420px] text-[13px]">
+              <thead><tr className="border-b border-line text-2xs text-muted">
+                <th className="py-1.5 text-left font-medium">Time</th>
+                <th className="py-1.5 text-left font-medium">Instrument</th>
+                <th className="py-1.5 text-right font-medium">Lots</th>
+                <th className="py-1.5 text-right font-medium">Price</th>
+                <th className="py-1.5 text-right font-medium">₹ cr</th>
+                <th className="py-1.5 pl-3 text-left font-medium">Likely side</th>
+              </tr></thead>
+              <tbody>
+                {b.recent.map((t, k) => (
+                  <tr key={`${t.ts}-${t.ticker}-${k}`} className="border-b border-line/60 last:border-0">
+                    <td className="num py-1 text-muted">{timeIST(t.ts)}</td>
+                    <td className="py-1">{instName(t)}</td>
+                    <td className="num py-1 text-right">{num(t.lots, 0)}</td>
+                    <td className="num py-1 text-right">{num(t.price, 2)}</td>
+                    <td className="num py-1 text-right">{num(t.value_cr, 2)}</td>
+                    <td className={cn('py-1 pl-3 text-xs font-semibold', t.side === 'BUY' ? 'text-profit' : t.side === 'SELL' ? 'text-loss' : 'text-muted')}>{t.side === 'BUY' ? 'buyer' : t.side === 'SELL' ? 'seller' : 'unknown'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p className="text-xs text-muted">None yet.</p>}
+        </div>
+      </div>
+      <p className="text-2xs text-muted">{b.note}</p>
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ does it work?
 function Research({ symbol }: { symbol: string }) {
   const q = useOptResearch()
@@ -485,6 +570,10 @@ export default function Options() {
             right={<Segmented size="xs" ariaLabel="Window" value={String(win)} onChange={(v) => setWin(Number(v))}
               items={WINDOWS.map((w) => ({ id: String(w), label: `${w}m` }))} />}>
             <Unusual c={c} />
+          </Card>
+
+          <Card title="Big trades live · index futures and options" subtitle="Single large trades from the FYERS feed, with the side that most likely started them">
+            <BigTrades marketOpen={live} />
           </Card>
 
           <Card title="Option chain" subtitle="Tinted cells are in the money; the outlined row is at the money. Hover IV for NSE's own figure, LTP for bid/ask, build-up tags for what they mean."

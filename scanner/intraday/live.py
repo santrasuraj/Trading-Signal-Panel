@@ -156,35 +156,49 @@ def _stop_socket(sock) -> None:
         pass
 
 
-def run_live(symbols: list[str], root, interval: str = "5m", log=print) -> int:
-    """Stream ticks for up to 100 symbols until the session ends; returns the number of bars written."""
+def run_live(symbols: list[str], root, interval: str = "5m", log=print, fno: list[dict] | None = None,
+             fno_settings: dict | None = None) -> int:
+    """Stream ticks for up to 100 symbols until the session ends; returns the number of bars written. `fno`: index
+    futures / options to stream too (scanner/fno_live.py) - their large trades are recorded, they make no bars."""
     lock = idata.FileLock(live_dir(root) / LOCK_FILE_NAME)
     if not lock.acquire(timeout=0):
         log("Live feed already running in another window - not starting a second one "
             "(FYERS allows 100 symbols across all connections).")
         return 0
     try:
-        return _run_live(symbols, root, interval, log)
+        return _run_live(symbols, root, interval, log, fno or [], fno_settings)
     finally:
         lock.release()
 
 
-def _run_live(symbols: list[str], root, interval: str, log) -> int:
+def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno_settings: dict | None) -> int:
     tok = _wait_for_login(log)
     if tok is None:
         log("The session ended before a valid FYERS login was found - no live bars today.")
         return 0
     from fyers_apiv3.FyersWebsocket import data_ws
 
-    tickers = [s if ":" in s else f"NSE:{s}-EQ" for s in symbols[:MAX_SYMBOLS]]
+    fno = fno[:MAX_SYMBOLS]
+    tickers = [s if ":" in s else f"NSE:{s}-EQ" for s in symbols[:MAX_SYMBOLS - len(fno)]] + [i["ticker"] for i in fno]
     builder = idata.TickBarBuilder(interval)
     from ..footprints import FootprintRecorder
     recorder = FootprintRecorder()            # large trades + order-book totals for Big money live (footprints.py)
+    from ..fno_live import FnoRecorder
+    fno_rec = FnoRecorder(fno, fno_settings) if fno else None    # large futures / options trades (fno_live.py)
     lock = threading.Lock()
     status = {"live": False, "errors": 0, "ticks": 0, "last_tick": None}
 
     def on_message(msg):
         if isinstance(msg, dict) and msg.get("ltp") is not None:
+            if fno_rec is not None and fno_rec.wants(msg.get("symbol")):
+                with lock:                     # F&O: large trades only - no bars, no stock footprints
+                    try:
+                        fno_rec.on_tick(msg)
+                    except Exception:
+                        pass
+                    status["ticks"] += 1
+                    status["last_tick"] = time.time()
+                return
             with lock:
                 builder.on_tick(msg)
                 try:
@@ -240,6 +254,8 @@ def _run_live(symbols: list[str], root, interval: str, log) -> int:
             try:                                             # large trades / book (footprints): separate from the bars
                 with lock:
                     recorder.flush(ist_now().date())
+                    if fno_rec is not None:
+                        fno_rec.flush(ist_now().date(), live_dir(root))
             except Exception as e:
                 log(f"Live: writing footprints failed ({type(e).__name__}: {e})")
     finally:

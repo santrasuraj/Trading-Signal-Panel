@@ -2405,6 +2405,28 @@
     }
    }
   },
+  "/api/options/bigtrades": {
+   "get": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Bigtrades",
+    "description": "Large index futures / options trades today, from the FYERS live feed (scanner/fno_live.py).",
+    "operationId": "bigtrades_api_options_bigtrades_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OptBigTradesResponse"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/options/research": {
    "get": {
     "tags": [
@@ -9186,6 +9208,276 @@
      "complete_upto"
     ],
     "title": "NseHealth"
+   },
+   "OptBigInstrument": {
+    "properties": {
+     "ticker": {
+      "type": "string",
+      "title": "Ticker"
+     },
+     "underlying": {
+      "type": "string",
+      "title": "Underlying"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "fut",
+       "ce",
+       "pe"
+      ],
+      "title": "Kind"
+     },
+     "strike": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Strike"
+     },
+     "expiry": {
+      "type": "string",
+      "title": "Expiry"
+     },
+     "lot": {
+      "type": "integer",
+      "title": "Lot"
+     },
+     "prints": {
+      "type": "integer",
+      "title": "Prints"
+     },
+     "buy_cr": {
+      "type": "number",
+      "title": "Buy Cr"
+     },
+     "sell_cr": {
+      "type": "number",
+      "title": "Sell Cr"
+     },
+     "unknown_cr": {
+      "type": "number",
+      "title": "Unknown Cr"
+     },
+     "net_cr": {
+      "type": "number",
+      "title": "Net Cr"
+     },
+     "ltp": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ltp"
+     },
+     "buy_qty": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Buy Qty"
+     },
+     "sell_qty": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sell Qty"
+     },
+     "volume": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Volume"
+     }
+    },
+    "type": "object",
+    "required": [
+     "ticker",
+     "underlying",
+     "kind",
+     "strike",
+     "expiry",
+     "lot",
+     "prints",
+     "buy_cr",
+     "sell_cr",
+     "unknown_cr",
+     "net_cr",
+     "ltp",
+     "buy_qty",
+     "sell_qty",
+     "volume"
+    ],
+    "title": "OptBigInstrument"
+   },
+   "OptBigTrade": {
+    "properties": {
+     "ts": {
+      "type": "string",
+      "title": "Ts"
+     },
+     "ticker": {
+      "type": "string",
+      "title": "Ticker"
+     },
+     "underlying": {
+      "type": "string",
+      "title": "Underlying"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "fut",
+       "ce",
+       "pe"
+      ],
+      "title": "Kind"
+     },
+     "strike": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Strike"
+     },
+     "expiry": {
+      "type": "string",
+      "title": "Expiry"
+     },
+     "price": {
+      "type": "number",
+      "title": "Price"
+     },
+     "lots": {
+      "type": "number",
+      "title": "Lots"
+     },
+     "value_cr": {
+      "type": "number",
+      "title": "Value Cr"
+     },
+     "side": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "BUY",
+         "SELL"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Side"
+     }
+    },
+    "type": "object",
+    "required": [
+     "ts",
+     "ticker",
+     "underlying",
+     "kind",
+     "strike",
+     "expiry",
+     "price",
+     "lots",
+     "value_cr",
+     "side"
+    ],
+    "title": "OptBigTrade"
+   },
+   "OptBigTradesResponse": {
+    "properties": {
+     "date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Date"
+     },
+     "updated_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Updated At"
+     },
+     "live": {
+      "type": "boolean",
+      "title": "Live"
+     },
+     "instruments": {
+      "items": {
+       "$ref": "#/components/schemas/OptBigInstrument"
+      },
+      "type": "array",
+      "title": "Instruments"
+     },
+     "recent": {
+      "items": {
+       "$ref": "#/components/schemas/OptBigTrade"
+      },
+      "type": "array",
+      "title": "Recent"
+     },
+     "thresholds": {
+      "additionalProperties": {
+       "type": "number"
+      },
+      "type": "object",
+      "title": "Thresholds"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "date",
+     "updated_at",
+     "live",
+     "instruments",
+     "recent",
+     "thresholds",
+     "note"
+    ],
+    "title": "OptBigTradesResponse"
    },
    "OptChainRef": {
     "properties": {

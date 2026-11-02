@@ -160,6 +160,7 @@ GET_ENDPOINTS = [
     ("/api/intraday", M.IntradayResponse),
     ("/api/options/status", M.OptStatus),
     ("/api/options/research", M.OptResearchResponse),
+    ("/api/options/bigtrades", M.OptBigTradesResponse),
     ("/api/fno/status", M.FnoStatus),
     ("/api/fno/positions", M.FnoPositionsResponse),
     ("/api/fno/futures", M.FnoFuturesResponse),

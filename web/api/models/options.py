@@ -189,6 +189,47 @@ class OptResearchResponse(Model):
     note: str
 
 
+class OptBigInstrument(Model):
+    ticker: str                                   # FYERS symbol, e.g. NSE:NIFTY26NOVFUT
+    underlying: str
+    kind: Literal["fut", "ce", "pe"]
+    strike: float | None = None
+    expiry: ISODate
+    lot: int
+    prints: int                                   # large trades today
+    buy_cr: float                                 # Rs crore traded at the ask (likely started by a buyer)
+    sell_cr: float                                # ... at the bid (likely started by a seller)
+    unknown_cr: float                             # ... between bid and ask
+    net_cr: float                                 # buy - sell
+    ltp: float | None = None
+    buy_qty: float | None = None                  # pending buy / sell quantity in the book
+    sell_qty: float | None = None
+    volume: float | None = None
+
+
+class OptBigTrade(Model):
+    ts: ISODateTime
+    ticker: str
+    underlying: str
+    kind: Literal["fut", "ce", "pe"]
+    strike: float | None = None
+    expiry: ISODate
+    price: float
+    lots: float
+    value_cr: float                               # notional (futures) or premium (options)
+    side: Literal["BUY", "SELL"] | None = None    # likely initiator (tick rule); None: between bid and ask
+
+
+class OptBigTradesResponse(Model):
+    date: ISODate | None = None
+    updated_at: ISODateTime | None = None
+    live: bool                                    # the live feed wrote within the last 2 minutes
+    instruments: list[OptBigInstrument]
+    recent: list[OptBigTrade]                     # newest first
+    thresholds: dict[str, float]                  # future_print_cr, option_print_lakh
+    note: str
+
+
 class OptRefreshRequest(Model):
     symbols: list[str] | None = None              # default: config.yaml options.underlyings
 
@@ -199,6 +240,6 @@ class OptRefreshAccepted(Model):
 
 
 __all__ = ["OptBuildup", "OptRunState", "OptLeg", "OptRow", "OptLevel", "OptLevels", "OptSummary", "OptUnusual",
-           "OptClaim", "OptMaxPainClaim", "OptExpectedMoveClaim", "OptPcrClaim", "OptStudy", "OptResearchResponse",
+           "OptBigInstrument", "OptBigTrade", "OptBigTradesResponse", "OptClaim", "OptMaxPainClaim", "OptExpectedMoveClaim", "OptPcrClaim", "OptStudy", "OptResearchResponse",
            "OptChainResponse", "OptHistoryResponse", "OptChainRef", "OptRefreshRun", "OptLastRefresh", "OptStatus",
            "OptRefreshRequest", "OptRefreshAccepted"]

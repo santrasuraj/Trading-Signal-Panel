@@ -191,6 +191,17 @@ options:
   interval_seconds: 60              # NSE updates its chain every few minutes; an unchanged chain is not stored twice
   risk_free_pct: 6.5                # for implied volatility (about the 91-day T-bill yield)
 
+# Big trades live in index futures / options (Options page): the 09:14 live service (FYERS WebSocket, needs today's
+# FYERS login) also streams these and keeps every large trade with its likely side. FYERS allows 100 live symbols:
+# these come off the stocks (default 2 futures + 18 NIFTY options = 20; stocks keep 80). futures: [] and options: []
+# switch it off.
+live_fno:
+  futures: [NIFTY, BANKNIFTY]       # nearest-month futures
+  options: [NIFTY]                  # nearest-expiry calls and puts ...
+  strikes_each_side: 4              # ... within 4 strikes of the money (9 strikes x CE/PE = 18 symbols)
+  future_print_cr: 5                # a futures trade of Rs 5 crore notional or more is "large"
+  option_print_lakh: 25             # an options trade of Rs 25 lakh premium or more is "large"
+
 # Individual intraday strategies can be switched off, e.g.:
 # intraday_strategies:
 #   supertrend: {enabled: false}

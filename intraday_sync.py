@@ -149,8 +149,15 @@ def _run(args) -> int:
         if not live.market_open_now(lead_minutes=LIVE_LEAD_MINUTES):
             print("Market is closed - the live feed runs 09:15-15:31 on trading days.")
         else:
-            # the 100 most liquid intraday symbols (FYERS Standard plan WebSocket limit)
-            live.run_live(symbols[: live.MAX_SYMBOLS], INTRADAY_DIR, log=lambda m: print(m, flush=True))
+            # FYERS allows 100 live symbols: the index futures / options of config.yaml live_fno first, then the
+            # most liquid intraday stocks
+            from scanner import fno_live
+            fno = fno_live.instruments(cfg, log=lambda m: print(m, flush=True))
+            if fno:
+                print(f"Live F&O: {len(fno)} futures / options (large trades); {live.MAX_SYMBOLS - len(fno)} stocks",
+                      flush=True)
+            live.run_live(symbols[: live.MAX_SYMBOLS - len(fno)], INTRADAY_DIR, log=lambda m: print(m, flush=True),
+                          fno=fno, fno_settings=fno_live.settings(cfg))
 
     if args.run:
         try:

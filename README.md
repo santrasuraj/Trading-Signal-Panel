@@ -207,7 +207,7 @@ FYERS is the first choice for everything real-time and intraday. Every FYERS cal
 | Data calls (history, quotes) | 5/second, 50/minute, 5,000/day | **4/second, 45/minute, 4,500/day** |
 | User calls (profile, holdings) | 10/second, 200/minute, 100,000/day | 8/second, 180/minute, 90,000/day |
 | Rate-limit breaches | 3 in a day = account blocked for the day | **Stops using FYERS for the day after 2** |
-| WebSocket (live ticks) | up to 100 symbols, no REST cost | 100 most liquid intraday symbols |
+| WebSocket (live ticks) | up to 100 symbols, no REST cost | the `live_fno` index futures / options (default 20), then the most liquid intraday stocks (80) |
 
 Usage is counted in `data/fyers_usage.json`, which every process shares. If the day's budget runs out, everything falls back to NSE and Yahoo automatically, with no errors.
 
@@ -309,6 +309,14 @@ backtest in this app shows that PCR, max pain, open-interest levels or candle pa
   today's VWAP with 1-SD bands, the 15-minute opening range, the volume profile (point of control, value area) and
   intraday patterns.
 
+- **Big trades live** (`scanner/fno_live.py`, Options page): the 09:14 live service (FYERS WebSocket, needs
+  today's FYERS login) also streams the nearest NIFTY and BANKNIFTY futures and NIFTY's nearest-expiry calls and
+  puts within 4 strikes of the money (`live_fno` in `config.yaml`; picked from FYERS' public symbol list). Every
+  single trade of Rs 5 crore notional (futures) or Rs 25 lakh premium (options) or more is kept with the side that
+  most likely started it: at the ask a buyer, at the bid a seller (tick rule). Totals per instrument show which side
+  was more aggressive today. These 20 symbols come off the 100 the live feed allows, so 80 stocks stay. Not yet
+  seen on a live session: the first one after a FYERS login confirms the tick fields.
+
 What no one can show: who is behind a trade while it happens, or when a big trader will exit. NSE names buyers
 and sellers only later (block / bulk deals the same evening, insider disclosures within two days, shareholding
 each quarter: see Smart money).
@@ -372,6 +380,7 @@ scanner/
   options.py     NSE option chains: parsing, Black-76 IV / greeks, PCR, max pain, OI levels, unusual activity
   options_research.py  do PCR / max pain / the straddle's expected move hold up on the stored days?
   fno.py         NSE participant-wise OI and F&O bhavcopy: FII/DII/Pro/Client positions, futures build-ups
+  fno_live.py    big trades live: index futures / near-the-money options on the FYERS feed, large trades by side
   levels.py      price action: pivots, swing S/R, trend, candle patterns, VWAP / opening range / volume profile
 web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), started by 3_dashboard.bat
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)

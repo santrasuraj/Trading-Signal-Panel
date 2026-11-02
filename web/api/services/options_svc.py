@@ -8,7 +8,7 @@ from datetime import date, datetime
 
 import pandas as pd
 
-from scanner import fno, options as opt, options_research
+from scanner import fno, fno_live, options as opt, options_research
 from scanner.settings import load_config
 
 from .. import errors
@@ -114,6 +114,17 @@ def chain(symbol: str, expiry: str | None, window: int) -> dict:
             "expiries": exps, "stale": clock["session"] == "open" and age_min > STALE_MINUTES,
             "window_minutes": window, "window_since": (w or {}).get("since"), "lot": lot, "unusual": unusual,
             "rows": rows, "note": NOTE}
+
+
+BIG_NOTE = ("Every single futures / options trade above the size thresholds, from the FYERS live feed (needs today's FYERS "
+            "login and the 09:14 live service). Side = the likely initiator: at the ask a buyer lifted the offer, at the "
+            "bid a seller hit it. Who traded, and whether it opened or closed a position, is never known live.")
+
+
+def bigtrades() -> dict:
+    st = fno_live.settings(_config())
+    return {**fno_live.summary(P.intraday_live), "note": BIG_NOTE,
+            "thresholds": {"future_print_cr": st["future_print_cr"], "option_print_lakh": st["option_print_lakh"]}}
 
 
 def research() -> dict:

@@ -43,6 +43,19 @@ export interface OptStudy {
   expected_move: OptClaim & { inside_pct: number | null; fair_pct: number }
   pcr: OptClaim & { corr: number | null; top_minus_bottom_pct: number | null }
 }
+export interface OptBigInstrument {
+  ticker: string; underlying: string; kind: 'fut' | 'ce' | 'pe'; strike: number | null; expiry: ISODate; lot: number
+  prints: number; buy_cr: number; sell_cr: number; unknown_cr: number; net_cr: number
+  ltp: number | null; buy_qty: number | null; sell_qty: number | null; volume: number | null
+}
+export interface OptBigTrade {
+  ts: ISODateTime; ticker: string; underlying: string; kind: 'fut' | 'ce' | 'pe'; strike: number | null; expiry: ISODate
+  price: number; lots: number; value_cr: number; side: 'BUY' | 'SELL' | null
+}
+export interface OptBigTradesResponse {
+  date: ISODate | null; updated_at: ISODateTime | null; live: boolean; instruments: OptBigInstrument[]
+  recent: OptBigTrade[]; thresholds: Record<string, number>; note: string
+}
 export interface OptResearchResponse { min_days: number; studies: OptStudy[]; note: string }
 export interface OptHistoryResponse {
   symbol: string; expiry: ISODate; day: ISODate; t: ISODateTime[]; spot: (number | null)[]; max_pain: (number | null)[]
@@ -76,6 +89,7 @@ export const optApi = {
   history: (symbol: string, expiry: string | undefined) =>
     fetchJson<OptHistoryResponse>(`/api/options/history/${encodeURIComponent(symbol)}${q({ expiry })}`),
   research: () => fetchJson<OptResearchResponse>('/api/options/research'),
+  bigtrades: () => fetchJson<OptBigTradesResponse>('/api/options/bigtrades'),
   refresh: (symbols?: string[]) =>
     fetchJson<OptRefreshAccepted>('/api/options/refresh', { method: 'POST', body: JSON.stringify(symbols ? { symbols } : {}) }),
 }
@@ -86,6 +100,7 @@ export const optKeys = {
   chain: (s: string, e: string | undefined, w: number) => ['options', 'chain', s, e ?? 'nearest', w] as const,
   history: (s: string, e: string | undefined) => ['options', 'history', s, e ?? 'nearest'] as const,
   research: ['options', 'research'] as const,
+  bigtrades: ['options', 'bigtrades'] as const,
 }
 
 export const useOptStatus = () =>
@@ -117,6 +132,10 @@ export const useOptHistory = (symbol: string, expiry: string | undefined, live: 
     placeholderData: sameSymbol(symbol),
     refetchInterval: live ? 60_000 : false,
   })
+
+/** Every 15 s while the market is open (the live service writes every 5 s). */
+export const useOptBigTrades = (live: boolean) =>
+  useQuery({ queryKey: optKeys.bigtrades, queryFn: optApi.bigtrades, refetchInterval: live ? 15_000 : false })
 
 export const useOptResearch = () => useQuery({ queryKey: optKeys.research, queryFn: optApi.research, staleTime: 300_000 })
 
