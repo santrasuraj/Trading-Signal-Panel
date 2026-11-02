@@ -29,6 +29,7 @@ class FileCache:
         self._lock = threading.Lock()
         self._key: tuple | None = None
         self._val: Any = None
+        self._good: tuple[str, Any] | None = None     # (path, value) of the last successful load
 
     def get(self, path: Path) -> Any:
         key = file_key(path)
@@ -40,15 +41,20 @@ class FileCache:
                     try:
                         self._val = self.loader(path)
                     except Exception:
-                        # a file caught mid-write by another process: retry on the next request
+                        # A file caught mid-write or locked by another process (Windows, while a scan replaces it):
+                        # keep answering with the last good read of the same file - "missing" would look like "no
+                        # scan" for a moment (the UI flashed Onboarding) - and retry on the next request.
                         self._key = None
+                        if self._good is not None and self._good[0] == str(path):
+                            return self._good[1]
                         return self.missing
+                    self._good = (str(path), self._val)
                 self._key = key
             return self._val
 
     def clear(self) -> None:
         with self._lock:
-            self._key, self._val = None, None
+            self._key, self._val, self._good = None, None, None
 
 
 class KeyedCache:

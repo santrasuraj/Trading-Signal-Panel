@@ -117,7 +117,11 @@ function Editor({ open, onClose, h, loggedIn }: { open: boolean; onClose: () => 
   const doSave = () =>
     save.mutate(rows.filter((r) => !isBlank(r)).map(fromDraft), {
       onSuccess: (r) => {
-        toast({ tone: r.rejected.length ? 'bad' : 'good', title: `Saved ${r.saved} holding${r.saved === 1 ? '' : 's'}`, detail: [r.rejected.length ? `${r.rejected.length} rejected: ${r.rejected.map((x) => `${x.symbol} (${x.reason})`).join(', ')}` : '', r.unknown_symbols.length ? `Not in the scan universe: ${r.unknown_symbols.join(', ')}` : '', 'Alerts update after a re-check.'].filter(Boolean).join(' ') })
+        if (r.rejected.length) {      // nothing was written: keep the editor open so no row is lost
+          toast({ tone: 'bad', title: `Nothing saved: ${r.rejected.length} row${r.rejected.length === 1 ? '' : 's'} to fix`, detail: r.rejected.map((x) => `Row ${x.index + 1} ${x.symbol || '(no symbol)'}: ${x.reason}`).join('; ') })
+          return
+        }
+        toast({ tone: 'good', title: `Saved ${r.saved} holding${r.saved === 1 ? '' : 's'}`, detail: [r.unknown_symbols.length ? `Not in the scan universe: ${r.unknown_symbols.join(', ')}` : '', 'Alerts update after a re-check.'].filter(Boolean).join(' ') })
         onClose()
       },
     })

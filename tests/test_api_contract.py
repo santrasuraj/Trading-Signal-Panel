@@ -11,10 +11,12 @@ import json
 import math
 import shutil
 import socket
+import sys
 import typing
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 import requests
 from fastapi.testclient import TestClient
@@ -593,9 +595,14 @@ def test_holdings_round_trip(mclient, env):
     assert r.status_code == 200, r.text
     body = r.json()
     M.HoldingsPutResponse.model_validate(body)
-    assert body["saved"] == 2
+    before = (env / "holdings.csv").read_text(encoding="utf-8")
+    assert body["saved"] == 0                       # all or nothing: a rejected row is never silently dropped
     assert [(x["index"], x["reason"]) for x in body["rejected"]] == [(1, "negative quantity"), (2, "buy date is in the future")]
     assert body["unknown_symbols"] == ["ZZZUNKNOWN"]
+    assert (env / "holdings.csv").read_text(encoding="utf-8") == before          # file untouched
+    rows = [rows[0], rows[3]]                       # the user fixes (here: removes) the two bad rows
+    r = mclient.put("/api/holdings", json={"rows": rows}, headers=GUARD)
+    assert r.status_code == 200 and r.json()["saved"] == 2 and r.json()["rejected"] == []
     text = (env / "holdings.csv").read_text(encoding="utf-8")
     assert text.splitlines()[0] == "symbol,qty,buy_price,buy_date,stop_loss_pct,target_pct"
     assert "INFY" in text and "ZZZUNKNOWN" in text and "ZZZNOTREAL" not in text
@@ -1085,3 +1092,76 @@ def test_openapi_file_is_current():
     committed = json.loads(OPENAPI_FILE.read_text(encoding="utf-8"))
     assert committed == json.loads(json.dumps(create_app(warm=False).openapi())), \
         "web/api/openapi.json is out of date: run python -m web.api.main --openapi"
+
+
+# ------------------------------------------------------------------ review fixes (Nov 2026)
+def test_curves_from_another_scan_are_not_used(env):
+    """curves.parquet carries its scan's id (daily._save): curves of another scan never mix with latest.json."""
+    from web.api.services import data
+    path = env / "data" / "results" / "curves.parquet"
+    df = pd.read_parquet(path)
+    df.attrs["scan_id"] = "2000-01-01T00:00:00+05:30"
+    df.to_parquet(path)
+    caches.clear_all()
+    assert data.curves() is None
+    df.attrs["scan_id"] = latest_fixture(env)["generated_at"]
+    df.to_parquet(path)
+    caches.clear_all()
+    assert data.curves() is not None
+
+
+def test_file_cache_keeps_the_last_good_read_while_a_file_is_mid_write(tmp_path):
+    p = tmp_path / "x.json"
+    p.write_text('{"a": 1}', encoding="utf-8")
+    c = caches.FileCache(lambda f: json.loads(f.read_text(encoding="utf-8")))
+    assert c.get(p) == {"a": 1}
+    p.write_text('{"a": ', encoding="utf-8")                 # caught half-written
+    assert c.get(p) == {"a": 1}
+    p.write_text('{"a": 2}', encoding="utf-8")               # retried on the next request
+    assert c.get(p) == {"a": 2}
+    q = tmp_path / "other.json"
+    q.write_text("{", encoding="utf-8")
+    assert c.get(q) is None                                 # never another file's value
+    p.unlink()
+    assert c.get(p) is None                                 # really gone: missing
+
+
+def test_status_does_not_flash_no_scan_while_latest_is_replaced(mclient, env):
+    first = get_ok(mclient, "/api/status", M.AppStatus)["latest"]
+    assert first is not None
+    path = env / "data" / "results" / "latest.json"
+    good = path.read_text(encoding="utf-8")
+    path.write_text(good[: len(good) // 2], encoding="utf-8")       # a scan replacing it, caught mid-way
+    assert get_ok(mclient, "/api/status", M.AppStatus)["latest"] == first
+    path.write_text(good, encoding="utf-8")
+
+
+def test_a_corrupt_saved_scan_is_skipped(mclient, env):
+    res = env / "data" / "results"
+    (res / "scan_20991231_2359.json").write_bytes(b'\xff\xfe{"generated_at": "x", broken')    # not even UTF-8
+    (res / "scan_20991231_2358.json").write_text('{"generated_at": "2099-12-31", "elapsed_s": 1e999e}', encoding="utf-8")
+    caches.clear_all()
+    for url, model in (("/api/scan/history", M.ScanHistory), ("/api/data/health", M.DataHealth)):
+        body = get_ok(mclient, url, model)
+        assert "scan_20991231_2359.json" not in json.dumps(body), url
+
+
+def test_intraday_job_status_is_written_atomically(tmp_path, monkeypatch):
+    """The job's status file is replaced, never rewritten in place (a poll mid-write saw an empty file)."""
+    from web.api.services import intraday_job
+    import scanner.intraday.run as irun
+    status = tmp_path / "intraday_status.json"
+    seen = []
+    real_replace = __import__("scanner.store", fromlist=["_replace"])._replace
+
+    def spy(src, dst):
+        seen.append((str(src).endswith(".tmp"), str(dst)))
+        real_replace(src, dst)
+    monkeypatch.setattr("scanner.store._replace", spy)
+    monkeypatch.setattr(irun, "run_intraday_all", lambda cfg, update, log: (log("working"), {"elapsed_s": 1, "strategies": []})[1])
+    monkeypatch.setattr("scanner.settings.load_config", lambda: {})
+    monkeypatch.setattr(sys, "argv", ["intraday_job", "--status", str(status), "--no-update"])
+    assert intraday_job.main() == 0
+    assert seen and all(tmp and dst == str(status) for tmp, dst in seen)
+    assert json.loads(status.read_text(encoding="utf-8"))["state"] == "done"
+    assert not list(tmp_path.glob("*.tmp"))

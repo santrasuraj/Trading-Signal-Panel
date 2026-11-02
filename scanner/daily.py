@@ -728,8 +728,9 @@ def _save(result: dict, curves: dict, p, ew: pd.Series, n500: pd.Series | None, 
     if n500 is not None and n500.notna().any():
         n5 = n500.reindex(df.index).ffill()
         df["NIFTY 500"] = n5 / n5.dropna().iloc[0]
-    _write_atomic(CURVES_FILE, lambda t: df.to_parquet(t))
     scan_id = result["generated_at"]
+    df.attrs["scan_id"] = scan_id                   # kept in the parquet: readers reject curves of another scan
+    _write_atomic(CURVES_FILE, lambda t: df.to_parquet(t))
     for path, frame in ((TRADES_FILE, trades), (SCREENER_FILE, screener)):
         if frame is not None:
             frame = frame.assign(scan_id=scan_id)   # lets readers reject an artifact from another scan

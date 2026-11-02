@@ -32,6 +32,7 @@ def main() -> int:
     from scanner.lock import _try_lock, _unlock
     from scanner.settings import load_config
     from scanner.intraday.run import run_intraday_all
+    from scanner.store import _replace
 
     # One job at a time, also across API restarts: the lock tells a new API process that this job still runs.
     fh = open(args.lock or Path(args.status).with_name(LOCK_NAME), "a+")
@@ -48,10 +49,15 @@ def main() -> int:
 
         def write(**kw):
             state.update(kw)
+            tmp = Path(f"{args.status}.{os.getpid()}.tmp")
             try:
-                Path(args.status).write_text(json.dumps(state), encoding="utf-8")
+                tmp.write_text(json.dumps(state), encoding="utf-8")
+                _replace(tmp, args.status)       # atomic, as run_scan.py: a poll never reads half a file
             except OSError:
-                pass
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
         write()
         try:
             r = run_intraday_all(load_config(), update=not args.no_update, log=lambda m: write(message=str(m)[:300]))

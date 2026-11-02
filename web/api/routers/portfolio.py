@@ -20,6 +20,8 @@ def holdings():
 @router.put("/holdings", response_model=HoldingsPutResponse)
 def put_holdings(body: HoldingsPutRequest):
     ok, rejected, unknown = holdings_svc.validate([r.model_dump() for r in body.rows])
+    if rejected:    # all or nothing: writing only the valid rows would silently delete the rejected ones
+        return {"saved": 0, "rejected": rejected, "unknown_symbols": unknown}
     try:
         holdings_svc.save(ok)
     except PermissionError:         # Windows: Excel locks an open csv, so the rename onto it fails

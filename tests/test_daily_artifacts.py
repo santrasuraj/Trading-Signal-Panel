@@ -62,6 +62,7 @@ def test_save_writes_artifacts_first_and_latest_last(tmp_path, monkeypatch):
     assert order.index("trades.parquet") < order.index("latest.json") > order.index("screener.parquet")
     assert not list(tmp_path.glob("*.tmp"))
     assert pd.read_parquet(tmp_path / "trades.parquet")["scan_id"].tolist() == ["2026-01-07T19:00:00+05:30"]
+    assert pd.read_parquet(tmp_path / "curves.parquet").attrs["scan_id"] == "2026-01-07T19:00:00+05:30"
     assert json.loads((tmp_path / "latest.json").read_text(encoding="utf-8"))["generated_at"] == result["generated_at"]
     assert (tmp_path / "scan_20260107_1900.json").exists()
 
