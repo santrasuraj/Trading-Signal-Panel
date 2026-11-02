@@ -2,12 +2,13 @@
 // today's VWAP, opening range and volume profile when the stock has 5-minute bars (web/api/routers/levels.py).
 // Descriptive only - the card says so.
 
-import { useLevels, type LvChartPattern, type LvLevel, type LvPattern } from '@/api/levels'
+import { useState } from 'react'
+import { useLevels, usePatternEvidence, type LvChartPattern, type LvEvidence, type LvLevel, type LvPattern, type LvVerdict } from '@/api/levels'
 import { isFailure } from '@/api/client'
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/feedback'
 import { Card, Tip } from '@/components/ui'
 import { cn } from '@/lib/csv'
-import { DASH, date, num, ok, pct, timeIST } from '@/lib/format'
+import { DASH, date, num, ok, pct, qty, timeIST } from '@/lib/format'
 
 const dist = (px: number | null, from: number | null) => (ok(px) && ok(from) && from > 0 ? pct((px / from - 1) * 100, { dp: 1 }) : DASH)
 
@@ -38,6 +39,65 @@ function Levels({ title, items, tone }: { title: string; items: LvLevel[]; tone:
   )
 }
 
+const VERDICT: Record<LvVerdict, { label: string; cls: string }> = {
+  edge: { label: 'tested: edge', cls: 'border-profit/40 text-profit' },
+  edge_before_costs: { label: 'tested: edge before costs only', cls: 'border-warn/40 text-warn' },
+  no_edge: { label: 'tested: no edge', cls: 'border-line text-muted' },
+  opposite: { label: 'tested: worked in reverse', cls: 'border-loss/40 text-loss' },
+  no_direction: { label: 'tested: no direction', cls: 'border-line text-muted' },
+  too_few: { label: 'too few cases', cls: 'border-line text-faint' },
+}
+
+function EvidenceBadge({ e }: { e: LvEvidence | null }) {
+  if (!e) return <span className="text-2xs text-faint" title="The pattern study has not run yet (python -m scanner.pattern_study)">untested</span>
+  const v = VERDICT[e.verdict]
+  return (
+    <Tip text={<>{qty(e.n)} cases in 8 years. {e.horizon_days} days later vs the average stock: {pct(e.excess_pct, { dp: 2 })} ({pct(e.after_cost_pct, { dp: 2 })} after costs); beat it {num(e.hit_pct, 0)}% of the time; t {num(e.t, 1)}.</>}>
+      <span className={cn('whitespace-nowrap rounded border px-1 text-2xs', v.cls)}>{v.label}</span>
+    </Tip>
+  )
+}
+
+/** How every pattern did - loads only when opened. */
+function EvidenceTable() {
+  const [open, setOpen] = useState(false)
+  const q = usePatternEvidence(open)
+  return (
+    <details className="mt-3" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="cursor-pointer text-xs font-medium text-muted hover:text-fg">How every pattern did on 8 years of data</summary>
+      {!q.data ? <SkeletonRows rows={5} cols={6} /> : !q.data.generated_at ? (
+        <p className="mt-2 text-xs text-muted">Not tested yet: run <code>python -m scanner.pattern_study</code> once (about 20 minutes).</p>
+      ) : (
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full min-w-[640px] text-xs">
+            <thead><tr className="border-b border-line text-2xs text-muted">
+              {['Pattern', 'Cases', 'Days', 'vs avg stock', 'After costs', 'Beat it', 't', 'Verdict'].map((h, i) => <th key={h} className={cn('py-1.5 font-medium', i ? 'text-right' : 'text-left')}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {q.data.patterns.map((p) => {
+                const s = p.horizons[String(p.primary)]
+                return (
+                  <tr key={p.key} className="border-b border-line/60 last:border-0">
+                    <td className="py-1"><span className={p.bias === 'bullish' ? 'text-profit' : p.bias === 'bearish' ? 'text-loss' : 'text-fg'}>{p.name}</span> <span className="text-faint">{p.family}</span></td>
+                    <td className="num py-1 text-right">{qty(s?.n)}</td>
+                    <td className="num py-1 text-right">{p.primary}</td>
+                    <td className="num py-1 text-right">{pct(s?.excess_pct, { dp: 2 })}</td>
+                    <td className="num py-1 text-right">{pct(s?.after_cost_pct, { dp: 2 })}</td>
+                    <td className="num py-1 text-right">{num(s?.hit_pct, 0)}%</td>
+                    <td className="num py-1 text-right">{num(s?.t, 1)}</td>
+                    <td className="py-1 pl-2 text-right"><span className={cn('rounded border px-1 text-2xs', VERDICT[p.verdict].cls)}>{VERDICT[p.verdict].label.replace('tested: ', '')}</span></td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <p className="mt-2 text-2xs text-muted">{date(q.data.first_day)} – {date(q.data.last_day)}, {qty(q.data.events)} events; round-trip costs {num(q.data.cost_pct, 2)}%. {q.data.note}</p>
+        </div>
+      )}
+    </details>
+  )
+}
+
 function Patterns({ items, intraday }: { items: LvPattern[]; intraday?: boolean }) {
   if (!items.length) return <div className="text-xs text-muted">No pattern on the last bars.</div>
   return (
@@ -47,7 +107,10 @@ function Patterns({ items, intraday }: { items: LvPattern[]; intraday?: boolean 
           <Tip text={p.what}>
             <span className={cn('rounded border px-1.5 text-2xs font-semibold', p.bias === 'bullish' ? 'border-profit/40 text-profit' : p.bias === 'bearish' ? 'border-loss/40 text-loss' : 'border-line text-muted')}>{p.name}</span>
           </Tip>
-          <span className="text-2xs text-muted">{p.bars_ago === 0 ? 'last bar' : `${p.bars_ago} bar${p.bars_ago > 1 ? 's' : ''} ago`} · {intraday ? timeIST(p.at) : date(p.at.slice(0, 10), { year: false })}</span>
+          <span className="flex items-center gap-1.5 text-2xs text-muted">
+            {!intraday && <EvidenceBadge e={p.evidence} />}
+            {p.bars_ago === 0 ? 'last bar' : `${p.bars_ago} bar${p.bars_ago > 1 ? 's' : ''} ago`} · {intraday ? timeIST(p.at) : date(p.at.slice(0, 10), { year: false })}
+          </span>
         </li>
       ))}
     </ul>
@@ -92,6 +155,7 @@ function ChartPatterns({ items }: { items: LvChartPattern[] }) {
               {p.status === 'confirmed' ? `confirmed${p.direction ? ` ${p.direction}` : ''}${p.confirmed_bars_ago != null ? `, ${p.confirmed_bars_ago === 0 ? 'last bar' : `${p.confirmed_bars_ago} bars ago`}` : ''}` : 'forming'}
             </span>
           </div>
+          <div className="mt-1"><EvidenceBadge e={p.evidence} /></div>
           <Sketch p={p} />
           <table className="w-full text-xs">
             <tbody>
@@ -188,6 +252,7 @@ export function PriceAction({ symbol }: { symbol: string }) {
         <div className="eyebrow mb-2">Chart patterns (daily)</div>
         <ChartPatterns items={d.chart_patterns} />
         {d.chart_patterns.length > 1 && <p className="mt-2 text-2xs text-muted">Patterns over different stretches can point different ways - one more reason not to trade them blindly.</p>}
+        <EvidenceTable />
       </div>
       <p className="mt-3 text-2xs text-muted">{q.data?.note}</p>
     </Card>

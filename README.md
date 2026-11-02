@@ -304,11 +304,18 @@ backtest in this app shows that PCR, max pain, open-interest levels or candle pa
   and resistance of the last year (with how often each level formed), trend versus the 20/50/200-day averages,
   higher highs / lower lows, Supertrend, daily candle patterns and **chart patterns** (double top / bottom, head
   and shoulders, triangles, wedges, rectangles, flags: forming or confirmed, with the breakout level, where the
-  pattern is void and the textbook target; about half of all stocks show one at any time, and none has been
-  tested here). When the stock has 5-minute bars it adds
+  pattern is void and the textbook target; about half of all stocks show one at any time). When the stock has
+  5-minute bars it adds
   today's VWAP with 1-SD bands, the 15-minute opening range, the volume profile (point of control, value area) and
   intraday patterns.
 
+- **Pattern evidence** (`scanner/pattern_study.py`, shown on every pattern): each candle and chart pattern tested
+  on the survivorship-free top 500, Aug 2018 - Oct 2026 (808,294 events): buy at the next open after the pattern
+  first appeared (using only data up to that day), compare with the average top-500 stock over the same 5 / 10 /
+  20 days, t-statistic on monthly averages. **No pattern beat the average stock after costs (~0.45% round trip).**
+  Gap-ups did worse than it (-0.20% over 10 days, t -5.0), ascending-triangle breakouts too (-0.36% over 20 days,
+  t -2.2). The closest to an edge, symmetrical-triangle breakouts, made +0.69% in 5 days (t 4.6) - +0.24% after
+  costs, gone by 20 days. Re-run with `python -m scanner.pattern_study` (~17 minutes) to add new months.
 - **Big trades live** (`scanner/fno_live.py`, Options page): the 09:14 live service (FYERS WebSocket, needs
   today's FYERS login) also streams the nearest NIFTY and BANKNIFTY futures and NIFTY's nearest-expiry calls and
   puts within 4 strikes of the money (`live_fno` in `config.yaml`; picked from FYERS' public symbol list). Every
@@ -381,7 +388,8 @@ scanner/
   options_research.py  do PCR / max pain / the straddle's expected move hold up on the stored days?
   fno.py         NSE participant-wise OI and F&O bhavcopy: FII/DII/Pro/Client positions, futures build-ups
   fno_live.py    big trades live: index futures / near-the-money options on the FYERS feed, large trades by side
-  levels.py      price action: pivots, swing S/R, trend, candle patterns, VWAP / opening range / volume profile
+  levels.py      price action: pivots, swing S/R, trend, candle / chart patterns, VWAP / opening range / profile
+  pattern_study.py  every candle / chart pattern tested on the point-in-time top 500 (event study, after costs)
 web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), started by 3_dashboard.bat
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)

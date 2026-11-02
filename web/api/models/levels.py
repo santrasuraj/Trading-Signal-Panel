@@ -6,6 +6,25 @@ from typing import Literal
 from .common import ISODate, ISODateTime, Model
 
 
+LvVerdict = Literal["edge", "edge_before_costs", "no_edge", "opposite", "no_direction", "too_few"]
+
+
+class LvStats(Model):
+    n: int                                        # events
+    months: int
+    excess_pct: float | None = None               # mean return vs the average stock, in the pattern's direction
+    median_pct: float | None = None
+    hit_pct: float | None = None                  # % of events that beat the average stock in its direction
+    t: float | None = None                        # on monthly averages
+    after_cost_pct: float | None = None           # excess minus round-trip costs
+
+
+class LvEvidence(LvStats):
+    """How the pattern did on 8 years of the point-in-time top 500 (scanner/pattern_study.py), at its main horizon."""
+    verdict: LvVerdict
+    horizon_days: int
+
+
 class LvPattern(Model):
     key: str
     name: str
@@ -13,6 +32,7 @@ class LvPattern(Model):
     what: str
     bars_ago: int                                 # 0 = the last bar
     at: ISODateTime
+    evidence: LvEvidence | None = None            # None until the pattern study has run
 
 
 class LvPoint(Model):
@@ -45,6 +65,7 @@ class LvChartPattern(Model):
     series: list[float | None]                    # closes from just before the pattern to the last bar (sketch)
     points: list[LvPoint]
     lines: list[LvLine]
+    evidence: LvEvidence | None = None
 
 
 class LvLevel(Model):
@@ -135,6 +156,28 @@ class LvIntraday(Model):
     patterns: list[LvPattern]
 
 
+class LvStudyRow(Model):
+    key: str
+    family: Literal["candle", "chart"]
+    name: str
+    bias: Literal["bullish", "bearish", "neutral"]
+    verdict: LvVerdict
+    primary: int                                  # main horizon, trading days
+    horizons: dict[str, LvStats]                  # "5", "10", "20"
+
+
+class PatternEvidenceResponse(Model):
+    generated_at: ISODateTime | None = None       # None: the study has not run (python -m scanner.pattern_study)
+    first_day: ISODate | None = None
+    last_day: ISODate | None = None
+    events: int | None = None
+    cost_pct: float | None = None
+    min_events: int | None = None
+    min_months: int | None = None
+    patterns: list[LvStudyRow]
+    note: str
+
+
 class LevelsResponse(Model):
     symbol: str
     daily: LvDaily | None = None
@@ -143,5 +186,5 @@ class LevelsResponse(Model):
     note: str
 
 
-__all__ = ["LvPattern", "LvPoint", "LvLine", "LvChartPattern", "LvLevel", "LvLevels", "LvPivots", "LvDay", "LvTrend", "LvDaily", "LvProfile", "LvIntraday",
+__all__ = ["LvVerdict", "LvStats", "LvEvidence", "LvStudyRow", "PatternEvidenceResponse", "LvPattern", "LvPoint", "LvLine", "LvChartPattern", "LvLevel", "LvLevels", "LvPivots", "LvDay", "LvTrend", "LvDaily", "LvProfile", "LvIntraday",
            "LevelsResponse"]

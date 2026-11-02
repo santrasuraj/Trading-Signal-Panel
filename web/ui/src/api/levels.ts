@@ -4,13 +4,31 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchJson } from './client'
 import type { ISODate, ISODateTime } from './types'
 
-export interface LvPattern { key: string; name: string; bias: 'bullish' | 'bearish' | 'neutral'; what: string; bars_ago: number; at: ISODateTime }
+export type LvVerdict = 'edge' | 'edge_before_costs' | 'no_edge' | 'opposite' | 'no_direction' | 'too_few'
+export interface LvStats {
+  n: number; months: number; excess_pct: number | null; median_pct: number | null; hit_pct: number | null
+  t: number | null; after_cost_pct: number | null
+}
+export interface LvEvidence extends LvStats { verdict: LvVerdict; horizon_days: number }
+export interface LvPattern {
+  key: string; name: string; bias: 'bullish' | 'bearish' | 'neutral'; what: string; bars_ago: number; at: ISODateTime
+  evidence: LvEvidence | null
+}
+export interface LvStudyRow {
+  key: string; family: 'candle' | 'chart'; name: string; bias: 'bullish' | 'bearish' | 'neutral'; verdict: LvVerdict
+  primary: number; horizons: Record<string, LvStats>
+}
+export interface PatternEvidenceResponse {
+  generated_at: ISODateTime | null; first_day: ISODate | null; last_day: ISODate | null; events: number | null
+  cost_pct: number | null; min_events: number | null; min_months: number | null; patterns: LvStudyRow[]; note: string
+}
 export interface LvChartPattern {
   key: string; name: string; bias: 'bullish' | 'bearish' | 'neutral'; status: 'forming' | 'confirmed'
   direction: 'up' | 'down' | null; confirmed_bars_ago: number | null; what: string; start: ISODate; end: ISODate
   breakout: number | null; invalidation: number | null; target: number | null; target_pct: number | null
   series: (number | null)[]; points: { i: number; price: number | null; label: string }[]
   lines: { i1: number; p1: number | null; i2: number; p2: number | null }[]
+  evidence: LvEvidence | null
 }
 export interface LvLevel { price: number | null; touches: number; last: ISODate; dist_pct: number | null }
 export interface LvDaily {
@@ -35,6 +53,15 @@ export interface LvIntraday {
   patterns: LvPattern[]
 }
 export interface LevelsResponse { symbol: string; daily: LvDaily | null; intraday: LvIntraday | null; intraday_source: string | null; note: string }
+
+/** The pattern study's table (changes only when python -m scanner.pattern_study runs again). */
+export const usePatternEvidence = (enabled: boolean) =>
+  useQuery({
+    queryKey: ['levels', 'evidence'],
+    queryFn: () => fetchJson<PatternEvidenceResponse>('/api/levels/evidence'),
+    staleTime: 3_600_000,
+    enabled,
+  })
 
 /** Refetches every minute so today's VWAP and opening range follow the live feed. */
 export const useLevels = (symbol: string) =>

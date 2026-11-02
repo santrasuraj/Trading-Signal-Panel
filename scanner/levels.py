@@ -15,8 +15,8 @@ Intraday (5-minute bars of the latest session)
   VWAP with 1-SD bands, the 15-minute opening range, the session's high / low, and the volume profile (point of
   control and the 70% value area)
 
-All descriptive. Candle and chart patterns are folklore-grade: this app's own test of NR7 breakouts lost money after costs
-(README). None of this is a signal.
+All descriptive. Each candle and chart pattern is tested on 8 years of the survivorship-free top 500 by
+pattern_study.py: none beat the average stock after costs (Nov 2026). None of this is a signal.
 """
 from __future__ import annotations
 
@@ -449,7 +449,7 @@ def _flags(df: pd.DataFrame, a: float) -> list[dict]:
 
 def chart_patterns(df: pd.DataFrame) -> list[dict]:
     """Classic chart patterns on the last daily bars, confirmed ones first (at most MAX_CHART_PATTERNS). Rules are
-    the textbook ones, made exact: see the constants above. Untested here - like candle patterns, folklore-grade."""
+    the textbook ones, made exact: see the constants above. Tested by pattern_study.py: no edge after costs."""
     d = df.dropna(subset=["close"]).iloc[-250:]
     if len(d) < 60:
         return []

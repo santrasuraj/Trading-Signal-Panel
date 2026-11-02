@@ -2718,6 +2718,28 @@
     }
    }
   },
+  "/api/levels/evidence": {
+   "get": {
+    "tags": [
+     "levels"
+    ],
+    "summary": "Evidence",
+    "description": "How every candle and chart pattern did on 8 years of the point-in-time top 500 (scanner/pattern_study.py).",
+    "operationId": "evidence_api_levels_evidence_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PatternEvidenceResponse"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/levels/{symbol}": {
    "get": {
     "tags": [
@@ -7764,6 +7786,16 @@
       },
       "type": "array",
       "title": "Lines"
+     },
+     "evidence": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LvEvidence"
+       },
+       {
+        "type": "null"
+       }
+      ]
      }
     },
     "type": "object",
@@ -7783,7 +7815,8 @@
      "target_pct",
      "series",
      "points",
-     "lines"
+     "lines",
+     "evidence"
     ],
     "title": "LvChartPattern"
    },
@@ -8007,6 +8040,103 @@
      "prev_low"
     ],
     "title": "LvDay"
+   },
+   "LvEvidence": {
+    "properties": {
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "months": {
+      "type": "integer",
+      "title": "Months"
+     },
+     "excess_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Excess Pct"
+     },
+     "median_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Median Pct"
+     },
+     "hit_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hit Pct"
+     },
+     "t": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "T"
+     },
+     "after_cost_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "After Cost Pct"
+     },
+     "verdict": {
+      "type": "string",
+      "enum": [
+       "edge",
+       "edge_before_costs",
+       "no_edge",
+       "opposite",
+       "no_direction",
+       "too_few"
+      ],
+      "title": "Verdict"
+     },
+     "horizon_days": {
+      "type": "integer",
+      "title": "Horizon Days"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "months",
+     "excess_pct",
+     "median_pct",
+     "hit_pct",
+     "t",
+     "after_cost_pct",
+     "verdict",
+     "horizon_days"
+    ],
+    "title": "LvEvidence",
+    "description": "How the pattern did on 8 years of the point-in-time top 500 (scanner/pattern_study.py), at its main horizon."
    },
    "LvIntraday": {
     "properties": {
@@ -8325,6 +8455,16 @@
      "at": {
       "type": "string",
       "title": "At"
+     },
+     "evidence": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LvEvidence"
+       },
+       {
+        "type": "null"
+       }
+      ]
      }
     },
     "type": "object",
@@ -8334,7 +8474,8 @@
      "bias",
      "what",
      "bars_ago",
-     "at"
+     "at",
+     "evidence"
     ],
     "title": "LvPattern"
    },
@@ -8527,6 +8668,147 @@
      "val"
     ],
     "title": "LvProfile"
+   },
+   "LvStats": {
+    "properties": {
+     "n": {
+      "type": "integer",
+      "title": "N"
+     },
+     "months": {
+      "type": "integer",
+      "title": "Months"
+     },
+     "excess_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Excess Pct"
+     },
+     "median_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Median Pct"
+     },
+     "hit_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hit Pct"
+     },
+     "t": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "T"
+     },
+     "after_cost_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "After Cost Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "n",
+     "months",
+     "excess_pct",
+     "median_pct",
+     "hit_pct",
+     "t",
+     "after_cost_pct"
+    ],
+    "title": "LvStats"
+   },
+   "LvStudyRow": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "title": "Key"
+     },
+     "family": {
+      "type": "string",
+      "enum": [
+       "candle",
+       "chart"
+      ],
+      "title": "Family"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "bias": {
+      "type": "string",
+      "enum": [
+       "bullish",
+       "bearish",
+       "neutral"
+      ],
+      "title": "Bias"
+     },
+     "verdict": {
+      "type": "string",
+      "enum": [
+       "edge",
+       "edge_before_costs",
+       "no_edge",
+       "opposite",
+       "no_direction",
+       "too_few"
+      ],
+      "title": "Verdict"
+     },
+     "primary": {
+      "type": "integer",
+      "title": "Primary"
+     },
+     "horizons": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/LvStats"
+      },
+      "type": "object",
+      "title": "Horizons"
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "family",
+     "name",
+     "bias",
+     "verdict",
+     "primary",
+     "horizons"
+    ],
+    "title": "LvStudyRow"
    },
    "LvTrend": {
     "properties": {
@@ -11758,6 +12040,111 @@
      "via"
     ],
     "title": "PaperTrade"
+   },
+   "PatternEvidenceResponse": {
+    "properties": {
+     "generated_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Generated At"
+     },
+     "first_day": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Day"
+     },
+     "last_day": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Day"
+     },
+     "events": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Events"
+     },
+     "cost_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cost Pct"
+     },
+     "min_events": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Min Events"
+     },
+     "min_months": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Min Months"
+     },
+     "patterns": {
+      "items": {
+       "$ref": "#/components/schemas/LvStudyRow"
+      },
+      "type": "array",
+      "title": "Patterns"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "generated_at",
+     "first_day",
+     "last_day",
+     "events",
+     "cost_pct",
+     "min_events",
+     "min_months",
+     "patterns",
+     "note"
+    ],
+    "title": "PatternEvidenceResponse"
    },
    "PendingOrder": {
     "properties": {

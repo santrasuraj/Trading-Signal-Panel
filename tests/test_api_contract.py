@@ -165,6 +165,7 @@ GET_ENDPOINTS = [
     ("/api/fno/positions", M.FnoPositionsResponse),
     ("/api/fno/futures", M.FnoFuturesResponse),
     ("/api/levels/NIFTY50", M.LevelsResponse),
+    ("/api/levels/evidence", M.PatternEvidenceResponse),
 ]
 
 
