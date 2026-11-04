@@ -166,8 +166,12 @@ GET_ENDPOINTS = [
     ("/api/fno/status", M.FnoStatus),
     ("/api/fno/positions", M.FnoPositionsResponse),
     ("/api/fno/futures", M.FnoFuturesResponse),
+    ("/api/fno/live", M.FnoLiveResponse),
     ("/api/levels/NIFTY50", M.LevelsResponse),
     ("/api/levels/evidence", M.PatternEvidenceResponse),
+    ("/api/outlook/IGIL", M.OutlookResponse),
+    ("/api/outlook/NIFTY50", M.OutlookResponse),
+    ("/api/ai/status", M.AiStatus),
 ]
 
 

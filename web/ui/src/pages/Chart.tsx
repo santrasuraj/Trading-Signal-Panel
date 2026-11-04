@@ -3,12 +3,19 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, Layers, PanelRightClose, PanelRightOpen, Search, SlidersHorizontal } from 'lucide-react'
-import { useChart, useStock, useSymbols } from '@/api/hooks'
-import type { ChartRange, ChartTf, IndicatorId } from '@/api/types'
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Layers, PanelRightClose, PanelRightOpen, Radio, Ruler, Search, SlidersHorizontal } from 'lucide-react'
+import { useChart, useLiveQuotes, useStock, useSymbols } from '@/api/hooks'
+import { useLevels } from '@/api/levels'
+import { useOutlook } from '@/api/outlook'
+import type { ChartMarker, ChartRange, ChartTf, IndicatorId } from '@/api/types'
 import { useUi } from '@/app/uiState'
 import { LevelPill, ResultsChip, StatusDot } from '@/components/badges'
-import { PriceChart, type PriceChartHandle } from '@/components/charts/PriceChart'
+import { PriceChart, type ChartOverlay, type LiveTick, type PriceChartHandle } from '@/components/charts/PriceChart'
+import { AiAnalyst } from '@/components/AiAnalyst'
+import { BigMoneyCard } from '@/components/BigMoney'
+import { ChartOptions } from '@/components/ChartOptions'
+import { VERDICT_STYLE } from '@/lib/verdict'
+import { OutlookPanel } from '@/components/Outlook'
 import { RangeBar52w } from '@/components/charts/svg'
 import { ErrorState, Skeleton, SkeletonChart } from '@/components/feedback'
 import { Money, Pct, Price } from '@/components/num'
@@ -26,6 +33,17 @@ const IND_MENU: { id: Ind; label: string }[] = [
   { id: 'sma20', label: 'SMA 20' }, { id: 'sma50', label: 'SMA 50' }, { id: 'sma200', label: 'SMA 200' }, { id: 'ema21', label: 'EMA 21' },
   { id: 'bb_mid', label: 'Bollinger 20, 2' }, { id: 'volume', label: 'Volume' }, { id: 'rsi14', label: 'RSI 14 pane' }, { id: 'macd', label: 'MACD pane' },
 ]
+
+type LevelId = 'sr' | 'pivots' | 'intraday' | 'options' | 'range' | 'patterns'
+const LEVEL_MENU: { id: LevelId; label: string; hint: string }[] = [
+  { id: 'sr', label: 'Support & resistance', hint: 'swing highs / lows of the last year; thicker = formed more often' },
+  { id: 'pivots', label: 'Pivots (next session)', hint: 'P, R1-R2, S1-S2 from the last completed day' },
+  { id: 'intraday', label: 'Today: VWAP, opening range, POC', hint: 'from 5-minute bars, when the stock has them' },
+  { id: 'options', label: 'Option walls & max pain', hint: 'from a current NSE option chain (F&O symbols)' },
+  { id: 'range', label: 'Expected 5-day range', hint: 'options-implied when a current chain exists, else recent volatility' },
+  { id: 'patterns', label: 'Pattern markers', hint: 'candle and chart patterns on the last bars' },
+]
+const LEVEL_DEFAULT: LevelId[] = ['sr', 'intraday', 'options', 'range', 'patterns']
 
 function apiIndicators(sel: Ind[]): IndicatorId[] {
   const out = new Set<IndicatorId>(['vol_avg20'])
@@ -122,9 +140,17 @@ export default function ChartPage() {
   const params = useMemo(() => ({ tf, range, indicators: apiIndicators(ind) }), [tf, range, ind])
   const q = useChart(symbol, params)
   const symbols = useSymbols()
-  const { setPalette } = useUi()
+  const { setPalette, setFyersLogin } = useUi()
   const nav = useNavigate()
   const ref = useRef<PriceChartHandle>(null)
+  const [lvSel, setLvSel] = useLocalStorage<LevelId[]>('qd.chart.levels', LEVEL_DEFAULT)
+  const lvOn = useMemo(() => new Set(lvSel), [lvSel])
+  const lv = useLevels(symbol).data
+  const liveQ = useLiveQuotes([symbol])
+  const quote = liveQ.quotes[symbol]
+  const liveTick = useMemo<LiveTick | null>(() => (quote ? { date: todayIST(), price: quote.price } : null), [quote])
+  const olq = useOutlook(symbol, liveQ.live)
+  const ol = olq.data?.symbol === symbol ? olq.data : undefined
 
   const available = q.data?.strategies_available ?? []
   const [markerSel, setMarkerSel] = useState<string[] | null>(null)
@@ -159,6 +185,65 @@ export default function ChartPage() {
     a.download = `${symbol}-${tf}-${range}.png`
     a.click()
   }
+  const overlays = useMemo<ChartOverlay[]>(() => {
+    const out: ChartOverlay[] = []
+    const dl = lv?.daily
+    if (dl && lvOn.has('sr')) {
+      for (const l of dl.levels.resistance) if (l.price != null) out.push({ price: l.price, label: `R ${l.touches}×`, tone: 'loss', width: l.touches >= 3 ? 2 : 1, style: 'solid' })
+      for (const l of dl.levels.support) if (l.price != null) out.push({ price: l.price, label: `S ${l.touches}×`, tone: 'profit', width: l.touches >= 3 ? 2 : 1, style: 'solid' })
+    }
+    if (dl && lvOn.has('pivots')) {
+      const pv = dl.pivots
+      const add = (v: number | null, label: string, tone: ChartOverlay['tone']) => { if (v != null) out.push({ price: v, label, tone, style: 'dotted', axis: false }) }
+      add(pv.r2, 'R2', 'loss'); add(pv.r1, 'R1', 'loss'); add(pv.p, 'Pivot', 'accent'); add(pv.s1, 'S1', 'profit'); add(pv.s2, 'S2', 'profit')
+    }
+    const it = lv?.intraday
+    if (it && lvOn.has('intraday') && it.date === todayIST()) {
+      if (it.vwap != null) out.push({ price: it.vwap, label: 'VWAP', tone: 'info', style: 'solid', width: 2 })
+      if (it.or_high != null) out.push({ price: it.or_high, label: 'OR high', tone: 'warn', style: 'dashed', axis: false })
+      if (it.or_low != null) out.push({ price: it.or_low, label: 'OR low', tone: 'warn', style: 'dashed', axis: false })
+      if (it.profile?.poc != null) out.push({ price: it.profile.poc, label: 'POC', tone: 'violet', style: 'dotted', axis: false })
+    }
+    const ch = ol?.derivatives.chain
+    if (ch && !ch.old && lvOn.has('options')) {
+      if (ch.call_wall != null) out.push({ price: ch.call_wall, label: 'Call wall', tone: 'loss', width: 3, style: 'solid' })
+      if (ch.put_wall != null) out.push({ price: ch.put_wall, label: 'Put wall', tone: 'profit', width: 3, style: 'solid' })
+      if (ch.max_pain != null) out.push({ price: ch.max_pain, label: 'Max pain', tone: 'warn', style: 'dashed' })
+    }
+    const vd = ol?.derivatives.verdict
+    if (vd?.pick && lvOn.has('options')) {
+      const call = vd.pick.side === 'ce'
+      const tag = `${num(vd.pick.strike, 0)} ${vd.pick.side.toUpperCase()}`
+      if (vd.pick.breakeven != null) out.push({ price: vd.pick.breakeven, label: `Breakeven ${tag}`, tone: call ? 'profit' : 'loss', width: 2, style: 'dashed' })
+      if (vd.exit?.stop_underlying != null) out.push({ price: vd.exit.stop_underlying, label: `Stop (${tag})`, tone: 'loss', style: 'dotted' })
+      if (vd.exit?.target_underlying != null) out.push({ price: vd.exit.target_underlying, label: `Target (${tag})`, tone: 'profit', style: 'dotted' })
+    }
+    if (ol && lvOn.has('range')) {
+      const r = ol.expected.ranges.find((x) => x.days === 5 && x.source === 'options') ?? ol.expected.ranges.find((x) => x.days === 5 && x.source === 'realized')
+      if (r?.low != null && r.high != null) {
+        const tag = r.source === 'options' ? '5d implied' : '5d range'
+        out.push({ price: r.high, label: `${tag} +${num(r.pct, 1)}%`, tone: 'violet', style: 'dotted' }, { price: r.low, label: `${tag} −${num(r.pct, 1)}%`, tone: 'violet', style: 'dotted' })
+      }
+    }
+    return out
+  }, [lv, ol, lvOn])
+  const patternMarkers = useMemo<ChartMarker[]>(() => {
+    const dl = lv?.daily
+    if (!dl || !lvOn.has('patterns')) return []
+    const out: ChartMarker[] = []
+    for (const p of dl.patterns) {
+      const bull = p.bias === 'bullish', bear = p.bias === 'bearish'
+      out.push({ t: p.at.slice(0, 10), position: bear ? 'aboveBar' : 'belowBar', shape: bull ? 'arrowUp' : bear ? 'arrowDown' : 'circle', kind: 'pattern',
+        tone: bull ? 'profit' : bear ? 'loss' : 'neutral', text: p.name, detail: p.what, strategy_key: null })
+    }
+    for (const p of dl.chart_patterns) {
+      if (p.status !== 'confirmed') continue
+      const up = p.direction === 'up'
+      out.push({ t: p.end, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'arrowUp' : 'arrowDown', kind: 'pattern',
+        tone: up ? 'profit' : 'loss', text: p.name, detail: p.what, strategy_key: null })
+    }
+    return out
+  }, [lv, lvOn])
   const height = mobile ? 300 + (indSet.has('macd') ? 80 : 0) : Math.max(460, (typeof window !== 'undefined' ? window.innerHeight : 800) - 250)
   const d = q.data
 
@@ -214,6 +299,22 @@ export default function ChartPage() {
               )}
             </div>
           </Popover>
+          <Popover align="right" width={300} trigger={({ toggle, open }) => <Button icon={<Ruler className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Levels" title="Support / resistance, pivots, option walls, ranges" className="max-sm:px-2.5"><span className="max-sm:hidden">Levels</span>{lvSel.length ? ` · ${lvSel.length}` : ''}</Button>}>
+            <div className="py-1">
+              {LEVEL_MENU.map((m) => (
+                <MenuCheck key={m.id} checked={lvOn.has(m.id)} onChange={(on) => setLvSel(on ? [...lvSel, m.id] : lvSel.filter((x) => x !== m.id))}>
+                  <span className="block">{m.label}</span><span className="block text-2xs text-faint">{m.hint}</span>
+                </MenuCheck>
+              ))}
+            </div>
+          </Popover>
+          {liveQ.data && quote && (
+            <button type="button" disabled={!liveQ.data.delayed} onClick={() => setFyersLogin(true)}
+              title={liveQ.data.delayed ? `${liveQ.data.note} Click to log in to FYERS for real-time prices.` : liveQ.data.note}
+              className={cn('inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-2xs font-medium', liveQ.data.delayed ? 'border-warn/40 text-warn hover:bg-warn/10' : 'border-profit/40 text-profit')}>
+              <Radio className="h-3.5 w-3.5" />{liveQ.data.delayed ? 'Delayed ~15 min · log in for live' : 'Live (FYERS)'} · {num(quote.price, 2)} <Pct v={quote.change_pct} dp={2} />
+            </button>
+          )}
           <IconButton label="Save chart as PNG" onClick={screenshot} className="max-sm:hidden"><Camera className="h-4 w-4" /></IconButton>
           <IconButton label={panel ? 'Hide side panel' : 'Show side panel'} onClick={() => setPanel(!panel)} className="max-md:hidden">{panel ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}</IconButton>
         </div>
@@ -223,13 +324,28 @@ export default function ChartPage() {
       <div className={cn('grid gap-3', panel && 'xl:grid-cols-[minmax(0,1fr)_320px]')}>
         <Card flush className="min-w-0 self-start overflow-hidden">
           {q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : (
-            <PriceChart ref={ref} data={d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile} />
+            <div className="relative">
+              <PriceChart ref={ref} data={d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile}
+                overlays={overlays} extraMarkers={patternMarkers} live={liveTick} />
+              {ol?.derivatives.verdict && (
+                <button type="button" title={ol.derivatives.verdict.headline}
+                  onClick={() => document.getElementById('chart-options')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className={cn('absolute bottom-10 left-3 z-10 rounded-md border px-2 py-1 text-2xs font-bold tracking-wide shadow-sm', VERDICT_STYLE[ol.derivatives.verdict.verdict].cls)}>
+                  Options: {VERDICT_STYLE[ol.derivatives.verdict.verdict].label}
+                  {ol.derivatives.verdict.pick ? ` ${num(ol.derivatives.verdict.pick.strike, 0)} ${ol.derivatives.verdict.pick.side.toUpperCase()}` : ''}
+                </button>
+              )}
+            </div>
           )}
         </Card>
         {panel && <Card flush className="min-w-0 self-start"><SidePanel symbol={symbol} /></Card>}
       </div>
+      <AiAnalyst symbol={symbol} />
+      <OutlookPanel symbol={symbol} livePrice={quote?.price ?? null} />
+      {ol && <ChartOptions d={ol.derivatives} live={liveQ.live} lastDay={ol.date} />}
+      {ol && <BigMoneyCard symbol={symbol} b={ol.big_money} kind={ol.kind} />}
       <PriceAction symbol={symbol} />
-      <p className="text-2xs text-faint">Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data. Markers: ▲ model buy, ▼ model sell, ● open model position, ■ corporate action, small ● results day. Keys: 1-6 range, d/w timeframe, [ ] symbol.</p>
+      <p className="text-2xs text-faint">Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data; while the market is open the last candle follows the live price. Markers: ▲ model buy / bullish pattern, ▼ model sell / bearish pattern, ● open model position, ■ corporate action, small ● results day. Lines (Levels menu): red resistance / call wall, green support / put wall, blue VWAP, violet expected range. Keys: 1-6 range, d/w timeframe, [ ] symbol.</p>
     </div>
   )
 }

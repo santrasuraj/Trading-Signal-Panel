@@ -59,6 +59,36 @@ export const useFnoPositions = (days: number) =>
 export const useFnoFutures = (p: FnoFuturesParams) =>
   useQuery({ queryKey: fnoKeys.futures(p), queryFn: () => fnoApi.futures(p), placeholderData: keepPreviousData })
 
+// ------------------------------------------------------------------ live (during the session)
+export interface FnoLiveRow {
+  symbol: string; kind: 'index' | 'stock'; price: number | null; prev_close: number | null; chg_pct: number | null
+  price_source: 'fyers' | 'yahoo' | 'nse_rounded' | 'close' | null; oi: number | null; prev_oi: number | null
+  oi_chg: number | null; oi_chg_pct: number | null; volume: number | null; buildup: FnoBuildup | null; eod_buildup: FnoBuildup | null
+}
+export interface FnoLiveResponse {
+  nse_time: ISODateTime | null; trade_date: ISODate | null; prev_date: ISODate | null; eod_date: ISODate | null
+  fetched_at: ISODateTime | null; price_source: string | null; session: string; running: boolean; error: string | null
+  counts: Record<string, number>; rows: FnoLiveRow[]; note: string
+}
+export interface FnoLiveParams { kind?: 'all' | 'stock' | 'index'; buildup?: 'all' | FnoBuildup; sort?: 'oi_chg' | 'chg' | 'oi' | 'volume' }
+
+export const fnoLiveApi = {
+  live: (p: FnoLiveParams) => fetchJson<FnoLiveResponse>(`/api/fno/live${qs(p)}`),
+  refresh: () => fetchJson<{ accepted: boolean; running: boolean; message: string }>('/api/fno/live/refresh', { method: 'POST' }),
+}
+
+/** The stored live snapshot: every 3 s while a fetch runs, every 30 s while the market is open. */
+export const useFnoLive = (p: FnoLiveParams, open: boolean) =>
+  useQuery({
+    queryKey: ['fno', 'live', p], queryFn: () => fnoLiveApi.live(p), placeholderData: keepPreviousData,
+    refetchInterval: (q) => (q.state.data?.running ? 3000 : open ? 30_000 : false),
+  })
+
+export function useFnoLiveRefresh() {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: fnoLiveApi.refresh, onSuccess: () => void qc.invalidateQueries({ queryKey: ['fno', 'live'] }) })
+}
+
 export function useFnoRefresh() {
   const qc = useQueryClient()
   return useMutation({ mutationFn: fnoApi.refresh, onSuccess: () => void qc.invalidateQueries({ queryKey: fnoKeys.status }) })

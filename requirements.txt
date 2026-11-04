@@ -16,3 +16,5 @@ fastapi==0.120.4
 uvicorn==0.38.0
 pydantic==2.14.1
 httpx==0.28.1
+# AI analyst (web/api/services/ai_svc.py) - the key goes in .env as ANTHROPIC_API_KEY
+anthropic==2.4.0

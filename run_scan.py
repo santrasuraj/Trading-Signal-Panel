@@ -143,6 +143,25 @@ def main() -> int:
         except Exception as e:
             lg.error("Smart money refresh failed: %s\n%s", e, traceback.format_exc())
             print(f"Smart money refresh failed (skipped): {e}", flush=True)
+        # Big money (scanner/big_money.py): F&O ban list, acquisition filings, promoter pledges of the stocks you
+        # hold or the models hold / order. Own error handling: never fails the finished scan.
+        try:
+            from scanner import big_money
+            wanted = [h.get("symbol") for h in result.get("holdings") or []]
+            for s in result.get("strategies") or []:
+                wanted += [r.get("symbol") for r in (s.get("actions") or []) + (s.get("positions") or [])]
+            big_money.refresh([w for w in wanted if w], log=lambda m: (print(m, flush=True), lg.info(m)))
+        except Exception as e:
+            lg.error("Big money refresh failed: %s", e)
+            print(f"Big money refresh failed (skipped): {e}", flush=True)
+    # Options verdicts (scanner/option_verdict.py): journal today's verdict for every chain stored today, so their
+    # real record builds up. Files only.
+    try:
+        from scanner import option_verdict
+        from scanner.store import load_store
+        option_verdict.record_stored_chains(load_store(), result, log=lambda m: (print(m, flush=True), lg.info(m)))
+    except Exception as e:
+        lg.error("Options verdict journal failed: %s", e)
     try:
         summary = format_daily(result, int((cfg.get("telegram") or {}).get("top_n", 10)))
     except Exception as e:   # the scan finished and is saved: a summary problem must not leave it "running"

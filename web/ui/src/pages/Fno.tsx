@@ -1,5 +1,6 @@
 // F&O positioning `/fno/:tab` (scanner/fno.py): NSE's participant-wise open interest (FII, DII, Pro, Client) and the
-// day's futures build-ups with each underlying's put-call ratio and call / put walls. End-of-day data, published by
+// day's futures build-ups with each underlying's put-call ratio and call / put walls: live during the session (NSE OI
+// spurts + live prices, POST /api/fno/live/refresh every 3 min) and end of day (the F&O bhavcopy), published by
 // NSE after the close; "Fetch" posts /api/fno/refresh. Positioning, never a signal.
 
 import { useEffect, useRef, useState } from 'react'
@@ -8,16 +9,19 @@ import { useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Scale } from 'lucide-react'
 import { isFailure } from '@/api/client'
 import {
-  fnoKeys, useFnoFutures, useFnoPositions, useFnoRefresh, useFnoStatus,
-  type FnoBuildup, type FnoClient, type FnoFuturesParams, type FnoStatus,
+  fnoKeys, useFnoFutures, useFnoLive, useFnoLiveRefresh, useFnoPositions, useFnoRefresh, useFnoStatus,
+  type FnoBuildup, type FnoClient, type FnoFuturesParams, type FnoLiveParams, type FnoStatus,
 } from '@/api/fno'
+import { useStatus } from '@/api/hooks'
 import { BUILDUP_LABEL } from '@/api/options'
+import { useUi } from '@/app/uiState'
+import { useLocalStorage } from '@/lib/useLocalStorage'
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { EmptyState, ErrorState, SkeletonKpis, SkeletonRows } from '@/components/feedback'
 import { useToast } from '@/components/toast'
 import { Button, Card, Segmented, Tabs, Tip } from '@/components/ui'
 import { cn } from '@/lib/csv'
-import { DASH, date, num, ok, pct, qty } from '@/lib/format'
+import { DASH, date, num, ok, pct, qty, timeIST } from '@/lib/format'
 
 type Tab = 'positions' | 'futures'
 const CLIENT_LABEL: Record<FnoClient, string> = { fii: 'FII', dii: 'DII', pro: 'Pro', client: 'Client' }
@@ -163,8 +167,104 @@ function Positions() {
   )
 }
 
+// ------------------------------------------------------------------ live build-ups (during the session)
+const LIVE_EVERY_MS = 180_000
+const SOURCE_LABEL: Record<string, string> = {
+  fyers: 'FYERS real-time prices', yahoo: 'Yahoo prices (~15 min delayed)', close: 'closing prices (market closed)',
+}
+
+function BuildBadge({ b }: { b: FnoBuildup | null }) {
+  return b ? <Tip text={FUT_HELP[b]}><span className={cn('rounded border px-1.5 text-2xs font-semibold', BUILD_TONE[b])}>{BUILDUP_LABEL[b]}</span></Tip> : <span className="text-faint">{DASH}</span>
+}
+
+function LiveFutures() {
+  const [p, setP] = useState<FnoLiveParams>({ kind: 'all', buildup: 'all', sort: 'oi_chg' })
+  const session = useStatus().data?.clock.session
+  const open = session === 'open'
+  const q = useFnoLive(p, open)
+  const refresh = useFnoLiveRefresh()
+  const { setFyersLogin } = useUi()
+  const fire = refresh.mutate
+  useEffect(() => {                                   // fetch on arrival, then every 3 minutes while the market is open
+    fire()
+    if (!open) return
+    const t = window.setInterval(() => fire(), LIVE_EVERY_MS)
+    return () => window.clearInterval(t)
+  }, [open, fire])
+  if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+  if (!q.data) return <SkeletonRows rows={12} cols={8} />
+  const f = q.data
+  const builds = Object.keys(BUILDUP_LABEL) as FnoBuildup[]
+  const delayed = f.price_source === 'yahoo'
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-panel px-3 py-2 text-xs">
+        <span className={cn('inline-flex items-center gap-1.5 font-semibold', open ? 'text-profit' : 'text-muted')}>
+          <span className={cn('h-2 w-2 rounded-full', open ? 'animate-pulse bg-profit' : 'bg-faint')} />{open ? 'LIVE' : 'Market closed'}
+        </span>
+        <span className="text-muted">NSE open interest at {f.nse_time ? `${date(f.nse_time.slice(0, 10), { year: false })} ${timeIST(f.nse_time)}` : DASH}</span>
+        <span className="text-muted">· {f.price_source ? SOURCE_LABEL[f.price_source] ?? f.price_source : 'no prices yet'}</span>
+        {open && <span className="text-faint">· refreshes every 3 minutes</span>}
+        <span className="ml-auto flex items-center gap-2">
+          {delayed && <Button size="xs" variant="subtle" onClick={() => setFyersLogin(true)}>Log in to FYERS for real time</Button>}
+          <Button size="xs" icon={<RefreshCw className="h-3 w-3" />} loading={refresh.isPending || f.running} onClick={() => fire()}>Refresh now</Button>
+        </span>
+      </div>
+      {f.error && <p className="rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-xs text-warn">{f.error} - showing the last good snapshot.</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented ariaLabel="Build-up" value={p.buildup ?? 'all'} onChange={(b) => setP({ ...p, buildup: b })}
+          items={[{ id: 'all' as const, label: 'All' }, ...builds.map((b) => ({ id: b, label: `${BUILDUP_LABEL[b]} ${f.counts[b] ?? 0}`, title: FUT_HELP[b] }))]} />
+        <Segmented ariaLabel="Kind" value={p.kind ?? 'all'} onChange={(k) => setP({ ...p, kind: k })}
+          items={[{ id: 'all', label: 'All' }, { id: 'stock', label: 'Stocks' }, { id: 'index', label: 'Indices' }]} />
+        <Segmented ariaLabel="Sort" value={p.sort ?? 'oi_chg'} onChange={(s) => setP({ ...p, sort: s })}
+          items={[{ id: 'oi_chg', label: 'ΔOI %' }, { id: 'chg', label: 'Price %' }, { id: 'oi', label: 'OI' }, { id: 'volume', label: 'Volume' }]} />
+      </div>
+      <Card flush title={`Live today${f.trade_date ? ` · ${date(f.trade_date)}` : ''}`} subtitle={`${f.rows.length} underlyings · open interest of all futures + options vs ${f.prev_date ? date(f.prev_date, { year: false }) : 'yesterday'}`}>
+        {f.rows.length === 0 ? <EmptyState compact title="No live snapshot yet">Press Refresh now: one NSE call plus the prices.</EmptyState> : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-[13px]">
+              <thead className="sticky top-0 bg-panel"><tr className="border-b border-line text-2xs text-muted">
+                {['Symbol', 'Price', 'Chg %', 'OI (F&O contracts)', 'ΔOI %', 'Live build-up', `Futures (EOD${f.eod_date ? ` ${date(f.eod_date, { year: false })}` : ''})`, 'Volume'].map((h, i) => (
+                  <th key={h} className={cn('px-3 py-1.5 font-medium', i === 0 || h.includes('build-up') || h.startsWith('Futures') ? 'text-left' : 'text-right')}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {f.rows.map((r) => (
+                  <tr key={r.symbol} className="border-b border-line/60 last:border-0 hover:bg-raised">
+                    <td className="px-3 py-1 font-semibold"><Link className="hover:underline" to={r.kind === 'stock' ? `/chart/${encodeURIComponent(r.symbol)}` : `/options/${encodeURIComponent(r.symbol)}`}>{r.symbol}</Link></td>
+                    <td className="num px-3 py-1 text-right" title={r.price_source === 'nse_rounded' ? "NSE's feed rounds the spot to whole rupees" : undefined}>{num(r.price, 2)}{r.price_source === 'nse_rounded' ? '*' : ''}</td>
+                    <td className={cn('num px-3 py-1 text-right', ok(r.chg_pct) && r.chg_pct < 0 ? 'text-loss' : 'text-profit')}>{pct(r.chg_pct, { dp: 2 })}</td>
+                    <td className="num px-3 py-1 text-right">{qty(r.oi)}</td>
+                    <td className={cn('num px-3 py-1 text-right', ok(r.oi_chg_pct) && r.oi_chg_pct < 0 ? 'text-loss' : '')}>{pct(r.oi_chg_pct, { dp: 1 })}</td>
+                    <td className="px-3 py-1"><BuildBadge b={r.buildup} /></td>
+                    <td className="px-3 py-1"><BuildBadge b={r.eod_buildup} /></td>
+                    <td className="num px-3 py-1 text-right text-muted">{qty(r.volume)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      <p className="text-2xs text-muted">{f.note} * index spot from NSE's feed, rounded to whole rupees.</p>
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ futures build-ups
 function Futures() {
+  const [mode, setMode] = useLocalStorage<'live' | 'eod'>('qd.fno.futures.mode', 'live')
+  return (
+    <div className="space-y-3">
+      <Segmented ariaLabel="Data" value={mode} onChange={setMode}
+        items={[{ id: 'live', label: 'Live today', title: "NSE's live open interest (futures + options) with live prices" },
+          { id: 'eod', label: 'End of day (futures)', title: "NSE's futures-only F&O bhavcopy, published after the close" }]} />
+      {mode === 'live' ? <LiveFutures /> : <EodFutures />}
+    </div>
+  )
+}
+
+function EodFutures() {
   const [p, setP] = useState<FnoFuturesParams>({ kind: 'all', buildup: 'all', sort: 'oi_chg' })
   const q = useFnoFutures(p)
   if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />

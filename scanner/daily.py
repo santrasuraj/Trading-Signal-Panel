@@ -16,7 +16,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from . import corporate, paper, pit
+from . import corporate, outlook, paper, pit
 from .costs import CostModel, TaxModel
 from .engine import (EventStrategy, _curve_stats, _period_ends, evaluate, equal_weight_index, simulate,
                      working_status)
@@ -600,6 +600,10 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     trades_df = pd.DataFrame(trade_rows, columns=_TRADE_COLS)
     _save(result, curves, bf.p, bew, bn500, started, trades=trades_df, screener=screener)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
+    try:   # the chart's Outlook base rates: re-measured once the point-in-time universe has a new day (~1 minute)
+        outlook.refresh_if_stale(log=log)
+    except Exception as e:   # never let it break a scan: the chart keeps the last study
+        log(f"Outlook study not updated ({type(e).__name__}: {e})")
     return result
 
 

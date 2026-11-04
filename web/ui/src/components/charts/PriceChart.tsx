@@ -2,12 +2,12 @@
 // (priceScaleId '' with scaleMargins top 0.8); pane 1 RSI 14 with 30/70 lines; pane 2 MACD (optional).
 // Markers via createSeriesMarkers; price lines for model/order/your stops; crosshair legend with OHLC.
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import {
   CandlestickSeries, HistogramSeries, LineSeries, LineStyle, PriceScaleMode, createSeriesMarkers, type IChartApi,
   type ISeriesApi, type MouseEventParams, type Time,
 } from 'lightweight-charts'
-import type { ChartResponse, IndicatorId, PriceLine } from '@/api/types'
+import type { ChartMarker, ChartResponse, IndicatorId, PriceLine } from '@/api/types'
 import { toCandles, toLine, toMarkers, toSignedHistogram, toVolume } from '@/lib/chartMappers'
 import { inrAxisPrice, palette } from '@/lib/chartTheme'
 import { cn } from '@/lib/csv'
@@ -16,6 +16,16 @@ import { useWidth } from '@/lib/useWidth'
 import { useLwChart } from './useLwChart'
 
 export interface PriceChartHandle { screenshot: () => HTMLCanvasElement | null; chart: () => IChartApi | null }
+
+/** A horizontal level drawn across the chart (support / resistance, pivots, option walls, expected range). */
+export interface ChartOverlay {
+  price: number; label: string
+  tone: 'profit' | 'loss' | 'accent' | 'warn' | 'violet' | 'info' | 'muted' | 'faint'
+  style?: 'solid' | 'dashed' | 'dotted'; width?: 1 | 2 | 3; axis?: boolean
+}
+/** The latest live price: updates (or opens) today's candle without rebuilding the chart. */
+export interface LiveTick { date: string; price: number }
+const LINE_STYLE = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted } as const
 
 export interface PriceChartProps {
   data: ChartResponse
@@ -26,6 +36,10 @@ export interface PriceChartProps {
   height: number
   /** Phones: a one-line legend (symbol, date, close, change) so it doesn't cover the candles. */
   compactLegend?: boolean
+  overlays?: ChartOverlay[]
+  /** Markers added by the page (candle / chart patterns): drawn with the strategy markers. */
+  extraMarkers?: ChartMarker[]
+  live?: LiveTick | null
 }
 
 const LINE_COLOR: Partial<Record<IndicatorId, 'warn' | 'accent' | 'violet' | 'info' | 'muted'>> = {
@@ -33,8 +47,10 @@ const LINE_COLOR: Partial<Record<IndicatorId, 'warn' | 'accent' | 'violet' | 'in
 }
 const LABEL: Partial<Record<IndicatorId, string>> = { sma20: 'SMA 20', sma50: 'SMA 50', sma200: 'SMA 200', ema21: 'EMA 21', bb_upper: 'BB up', bb_mid: 'BB mid', bb_lower: 'BB low' }
 
-export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function PriceChart({ data, indicators, markerStrategies, showLines, log, height, compactLegend }, handle) {
+export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function PriceChart({ data, indicators, markerStrategies, showLines, log, height, compactLegend, overlays, extraMarkers, live }, handle) {
   const { ref, chart, version } = useLwChart()
+  const [candleSeries, setCandleSeries] = useState<ISeriesApi<'Candlestick'> | null>(null)
+  const liveBar = useRef<{ t: string; o: number; h: number; l: number } | null>(null)
   const pal = useMemo(() => palette(), [version]) // eslint-disable-line react-hooks/exhaustive-deps
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   // The full two-row legend needs ~700 px; on a narrower chart (phone, split window, side panel open) it wrapped to
@@ -58,6 +74,7 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
     }, 0)
     candles.setData(toCandles(data.bars))
     created.push(candles)
+    liveBar.current = null
     chart.priceScale('right', 0).applyOptions({ mode: log ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal, scaleMargins: { top: 0.08, bottom: indicators.has('volume') && data.kind !== 'index' ? 0.22 : 0.06 } })
 
     if (indicators.has('volume') && data.kind !== 'index') {
@@ -106,7 +123,8 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
     panes[0]?.setStretchFactor(1)
     for (let i = 1; i < panes.length; i++) panes[i].setStretchFactor(0.28)
 
-    const markers = createSeriesMarkers(candles, toMarkers(data.markers, { profit: pal.profit, loss: pal.loss, neutral: pal.muted, warn: pal.warn }, markerStrategies ?? undefined))
+    const allMarkers = extraMarkers?.length ? [...data.markers, ...extraMarkers.filter((m) => data.bars.t.includes(m.t))] : data.markers
+    const markers = createSeriesMarkers(candles, toMarkers(allMarkers, { profit: pal.profit, loss: pal.loss, neutral: pal.muted, warn: pal.warn }, markerStrategies ?? undefined))
     if (showLines) {
       const tone = (k: PriceLine['kind']) => (k.includes('stop') ? pal.loss : k === 'your_target' ? pal.profit : k === 'high_52w' || k === 'low_52w' ? pal.faint : pal.accent)
       for (const pl of data.price_lines) {
@@ -118,6 +136,7 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
       }
     }
     chart.timeScale().fitContent()
+    setCandleSeries(candles)
 
     const index = new Map(t.map((d, i) => [d, i]))
     const onMove = (p: MouseEventParams<Time>) => setHoverIdx(p.time && typeof p.time === 'string' ? index.get(p.time) ?? null : null)
@@ -125,9 +144,43 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
     return () => {
       chart.unsubscribeCrosshairMove(onMove)
       markers.detach()
+      setCandleSeries(null)
       for (const s of created) chart.removeSeries(s)
     }
-  }, [chart, data, indicators, markerStrategies, showLines, log, pal, showRsi, showMacd])
+  }, [chart, data, indicators, markerStrategies, showLines, log, pal, showRsi, showMacd, extraMarkers])
+
+  // Levels are their own price lines: toggling them never rebuilds the chart or resets the zoom.
+  useEffect(() => {
+    if (!candleSeries || !overlays?.length) return
+    const made = overlays.map((o) => candleSeries.createPriceLine({
+      price: o.price, color: pal[o.tone], lineWidth: o.width ?? 1, lineStyle: LINE_STYLE[o.style ?? 'dashed'],
+      axisLabelVisible: o.axis ?? true, title: o.label,
+    }))
+    return () => {
+      for (const l of made) {
+        try { candleSeries.removePriceLine(l) } catch { /* the series went with a rebuild */ }
+      }
+    }
+  }, [candleSeries, overlays, pal])
+
+  // Live price: update the last candle when it is today's, else open today's candle from the last close.
+  useEffect(() => {
+    if (!candleSeries || !live || data.tf !== '1d') return
+    const t = data.bars.t
+    const n = t.length
+    if (!n || live.date < t[n - 1]) return
+    let bar = liveBar.current
+    if (!bar || bar.t !== live.date) {
+      bar = live.date === t[n - 1]
+        ? { t: live.date, o: data.bars.o[n - 1], h: data.bars.h[n - 1], l: data.bars.l[n - 1] }
+        : { t: live.date, o: data.bars.c[n - 1], h: data.bars.c[n - 1], l: data.bars.c[n - 1] }
+    }
+    bar = { ...bar, h: Math.max(bar.h, live.price), l: Math.min(bar.l, live.price) }
+    liveBar.current = bar
+    try {
+      candleSeries.update({ time: bar.t as Time, open: bar.o, high: bar.h, low: bar.l, close: live.price })
+    } catch { /* an older bar than the series' last: ignored */ }
+  }, [candleSeries, live, data])
 
   const i = hoverIdx ?? data.bars.t.length - 1
   const b = data.bars

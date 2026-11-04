@@ -77,5 +77,43 @@ class FnoRefreshAccepted(Model):
     run: FnoRefreshRun
 
 
+class FnoLiveRow(Model):
+    """One underlying during the session: all its futures AND options open interest (NSE OI spurts) and its price."""
+    symbol: str
+    kind: Literal["index", "stock"]
+    price: float | None = None
+    prev_close: float | None = None
+    chg_pct: float | None = None
+    price_source: Literal["fyers", "yahoo", "nse_rounded", "close"] | None = None
+    oi: float | None = None                       # contracts, futures + options, all expiries
+    prev_oi: float | None = None
+    oi_chg: float | None = None
+    oi_chg_pct: float | None = None
+    volume: float | None = None                   # contracts traded today
+    buildup: FnoBuildup | None = None             # price vs all-contract OI, 5%+ OI change
+    eod_buildup: FnoBuildup | None = None         # the futures-only build-up of eod_date (bhavcopy)
+
+
+class FnoLiveResponse(Model):
+    nse_time: ISODateTime | None = None           # NSE's own time stamp of the OI figures
+    trade_date: ISODate | None = None
+    prev_date: ISODate | None = None
+    eod_date: ISODate | None = None               # the futures-only end-of-day table eod_buildup comes from
+    fetched_at: ISODateTime | None = None
+    price_source: str | None = None               # fyers | yahoo | close
+    session: str                                  # market clock: open, closed, ...
+    running: bool
+    error: str | None = None
+    counts: dict[str, int]
+    rows: list[FnoLiveRow]
+    note: str
+
+
+class FnoLiveAccepted(Model):
+    accepted: bool                                # False: a fetch ran less than 90 s ago or is running
+    running: bool
+    message: str
+
+
 __all__ = ["FnoClient", "FnoBuildup", "FnoClientSeries", "FnoPositionsResponse", "FnoFuture", "FnoFuturesResponse",
-           "FnoRefreshRun", "FnoStatus", "FnoRefreshAccepted"]
+           "FnoRefreshRun", "FnoStatus", "FnoRefreshAccepted", "FnoLiveRow", "FnoLiveResponse", "FnoLiveAccepted"]

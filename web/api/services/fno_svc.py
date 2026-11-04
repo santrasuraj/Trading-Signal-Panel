@@ -115,3 +115,118 @@ def _worker(days: int) -> None:
         _run.update(state="failed", message=f"{type(e).__name__}: {e}"[:300])
     finally:
         _run["finished_at"] = now_ist().isoformat(timespec="seconds")
+
+
+# ------------------------------------------------------------------ live (during the session)
+NOTE_LIVE = ("Live: NSE's OI-spurts feed (open interest of ALL futures and options of each underlying, NSE's own time "
+             "stamp, updated every few minutes) with prices from FYERS in real time when you are logged in, else Yahoo "
+             "(~15 min delayed). Options move open interest far more than futures, so a live build-up needs a 5%+ OI "
+             "change, and it can differ from the futures-only end-of-day table NSE publishes after the close (the "
+             "'Futures (EOD)' column). Positioning, not a signal.")
+LIVE_MIN_GAP_S = 90
+_live_lock = threading.Lock()
+_live: dict = {"thread": None, "last": float("-inf"), "error": None}
+
+
+def _live_running() -> bool:
+    return _live["thread"] is not None and _live["thread"].is_alive()
+
+
+def start_live() -> dict:
+    """POST: fetch NSE's OI feed and the prices now (at most once every 90 s; one at a time)."""
+    import time
+    with _live_lock:
+        if _live_running():
+            return {"accepted": False, "running": True, "message": "A live fetch is already running."}
+        wait = LIVE_MIN_GAP_S - (time.monotonic() - _live["last"])
+        if wait > 0:
+            return {"accepted": False, "running": False, "message": f"Fetched less than {LIVE_MIN_GAP_S} s ago."}
+        _live["last"] = time.monotonic()
+        t = threading.Thread(target=_live_worker, name="fno-live", daemon=True)
+        _live["thread"] = t
+        t.start()
+    return {"accepted": True, "running": True, "message": "Fetching NSE's live open interest and prices..."}
+
+
+def _live_worker() -> None:
+    from scanner import fno_intraday as fi
+    from . import quotes_svc
+    try:
+        feed, err = fi.fetch()
+        if feed is None:
+            _live["error"] = err
+            return
+        _live["error"] = None
+        kinds = _kinds()
+        stocks = [r["symbol"] for r in feed["rows"] if kinds.get(r["symbol"]) != "index"]
+        prices, source = {}, None
+        for i in range(0, len(stocks), quotes_svc.MAX_SYMBOLS):
+            q = quotes_svc.quotes(stocks[i:i + quotes_svc.MAX_SYMBOLS])
+            source = q["source"]
+            prices.update({x["symbol"]: x for x in q["quotes"]})
+        fi.save({**feed, "prices": prices, "price_source": source, "fetched_at": now_ist().isoformat(timespec="seconds")})
+    except Exception as e:      # the page shows the error; the last good snapshot stays on disk
+        errors.log.exception("live F&O fetch failed")
+        _live["error"] = f"{type(e).__name__}: {e}"[:300]
+
+
+def _kinds() -> dict[str, str]:
+    fut = _futures()
+    if not len(fut):
+        return {}
+    _, rows = fno.day_futures(fut)
+    return dict(zip(rows["symbol"], rows["kind"]))
+
+
+def live(kind: str, buildup: str, sort: str, limit: int) -> dict:
+    from scanner import fno_intraday as fi
+    from .clock import market_clock
+    v = fi.load() or {}
+    fut = _futures()
+    prev, eod, eod_day = pd.DataFrame(), pd.DataFrame(), None
+    if len(fut) and v.get("prev_date"):
+        stored = set(pd.to_datetime(fut["date"]).dt.date)
+        _, prev = fno.day_futures(fut, date.fromisoformat(v["prev_date"]))
+        for d in (v.get("trade_date"), v.get("prev_date")):    # the same day's futures table once NSE published it
+            if d and date.fromisoformat(d) in stored:
+                eod_day = date.fromisoformat(d)
+                break
+        if eod_day:
+            _, eod = fno.day_futures(fut, eod_day)
+    prev = prev.set_index("symbol") if len(prev) else prev
+    eod = eod.set_index("symbol") if len(eod) else eod
+    today = (v.get("trade_date") or "")[:10]
+    out = []
+    for r in v.get("rows") or []:
+        s = r["symbol"]
+        p = prev.loc[s] if len(prev) and s in prev.index else None
+        k = str(p["kind"]) if p is not None else ("index" if s in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50") else "stock")
+        bhav_spot = (float(p["close"]) / (1 + float(p["basis_pct"]) / 100)
+                     if p is not None and pd.notna(p["close"]) and pd.notna(p["basis_pct"]) else None)
+        q = (v.get("prices") or {}).get(s)
+        if q and str(q.get("time", ""))[:10] == today and q.get("price"):
+            price, pc = q["price"], q.get("prev_close") or bhav_spot
+            src = v.get("price_source") if v.get("price_source") in ("fyers", "yahoo") else "close"
+        else:                                           # an index, or no trade yet in the quote: NSE's rounded spot
+            price, pc, src = r.get("spot_rounded"), bhav_spot, "nse_rounded"
+        chg = (price / pc - 1) * 100 if price and pc else None
+        out.append({"symbol": s, "kind": k, "price": num(price, 2), "prev_close": num(pc, 2), "chg_pct": num(chg, 2),
+                    "price_source": src, "oi": r.get("oi"), "prev_oi": r.get("prev_oi"), "oi_chg": r.get("oi_chg"),
+                    "oi_chg_pct": r.get("oi_chg_pct"), "volume": r.get("volume"),
+                    "buildup": fi.classify(chg, r.get("oi_chg_pct")),
+                    "eod_buildup": (eod.loc[s, "buildup"] if len(eod) and s in eod.index
+                                    and isinstance(eod.loc[s, "buildup"], str) else None)})
+    counts = {b: sum(1 for x in out if x["buildup"] == b) for b in ("long_buildup", "short_buildup", "short_covering",
+                                                                   "long_unwinding")}
+    if kind != "all":
+        out = [x for x in out if x["kind"] == kind]
+    if buildup != "all":
+        out = [x for x in out if x["buildup"] == buildup]
+    key = {"oi_chg": lambda x: abs(x["oi_chg_pct"] or 0), "chg": lambda x: abs(x["chg_pct"] or 0),
+           "oi": lambda x: x["oi"] or 0, "volume": lambda x: x["volume"] or 0}[sort]
+    out = sorted(out, key=key, reverse=True)[:limit]
+    return {"nse_time": v.get("nse_time"), "trade_date": v.get("trade_date"), "prev_date": v.get("prev_date"),
+            "eod_date": eod_day.isoformat() if eod_day else None,
+            "fetched_at": v.get("fetched_at"), "price_source": v.get("price_source"),
+            "session": market_clock()["session"], "running": _live_running(), "error": _live["error"],
+            "counts": counts, "rows": out, "note": NOTE_LIVE}

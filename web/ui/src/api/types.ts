@@ -384,7 +384,7 @@ export interface ChartResponse {
 }
 export interface ChartMarker {
   t: ISODate; position: 'aboveBar' | 'belowBar' | 'inBar'; shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square';
-  kind: 'entry' | 'exit' | 'open_entry' | 'pending_order' | 'corporate_action' | 'results';
+  kind: 'entry' | 'exit' | 'open_entry' | 'pending_order' | 'corporate_action' | 'results' | 'pattern';   // pattern: added by the Chart page (levels API)
   tone: 'profit' | 'loss' | 'neutral' | 'warn'; text: string; detail: string | null; strategy_key: string | null;
 }
 export interface PriceLine {
