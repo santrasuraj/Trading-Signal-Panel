@@ -9,6 +9,7 @@ import {
 } from 'lightweight-charts'
 import type { ChartMarker, ChartResponse, IndicatorId, PriceLine } from '@/api/types'
 import { toCandles, toLine, toMarkers, toSignedHistogram, toVolume } from '@/lib/chartMappers'
+import type { PatternDrawing } from '@/lib/patternDrawing'
 import { inrAxisPrice, palette } from '@/lib/chartTheme'
 import { cn } from '@/lib/csv'
 import { date, num, ok, pct, price, qty } from '@/lib/format'
@@ -39,6 +40,8 @@ export interface PriceChartProps {
   overlays?: ChartOverlay[]
   /** Markers added by the page (candle / chart patterns): drawn with the strategy markers. */
   extraMarkers?: ChartMarker[]
+  /** Chart patterns drawn on the candles (lib/patternDrawing): shape, lines, target / void levels, labels. */
+  drawings?: PatternDrawing[]
   live?: LiveTick | null
 }
 
@@ -47,7 +50,7 @@ const LINE_COLOR: Partial<Record<IndicatorId, 'warn' | 'accent' | 'violet' | 'in
 }
 const LABEL: Partial<Record<IndicatorId, string>> = { sma20: 'SMA 20', sma50: 'SMA 50', sma200: 'SMA 200', ema21: 'EMA 21', bb_upper: 'BB up', bb_mid: 'BB mid', bb_lower: 'BB low' }
 
-export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function PriceChart({ data, indicators, markerStrategies, showLines, log, height, compactLegend, overlays, extraMarkers, live }, handle) {
+export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function PriceChart({ data, indicators, markerStrategies, showLines, log, height, compactLegend, overlays, extraMarkers, drawings, live }, handle) {
   const { ref, chart, version } = useLwChart()
   const [candleSeries, setCandleSeries] = useState<ISeriesApi<'Candlestick'> | null>(null)
   const liveBar = useRef<{ t: string; o: number; h: number; l: number } | null>(null)
@@ -162,6 +165,44 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
       }
     }
   }, [candleSeries, overlays, pal])
+
+  // Chart patterns: one line series per drawn line on the candle pane, after the candles (so on top of them). They
+  // never move the price scale (a far target stays off-screen rather than squashing the candles), and toggling them
+  // never rebuilds the chart or resets the zoom.
+  useEffect(() => {
+    if (!chart || !candleSeries || !drawings?.length) return
+    const made: ISeriesApi<'Line'>[] = []
+    const prims: { detach: () => void }[] = []
+    for (const d of drawings) {
+      for (const ln of d.lines) {
+        if (ln.points.length < 2) continue
+        const color = pal[ln.tone]
+        const s = chart.addSeries(LineSeries, {
+          color, lineWidth: ln.width, lineStyle: LINE_STYLE[ln.style], priceLineVisible: false, lastValueVisible: false,
+          crosshairMarkerVisible: false, autoscaleInfoProvider: () => null,
+        }, 0)
+        s.setData(ln.points.map((p) => ({ time: p.t as Time, value: p.v })))
+        if (ln.axisLabel) {
+          s.createPriceLine({ price: ln.points[0].v, color, lineVisible: false, axisLabelVisible: true, title: ln.axisLabel, lineWidth: 1, lineStyle: LINE_STYLE[ln.style] })
+        }
+        made.push(s)
+        if (ln.labels.length) {
+          prims.push(createSeriesMarkers(s, ln.labels.map((l, k) => ({
+            id: `${ln.id}:${k}`, time: l.t as Time, position: l.position, price: l.price, shape: 'circle' as const, color, text: l.text,
+            size: ln.role === 'shape' ? 0.5 : 0.01,
+          }))))
+        }
+      }
+    }
+    return () => {
+      for (const p of prims) {
+        try { p.detach() } catch { /* the series went with a rebuild */ }
+      }
+      for (const s of made) {
+        try { chart.removeSeries(s) } catch { /* the series went with a rebuild */ }
+      }
+    }
+  }, [chart, candleSeries, drawings, pal])
 
   // Live price: update the last candle when it is today's, else open today's candle from the last close.
   useEffect(() => {

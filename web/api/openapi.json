@@ -1462,6 +1462,28 @@
     }
    }
   },
+  "/api/fyers/direct-setup": {
+   "post": {
+    "tags": [
+     "operations"
+    ],
+    "summary": "Fyers Direct Setup",
+    "description": "After the Fyers app's Redirect URL was set to this app's callback: point FYERS_REDIRECT_URI in .env at it.",
+    "operationId": "fyers_direct_setup_api_fyers_direct_setup_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FyersStatus"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/config": {
    "get": {
     "tags": [
@@ -1632,6 +1654,72 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/automation": {
+   "get": {
+    "tags": [
+     "operations"
+    ],
+    "summary": "Automation Status",
+    "description": "The scheduled jobs (Windows Task Scheduler): registered or not, next and last run (cached for a minute).",
+    "operationId": "automation_status_api_automation_get",
+    "parameters": [
+     {
+      "name": "refresh",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "title": "Refresh"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AutomationStatus"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/automation/setup": {
+   "post": {
+    "tags": [
+     "operations"
+    ],
+    "summary": "Automation Setup",
+    "description": "Register or repair every automatic job (runs setup_schedule.ps1; no window opens).",
+    "operationId": "automation_setup_api_automation_setup_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AutomationSetupResult"
         }
        }
       }
@@ -3044,6 +3132,113 @@
      }
     }
    }
+  },
+  "/api/ai/forecasts": {
+   "get": {
+    "tags": [
+     "ai"
+    ],
+    "summary": "Forecasts",
+    "description": "Files only: Claude's option-chain forecasts scored against NSE's official closes, and their record.",
+    "operationId": "forecasts_api_ai_forecasts_get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 20,
+         "pattern": "^[A-Za-z0-9&-]+$"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 500,
+       "minimum": 1,
+       "default": 40,
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AiForecastReport"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/ai/forecast": {
+   "post": {
+    "tags": [
+     "ai"
+    ],
+    "summary": "Forecast",
+    "description": "One forecast now from the stored chain (costs roughly Rs 8-13 on the Anthropic account).",
+    "operationId": "forecast_api_ai_forecast_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AiForecastRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AiForecast"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -3215,6 +3410,758 @@
     ],
     "title": "AiAnalyzeRequest"
    },
+   "AiBaselines": {
+    "properties": {
+     "next_close": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AiPriceRange"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "expiry": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AiPriceRange"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": "object",
+    "required": [
+     "next_close",
+     "expiry"
+    ],
+    "title": "AiBaselines"
+   },
+   "AiForecast": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "evening",
+       "on_demand"
+      ],
+      "title": "Kind"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "settle": {
+      "type": "string",
+      "enum": [
+       "index",
+       "store"
+      ],
+      "title": "Settle"
+     },
+     "created_at": {
+      "type": "string",
+      "title": "Created At"
+     },
+     "answered_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Answered At"
+     },
+     "chain_time": {
+      "type": "string",
+      "title": "Chain Time"
+     },
+     "expiry": {
+      "type": "string",
+      "title": "Expiry"
+     },
+     "spot": {
+      "type": "number",
+      "title": "Spot"
+     },
+     "model": {
+      "type": "string",
+      "title": "Model"
+     },
+     "effort": {
+      "type": "string",
+      "title": "Effort"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "pending",
+       "ok",
+       "refused",
+       "error"
+      ],
+      "title": "Status"
+     },
+     "error": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Error"
+     },
+     "forecast": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AiForecastBody"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "baseline": {
+      "$ref": "#/components/schemas/AiBaselines"
+     },
+     "snapshot_sha256": {
+      "type": "string",
+      "title": "Snapshot Sha256"
+     },
+     "usage": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AiUsage"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "batch_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Batch Id"
+     },
+     "outcome": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AiOutcomes"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "cached": {
+      "type": "boolean",
+      "title": "Cached",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "kind",
+     "symbol",
+     "settle",
+     "created_at",
+     "answered_at",
+     "chain_time",
+     "expiry",
+     "spot",
+     "model",
+     "effort",
+     "status",
+     "error",
+     "forecast",
+     "baseline",
+     "snapshot_sha256",
+     "usage",
+     "batch_id",
+     "outcome",
+     "cached"
+    ],
+    "title": "AiForecast"
+   },
+   "AiForecastBody": {
+    "properties": {
+     "view": {
+      "type": "string",
+      "enum": [
+       "up",
+       "down",
+       "sideways",
+       "no_view"
+      ],
+      "title": "View"
+     },
+     "confidence": {
+      "type": "string",
+      "enum": [
+       "low",
+       "medium",
+       "high"
+      ],
+      "title": "Confidence"
+     },
+     "summary": {
+      "type": "string",
+      "title": "Summary"
+     },
+     "next_close": {
+      "$ref": "#/components/schemas/AiHorizonForecast"
+     },
+     "expiry": {
+      "$ref": "#/components/schemas/AiHorizonForecast"
+     },
+     "invalidation": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Invalidation"
+     },
+     "key_levels": {
+      "items": {
+       "$ref": "#/components/schemas/AiKeyLevel"
+      },
+      "type": "array",
+      "title": "Key Levels"
+     },
+     "reasons": {
+      "items": {
+       "$ref": "#/components/schemas/AiReason"
+      },
+      "type": "array",
+      "title": "Reasons"
+     }
+    },
+    "type": "object",
+    "required": [
+     "view",
+     "confidence",
+     "summary",
+     "next_close",
+     "expiry",
+     "invalidation",
+     "key_levels",
+     "reasons"
+    ],
+    "title": "AiForecastBody"
+   },
+   "AiForecastReport": {
+    "properties": {
+     "configured": {
+      "type": "boolean",
+      "title": "Configured"
+     },
+     "model": {
+      "type": "string",
+      "title": "Model"
+     },
+     "effort": {
+      "type": "string",
+      "title": "Effort"
+     },
+     "underlyings": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Underlyings"
+     },
+     "symbol": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Symbol"
+     },
+     "proven_min": {
+      "type": "integer",
+      "title": "Proven Min"
+     },
+     "p_max": {
+      "type": "number",
+      "title": "P Max"
+     },
+     "track": {
+      "items": {
+       "$ref": "#/components/schemas/AiTrack"
+      },
+      "type": "array",
+      "title": "Track"
+     },
+     "latest": {
+      "items": {
+       "$ref": "#/components/schemas/AiForecast"
+      },
+      "type": "array",
+      "title": "Latest"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/AiForecast"
+      },
+      "type": "array",
+      "title": "Rows"
+     },
+     "pending_batches": {
+      "items": {
+       "$ref": "#/components/schemas/AiPendingBatch"
+      },
+      "type": "array",
+      "title": "Pending Batches"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "configured",
+     "model",
+     "effort",
+     "underlyings",
+     "symbol",
+     "proven_min",
+     "p_max",
+     "track",
+     "latest",
+     "rows",
+     "pending_batches",
+     "note"
+    ],
+    "title": "AiForecastReport"
+   },
+   "AiForecastRequest": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "maxLength": 20,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9&-]+$",
+      "title": "Symbol"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol"
+    ],
+    "title": "AiForecastRequest"
+   },
+   "AiHorizonForecast": {
+    "properties": {
+     "p_up": {
+      "type": "number",
+      "title": "P Up"
+     },
+     "low": {
+      "type": "number",
+      "title": "Low"
+     },
+     "high": {
+      "type": "number",
+      "title": "High"
+     }
+    },
+    "type": "object",
+    "required": [
+     "p_up",
+     "low",
+     "high"
+    ],
+    "title": "AiHorizonForecast"
+   },
+   "AiHorizonTrack": {
+    "properties": {
+     "settled": {
+      "type": "integer",
+      "title": "Settled"
+     },
+     "calls": {
+      "type": "integer",
+      "title": "Calls"
+     },
+     "hits": {
+      "type": "integer",
+      "title": "Hits"
+     },
+     "hit_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hit Pct"
+     },
+     "p_value": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "P Value"
+     },
+     "brier": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Brier"
+     },
+     "coin_brier": {
+      "type": "number",
+      "title": "Coin Brier"
+     },
+     "always_up_hit_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Always Up Hit Pct"
+     },
+     "range_hit_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Range Hit Pct"
+     },
+     "range_width_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Range Width Pct"
+     },
+     "base_range_hit_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Base Range Hit Pct"
+     },
+     "base_width_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Base Width Pct"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "unproven",
+       "beats_coin_flip",
+       "no_edge"
+      ],
+      "title": "Status"
+     },
+     "why": {
+      "type": "string",
+      "title": "Why"
+     }
+    },
+    "type": "object",
+    "required": [
+     "settled",
+     "calls",
+     "hits",
+     "hit_pct",
+     "p_value",
+     "brier",
+     "coin_brier",
+     "always_up_hit_pct",
+     "range_hit_pct",
+     "range_width_pct",
+     "base_range_hit_pct",
+     "base_width_pct",
+     "status",
+     "why"
+    ],
+    "title": "AiHorizonTrack"
+   },
+   "AiKeyLevel": {
+    "properties": {
+     "price": {
+      "type": "number",
+      "title": "Price"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "support",
+       "resistance",
+       "pivot"
+      ],
+      "title": "Kind"
+     },
+     "why": {
+      "type": "string",
+      "title": "Why"
+     }
+    },
+    "type": "object",
+    "required": [
+     "price",
+     "kind",
+     "why"
+    ],
+    "title": "AiKeyLevel"
+   },
+   "AiOutcome": {
+    "properties": {
+     "date": {
+      "type": "string",
+      "title": "Date"
+     },
+     "close": {
+      "type": "number",
+      "title": "Close"
+     },
+     "move_pct": {
+      "type": "number",
+      "title": "Move Pct"
+     },
+     "up": {
+      "type": "boolean",
+      "title": "Up"
+     },
+     "call": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "up",
+         "down"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Call"
+     },
+     "hit": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hit"
+     },
+     "brier": {
+      "type": "number",
+      "title": "Brier"
+     },
+     "in_range": {
+      "type": "boolean",
+      "title": "In Range"
+     },
+     "width_pct": {
+      "type": "number",
+      "title": "Width Pct"
+     },
+     "base_in_range": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Base In Range"
+     },
+     "base_width_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Base Width Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "date",
+     "close",
+     "move_pct",
+     "up",
+     "call",
+     "hit",
+     "brier",
+     "in_range",
+     "width_pct",
+     "base_in_range",
+     "base_width_pct"
+    ],
+    "title": "AiOutcome"
+   },
+   "AiOutcomes": {
+    "properties": {
+     "next_close": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AiOutcome"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "expiry": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AiOutcome"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": "object",
+    "required": [
+     "next_close",
+     "expiry"
+    ],
+    "title": "AiOutcomes"
+   },
+   "AiPendingBatch": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "submitted_at": {
+      "type": "string",
+      "title": "Submitted At"
+     },
+     "symbols": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Symbols"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "submitted_at",
+     "symbols"
+    ],
+    "title": "AiPendingBatch"
+   },
+   "AiPriceRange": {
+    "properties": {
+     "low": {
+      "type": "number",
+      "title": "Low"
+     },
+     "high": {
+      "type": "number",
+      "title": "High"
+     }
+    },
+    "type": "object",
+    "required": [
+     "low",
+     "high"
+    ],
+    "title": "AiPriceRange"
+   },
+   "AiReason": {
+    "properties": {
+     "text": {
+      "type": "string",
+      "title": "Text"
+     },
+     "evidence": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Evidence"
+     },
+     "tested": {
+      "type": "boolean",
+      "title": "Tested"
+     }
+    },
+    "type": "object",
+    "required": [
+     "text",
+     "evidence",
+     "tested"
+    ],
+    "title": "AiReason"
+   },
    "AiStatus": {
     "properties": {
      "configured": {
@@ -3242,6 +4189,112 @@
      "note"
     ],
     "title": "AiStatus"
+   },
+   "AiTrack": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "evening",
+       "on_demand"
+      ],
+      "title": "Kind"
+     },
+     "forecasts": {
+      "type": "integer",
+      "title": "Forecasts"
+     },
+     "ok": {
+      "type": "integer",
+      "title": "Ok"
+     },
+     "pending": {
+      "type": "integer",
+      "title": "Pending"
+     },
+     "refused": {
+      "type": "integer",
+      "title": "Refused"
+     },
+     "errors": {
+      "type": "integer",
+      "title": "Errors"
+     },
+     "horizons": {
+      "$ref": "#/components/schemas/AiTrackHorizons"
+     }
+    },
+    "type": "object",
+    "required": [
+     "kind",
+     "forecasts",
+     "ok",
+     "pending",
+     "refused",
+     "errors",
+     "horizons"
+    ],
+    "title": "AiTrack"
+   },
+   "AiTrackHorizons": {
+    "properties": {
+     "next_close": {
+      "$ref": "#/components/schemas/AiHorizonTrack"
+     },
+     "expiry": {
+      "$ref": "#/components/schemas/AiHorizonTrack"
+     }
+    },
+    "type": "object",
+    "required": [
+     "next_close",
+     "expiry"
+    ],
+    "title": "AiTrackHorizons"
+   },
+   "AiUsage": {
+    "properties": {
+     "input_tokens": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Input Tokens"
+     },
+     "output_tokens": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Output Tokens"
+     },
+     "cache_read_tokens": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cache Read Tokens"
+     }
+    },
+    "type": "object",
+    "required": [
+     "input_tokens",
+     "output_tokens",
+     "cache_read_tokens"
+    ],
+    "title": "AiUsage"
    },
    "Alert": {
     "properties": {
@@ -3516,6 +4569,150 @@
      "costs_round_trip_pct"
     ],
     "title": "AsOf"
+   },
+   "AutomationJob": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "when": {
+      "type": "string",
+      "title": "When"
+     },
+     "what": {
+      "type": "string",
+      "title": "What"
+     },
+     "registered": {
+      "type": "boolean",
+      "title": "Registered"
+     },
+     "state": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "State"
+     },
+     "next_run": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Next Run"
+     },
+     "last_run": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Run"
+     },
+     "last_result": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Result"
+     },
+     "ok": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ok"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name",
+     "when",
+     "what",
+     "registered",
+     "state",
+     "next_run",
+     "last_run",
+     "last_result",
+     "ok"
+    ],
+    "title": "AutomationJob"
+   },
+   "AutomationSetupResult": {
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "title": "Ok"
+     },
+     "output": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Output"
+     },
+     "status": {
+      "$ref": "#/components/schemas/AutomationStatus"
+     }
+    },
+    "type": "object",
+    "required": [
+     "ok",
+     "output",
+     "status"
+    ],
+    "title": "AutomationSetupResult"
+   },
+   "AutomationStatus": {
+    "properties": {
+     "available": {
+      "type": "boolean",
+      "title": "Available"
+     },
+     "jobs": {
+      "items": {
+       "$ref": "#/components/schemas/AutomationJob"
+      },
+      "type": "array",
+      "title": "Jobs"
+     },
+     "missing": {
+      "type": "integer",
+      "title": "Missing"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "available",
+     "jobs",
+     "missing",
+     "note"
+    ],
+    "title": "AutomationStatus"
    },
    "BacktestTradeStats": {
     "properties": {
@@ -6741,6 +7938,7 @@
      "mode": {
       "type": "string",
       "enum": [
+       "direct",
        "paste",
        "window"
       ],
@@ -6756,10 +7954,27 @@
      "mode": {
       "type": "string",
       "enum": [
+       "direct",
        "paste",
        "window"
       ],
       "title": "Mode"
+     },
+     "capture": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "app",
+         "listener",
+         "paste"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Capture"
      },
      "login_url": {
       "anyOf": [
@@ -6794,6 +8009,7 @@
     "type": "object",
     "required": [
      "mode",
+     "capture",
      "login_url",
      "expires_at",
      "instructions"
@@ -6893,12 +8109,26 @@
       "items": {
        "type": "string",
        "enum": [
+        "direct",
         "paste",
         "window"
        ]
       },
       "type": "array",
       "title": "Login Modes"
+     },
+     "direct_mode": {
+      "type": "string",
+      "enum": [
+       "app",
+       "listener",
+       "paste"
+      ],
+      "title": "Direct Mode"
+     },
+     "callback_url": {
+      "type": "string",
+      "title": "Callback Url"
      },
      "note": {
       "type": "string",
@@ -6919,6 +8149,8 @@
      "user_name",
      "redirect_uri",
      "login_modes",
+     "direct_mode",
+     "callback_url",
      "note"
     ],
     "title": "FyersStatus"
@@ -8150,6 +9382,44 @@
     ],
     "title": "IntradayCostPreview"
    },
+   "IntradayCoverage": {
+    "properties": {
+     "symbols": {
+      "type": "integer",
+      "title": "Symbols",
+      "default": 0
+     },
+     "from": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "From"
+     },
+     "to": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "To"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbols",
+     "from",
+     "to"
+    ],
+    "title": "IntradayCoverage"
+   },
    "IntradayData": {
     "properties": {
      "source": {
@@ -8180,6 +9450,16 @@
      "note": {
       "type": "string",
       "title": "Note"
+     },
+     "fyers_coverage": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/IntradayCoverage"
+       },
+       {
+        "type": "null"
+       }
+      ]
      }
     },
     "type": "object",
@@ -8190,7 +9470,8 @@
      "to",
      "sessions",
      "symbols",
-     "note"
+     "note",
+     "fyers_coverage"
     ],
     "title": "IntradayData"
    },
@@ -8292,6 +9573,17 @@
       ],
       "title": "Avg Trade Pct"
      },
+     "avg_trade_gross_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Trade Gross Pct"
+     },
      "profit_factor": {
       "anyOf": [
        {
@@ -8385,6 +9677,7 @@
      "max_dd_pct",
      "win_rate",
      "avg_trade_pct",
+     "avg_trade_gross_pct",
      "profit_factor",
      "avg_day_pct",
      "ci95_day_pct",
@@ -8609,6 +9902,11 @@
       "type": "boolean",
       "title": "Update",
       "default": true
+     },
+     "backfill": {
+      "type": "boolean",
+      "title": "Backfill",
+      "default": false
      }
     },
     "type": "object",
@@ -9099,6 +10397,17 @@
       ],
       "title": "Confirmed Bars Ago"
      },
+     "confirmed_on": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Confirmed On"
+     },
      "what": {
       "type": "string",
       "title": "What"
@@ -9202,6 +10511,7 @@
      "status",
      "direction",
      "confirmed_bars_ago",
+     "confirmed_on",
      "what",
      "start",
      "end",
@@ -9810,6 +11120,22 @@
        }
       ],
       "title": "P2"
+     },
+     "t1": {
+      "type": "string",
+      "title": "T1"
+     },
+     "t2": {
+      "type": "string",
+      "title": "T2"
+     },
+     "ago1": {
+      "type": "integer",
+      "title": "Ago1"
+     },
+     "ago2": {
+      "type": "integer",
+      "title": "Ago2"
      }
     },
     "type": "object",
@@ -9817,7 +11143,11 @@
      "i1",
      "p1",
      "i2",
-     "p2"
+     "p2",
+     "t1",
+     "t2",
+     "ago1",
+     "ago2"
     ],
     "title": "LvLine"
    },
@@ -10011,13 +11341,32 @@
      "label": {
       "type": "string",
       "title": "Label"
+     },
+     "t": {
+      "type": "string",
+      "title": "T"
+     },
+     "ago": {
+      "type": "integer",
+      "title": "Ago"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "high",
+       "low"
+      ],
+      "title": "Side"
      }
     },
     "type": "object",
     "required": [
      "i",
      "price",
-     "label"
+     "label",
+     "t",
+     "ago",
+     "side"
     ],
     "title": "LvPoint"
    },

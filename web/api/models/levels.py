@@ -39,6 +39,9 @@ class LvPoint(Model):
     i: int                                        # bar position within `series`
     price: float | None = None
     label: str
+    t: ISODate                                    # the bar's date (for drawing on the price chart)
+    ago: int                                      # bars before the last bar (`end`)
+    side: Literal["high", "low"]                  # a swing high (label above) or low (label below)
 
 
 class LvLine(Model):
@@ -46,6 +49,10 @@ class LvLine(Model):
     p1: float | None = None
     i2: int
     p2: float | None = None
+    t1: ISODate
+    t2: ISODate
+    ago1: int                                     # bars before the last bar: cuts a line at the chart's first bar
+    ago2: int
 
 
 class LvChartPattern(Model):
@@ -55,6 +62,7 @@ class LvChartPattern(Model):
     status: Literal["forming", "confirmed"]
     direction: Literal["up", "down"] | None = None   # the breakout's direction (triangles, rectangles, wedges)
     confirmed_bars_ago: int | None = None
+    confirmed_on: ISODate | None = None           # the breakout bar's date
     what: str
     start: ISODate
     end: ISODate

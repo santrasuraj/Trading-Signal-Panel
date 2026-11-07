@@ -272,20 +272,36 @@ def _sketch(df: pd.DataFrame, key: str, status: str, first: int, *, breakout: fl
             target: float | None, points: list[tuple[int, float, str]], lines: list[tuple[int, float, int, float]],
             direction: str | None = None, confirmed_at: int | None = None) -> dict:
     """One pattern for the page: levels plus what a small sketch needs - the closes from just before the first
-    point to the last bar, the labelled points and the lines (bar positions relative to the sketch's start)."""
+    point to the last bar, the labelled points and the lines (bar positions relative to the sketch's start).
+    For drawing on the price chart every point and line end also carries its date (`t`) and `ago`, its distance in
+    bars before the last bar (`end`): a line that starts before the chart's range is cut at the range's first bar
+    by counting bars, which a date alone can't do. A point is a swing `high` or `low` (its label goes above or
+    below it): every point is a bar's exact high or low."""
     name, bias, what = CHART_INFO[key]
     s0 = max(first - SKETCH_PAD, 0)
     close = float(df["close"].iat[-1])
     idx = df.index
+    last = len(df) - 1
+    hi, lo = df["high"].to_numpy(float), df["low"].to_numpy(float)
+
+    def day(j: int) -> str:
+        return pd.Timestamp(idx[j]).date().isoformat()
+
+    def side(j: int, p: float) -> str:
+        return "high" if abs(p - hi[j]) <= abs(p - lo[j]) else "low"
+
     return {
         "key": key, "name": name, "bias": bias, "status": status, "direction": direction, "what": what,
-        "confirmed_bars_ago": len(df) - 1 - confirmed_at if confirmed_at is not None else None,
-        "start": pd.Timestamp(idx[first]).date().isoformat(), "end": pd.Timestamp(idx[-1]).date().isoformat(),
+        "confirmed_bars_ago": last - int(confirmed_at) if confirmed_at is not None else None,
+        "confirmed_on": day(int(confirmed_at)) if confirmed_at is not None else None,
+        "start": day(first), "end": day(last),
         "breakout": _f(breakout), "invalidation": _f(invalidation), "target": _f(target),
         "target_pct": _f((target / close - 1) * 100) if target else None,
         "series": [_f(x) for x in df["close"].iloc[s0:].to_numpy()],
-        "points": [{"i": i - s0, "price": _f(p), "label": lab} for i, p, lab in points],
-        "lines": [{"i1": a - s0, "p1": _f(pa), "i2": b - s0, "p2": _f(pb)} for a, pa, b, pb in lines],
+        "points": [{"i": int(i) - s0, "price": _f(p), "label": lab, "t": day(int(i)), "ago": last - int(i),
+                    "side": side(int(i), p)} for i, p, lab in points],
+        "lines": [{"i1": int(a) - s0, "p1": _f(pa), "i2": int(b) - s0, "p2": _f(pb), "t1": day(int(a)),
+                   "t2": day(int(b)), "ago1": last - int(a), "ago2": last - int(b)} for a, pa, b, pb in lines],
     }
 
 
@@ -408,7 +424,9 @@ def _triangles(df: pd.DataFrame, pts: list, a: float) -> list[dict]:
                     invalidation=invalidation, target=target, direction=direction,
                     confirmed_at=up_at if broke_up else dn_at,
                     points=[(i, p, "") for i, p in hs + ls],
-                    lines=[(first, up(first), n - 1, up(n - 1)), (first, lo(first), n - 1, lo(n - 1))])]
+                    # each line from its own first touch (drawn from the pattern's first bar, the other line
+                    # started in empty space before any of its swings)
+                    lines=[(hs[0][0], up(hs[0][0]), n - 1, up(n - 1)), (ls[0][0], lo(ls[0][0]), n - 1, lo(n - 1))])]
 
 
 def _flags(df: pd.DataFrame, a: float) -> list[dict]:

@@ -7,7 +7,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertOctagon, ExternalLink, RefreshCw, Timer } from 'lucide-react'
 import { isFailure } from '@/api/client'
-import { useIntraday, useIntradayRun } from '@/api/hooks'
+import { useIntraday, useIntradayRun, useStatus } from '@/api/hooks'
+import { useUi } from '@/app/uiState'
+import { whyNoEdge } from '@/lib/intraday'
 import type { IntradayRun, IntradayStrategy } from '@/api/types'
 import { EdgeVerdict, EvidenceChip, StatusBadge, edgeVerdict } from '@/components/badges'
 import { LinesChart, type LineDef } from '@/components/charts/LinesChart'
@@ -40,6 +42,34 @@ function StrategyPanel({ s, sessions }: { s: IntradayStrategy; sessions: number 
         </div>
       </div>
     </Card>
+  )
+}
+
+/** Only Yahoo's ~60 sessions so far: a year of FYERS history makes the test much stronger. The 15:45 job fetches it
+ *  by itself once Fyers is logged in; this starts it now (in the background, then the re-test). */
+function HistoryBackfill({ sessions, running }: { sessions: number; running: boolean }) {
+  const { data: s } = useStatus()
+  const { setFyersLogin } = useUi()
+  const start = useIntradayRun()
+  const toast = useToast()
+  const logged = !!s?.fyers.logged_in_today
+  return (
+    <div className="mt-3 rounded-md border border-warn/35 bg-warn/[0.06] p-3 text-xs">
+      <p className="font-medium text-fg">Tested on only {sessions} sessions of delayed Yahoo bars.</p>
+      <p className="mt-1 text-muted">A year of FYERS 5-minute history gives a far stronger test. The 15:45 automatic job downloads it by itself on the first afternoon you are logged in to Fyers, or start it now: about 600 FYERS calls and 15 minutes, inside the daily limit.</p>
+      <div className="mt-2">
+        {logged ? (
+          <Button size="sm" loading={start.isPending} disabled={running}
+            onClick={() => start.mutate({ backfill: true }, {
+              onError: (e) => toast({ tone: 'bad', title: isFailure(e) ? e.message : 'Could not start the download', detail: isFailure(e) ? e.hint ?? undefined : undefined }),
+            })}>
+            Download 1 year of FYERS history
+          </Button>
+        ) : (
+          <Button size="sm" onClick={() => setFyersLogin(true)}>Log in to Fyers first</Button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -90,6 +120,7 @@ export default function Intraday() {
   const strategies = d?.strategies ?? []
   const losers = strategies.filter((s) => (s.metrics.return_pct ?? 0) < 0).length
   const best = strategies.reduce<IntradayStrategy | null>((b, s) => (b == null || (s.metrics.return_pct ?? -1e9) > (b.metrics.return_pct ?? -1e9) ? s : b), null)
+  const why = whyNoEdge(strategies)
   const selected = strategies.find((s) => s.key === sel) ?? null
 
   const cols: Col<IntradayStrategy>[] = [
@@ -99,7 +130,8 @@ export default function Intraday() {
     { id: 'ret', header: 'Return', title: 'Total over the tested sessions, after costs', align: 'right', value: (s) => s.metrics.return_pct, cell: (s) => <Pct v={s.metrics.return_pct} />, mobile: 'change' },
     { id: 'ann', header: 'Annualised', align: 'right', value: (s) => s.metrics.annualised_pct, cell: (s) => <Pct v={s.metrics.annualised_pct} />, hideBelow: 1420 },
     { id: 'tax', header: 'After tax', align: 'right', value: (s) => s.metrics.after_tax_return_pct, cell: (s) => <Pct v={s.metrics.after_tax_return_pct} /> },
-    { id: 'avg', header: 'Avg trade', align: 'right', value: (s) => s.metrics.avg_trade_pct, cell: (s) => <Pct v={s.metrics.avg_trade_pct} dp={2} /> },
+    { id: 'gross', header: 'Before costs', title: 'The average trade before brokerage, STT, exchange fees, GST and slippage', align: 'right', value: (s) => s.metrics.avg_trade_gross_pct, cell: (s) => <Pct v={s.metrics.avg_trade_gross_pct} dp={2} /> },
+    { id: 'avg', header: 'After costs', title: 'The average trade after every cost: what you would actually keep', align: 'right', value: (s) => s.metrics.avg_trade_pct, cell: (s) => <Pct v={s.metrics.avg_trade_pct} dp={2} /> },
     { id: 'dd', header: 'Max DD', align: 'right', value: (s) => s.metrics.max_dd_pct, cell: (s) => <Risk v={s.metrics.max_dd_pct} /> },
     { id: 'sh', header: 'Sharpe', align: 'right', value: (s) => s.metrics.sharpe, cell: (s) => <Ratio v={s.metrics.sharpe} />, hideBelow: 1200 },
     { id: 'win', header: 'Win %', align: 'right', value: (s) => s.metrics.win_rate, cell: (s) => <Pct v={s.metrics.win_rate} signed={false} color={false} />, hideBelow: 1100 },
@@ -122,6 +154,11 @@ export default function Intraday() {
               <AlertOctagon className={cn('mt-0.5 h-5 w-5 shrink-0', losers > 0 ? 'text-loss' : 'text-warn')} />
               <div className="text-[13px] leading-5">
                 <div className="font-semibold text-fg">{d.summary}</div>
+                {why && (
+                  <div className="mt-0.5 text-fg">
+                    Why: before costs the average trade makes between {pct(why.grossLo, { dp: 2 })} and {pct(why.grossHi, { dp: 2 })} - next to nothing, so there is no real edge to keep. Costs of {pct(why.costLo, { signed: false, dp: 2 })} to {pct(why.costHi, { signed: false, dp: 2 })} a trade then turn it into a loss. Nothing is broken and no 200-day / 200-EMA filter blocks them: these rules simply don't beat Indian intraday costs.
+                  </div>
+                )}
                 {d.costs && (
                   <div className="mt-0.5 text-muted">
                     Every backtest trade pays brokerage, STT, exchange fees, GST and slippage: about {pct(d.costs.round_trip_pct, { signed: false, dp: 3 })} per round trip on {money(d.costs.value)}.
@@ -146,6 +183,7 @@ export default function Intraday() {
                   <KV k="Sessions · symbols" v={`${d.data.sessions} · ${d.data.symbols}`} />
                   {d.costs && <KV k="Round trip on ₹1 L" v={`${money(d.costs.value)} → ${pct(d.costs.round_trip_pct, { signed: false, dp: 3 })}`} />}
                   <p className="mt-2 text-2xs text-muted">{d.data.note}</p>
+                  {(d.data.fyers_coverage?.symbols ?? 0) === 0 && <HistoryBackfill sessions={d.data.sessions} running={!!d.run.running} />}
                 </div>
               ) : <p className="text-[13px] text-muted">{d.reason}</p>}
               {Object.keys(d.rules).length > 0 && (

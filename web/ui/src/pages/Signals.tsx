@@ -128,6 +128,36 @@ function Group({ g, cmp, live }: { g: SignalGroup; cmp?: boolean; live?: Record<
   )
 }
 
+/** Strategies with no order for the next open, one row each, instead of a full card per strategy saying "No orders"
+ *  (ten such cards pushed the orders that exist off the screen). */
+function QuietStrategies({ groups }: { groups: SignalGroup[] }) {
+  return (
+    <Card title="No orders today" subtitle={`${groups.length} strateg${groups.length > 1 ? 'ies keep' : 'y keeps'} its holdings until the next review`} flush>
+      <ul className="divide-y divide-line/70">
+        {groups.map((g) => {
+          const s = g.strategy
+          return (
+            <li key={s.key} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-[13px]">
+              <span className="flex min-w-0 flex-1 basis-[260px] flex-wrap items-center gap-2">
+                <Link to={`/strategies/${s.key}`} className="font-medium hover:underline">{s.name}</Link>
+                <StatusBadge status={s.status} lost={lostMoney(s.headline)} />
+                <HorizonChip horizon={s.horizon} />
+              </span>
+              <span className="num text-xs text-muted">
+                holding {s.positions}{s.next_rebalance && <> · next review <span className="whitespace-nowrap">{date(s.next_rebalance, { year: false })}</span></>}
+              </span>
+              {/* "No changes until the next review on …" only repeats the date beside the name */}
+              {g.empty_reason && !/^No changes until the next review/i.test(g.empty_reason) && (
+                <span className="basis-full text-xs text-faint">{keepDatesTogether(g.empty_reason)}</span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </Card>
+  )
+}
+
 const INTRA_COLS: Col<IntradaySignal>[] = [
   { id: 'sym', header: 'Symbol', value: (r) => r.symbol, cell: (r) => <Link to={`/chart/${r.symbol}`} className="font-semibold hover:underline">{r.symbol}</Link>, sticky: true, mobile: 'primary' },
   { id: 'st', header: 'Strategy', value: (r) => r.strategy_name, cell: (r) => <span className="block max-w-[180px] truncate">{r.strategy_name}</span> },
@@ -254,7 +284,9 @@ export default function Signals() {
             />
           </div>
           {intraday && <IntradaySignals />}
-          {!intraday && ranked.length > 1 && (
+          {/* the cross-strategy ranking only says something new when the buys come from two or more strategies;
+              with one, it repeated that strategy's own table */}
+          {!intraday && ranked.length > 1 && new Set(ranked.map((o) => o.strategy_key)).size > 1 && (
             <Card title="Strongest buy signals" subtitle="Every buy signal today, strongest first. Hover a score for its parts: evidence, backtest, agreement between strategies, live record, results day." flush>
               <OrdersTable id="signals.ranked" orders={ranked} showStrategy live={live} />
             </Card>
@@ -267,7 +299,8 @@ export default function Signals() {
               {d.as_of.live ? ' Signals are from the latest live scan (provisional until the close).' : ' Signals are from the last close; the live scan in market hours re-checks them every 30 minutes.'}
             </p>
           )}
-          {main.map((g) => <Group key={g.strategy.key} g={g} live={live} />)}
+          {main.filter((g) => g.orders.length > 0).map((g) => <Group key={g.strategy.key} g={g} live={live} />)}
+          {!intraday && main.some((g) => g.orders.length === 0) && <QuietStrategies groups={main.filter((g) => g.orders.length === 0)} />}
 
           {!intraday && <div className="card num flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-[13px]">
             <span className="eyebrow">Totals</span>

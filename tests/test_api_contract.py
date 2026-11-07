@@ -497,9 +497,44 @@ def test_trusted_host_only(client):
 
 
 def test_spa_fallback_blocks_path_traversal(client):
-    for url in ("/..%2f..%2fconfig.yaml", "/../../.env", "/%2e%2e/%2e%2e/.env"):
+    for url in ("/..%2f..%2fconfig.yaml", "/../../.env", "/%2e%2e/%2e%2e/.env",
+                "/assets/..%2f..%2f..%2fconfig.yaml", "/assets/%5C..%5C..%5C..%5Cconfig.yaml"):
         r = client.get(url)
         assert "FYERS" not in r.text and "capital:" not in r.text
+
+
+def test_dist_file_rejects_network_and_absolute_paths_before_touching_disk(monkeypatch, tmp_path):
+    """On Windows, resolving \\\\host\\share\\x (the URL /%5C%5Chost%5Cshare%5Cx) opens an SMB connection that
+    sends the user's NTLM hash to that host. Such paths must be refused as text: the filesystem is never asked."""
+    from web.api.main import dist_file
+    root = tmp_path.resolve()
+    (root / "assets").mkdir()
+    (root / "assets" / "index-Be40HyvD.js").write_text("ok", encoding="utf-8")
+    (root / "favicon.svg").write_text("<svg/>", encoding="utf-8")
+    assert dist_file(root, "assets/index-Be40HyvD.js") == root / "assets" / "index-Be40HyvD.js"
+    assert dist_file(root, "favicon.svg") == root / "favicon.svg"
+    assert dist_file(root, "assets/missing-x.js") is None
+
+    def boom(*a, **k):
+        raise AssertionError("the filesystem was asked about an unsafe path")
+    monkeypatch.setattr(Path, "is_file", boom)
+    monkeypatch.setattr(Path, "resolve", boom)
+    for p in ("\\\\evil.host\\share\\x", "assets/\\\\evil.host\\share\\x", "//evil.host/share/x", "/evil.host/share",
+              "C:/Windows/win.ini", "c:", "C:\\Windows\\win.ini", "../.env", "assets/../../config.yaml", "./x",
+              "assets//x.js", "assets/", ".env", "x\\..\\..\\config.yaml", "file.txt:stream", "a\x00b"):
+        assert dist_file(root, p) is None, p
+
+
+def test_assets_are_served_through_the_guard(client):
+    from web.api.main import DIST
+    built = sorted((DIST / "assets").glob("*.js")) if (DIST / "assets").is_dir() else []
+    if not built:
+        pytest.skip("web/ui/dist is not built")
+    r = client.get(f"/assets/{built[0].name}")
+    assert r.status_code == 200 and "immutable" in r.headers["cache-control"]
+    assert client.get("/assets/no-such-file-x1.js").status_code == 404      # a 404, never index.html as a script
+    r = client.get("/")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
 
 
 # ------------------------------------------------------------------ scan
@@ -713,7 +748,7 @@ def test_fyers_status_never_leaks_secrets(mclient, monkeypatch, env):
     text = json.dumps(body)
     assert "supersecret" not in text and "tok-SECRET-123" not in text and "ABCD1234EF" not in text
     assert body["client_id_masked"] == "ABCD****-100" and body["token_present"] and not body["logged_in_today"]
-    assert body["login_modes"] == ["paste", "window"]
+    assert body["login_modes"] == ["direct", "paste", "window"]
 
 
 def test_fyers_status_says_when_rate_limit_protection_is_on(mclient, monkeypatch, env):
@@ -791,6 +826,163 @@ def test_fyers_paste_login_complete_writes_token(mclient, env, monkeypatch):
     done = mclient.post("/api/fyers/login/complete", json={"redirect_url": f"http://x/?auth_code=C&state={state}"},
                         headers=GUARD).json()
     assert done["ok"] is True and done["user_name"] is None and done["status"]["verified"] is None
+
+
+def _fake_fyers(monkeypatch, redirect: str) -> dict:
+    """Fyers app credentials in the environment and a Fyers that never leaves the test."""
+    from web.api.services import fyers_svc
+    monkeypatch.setenv("FYERS_CLIENT_ID", "ABCD1234EF-100")
+    monkeypatch.setenv("FYERS_SECRET_KEY", "s3cret")
+    monkeypatch.setenv("FYERS_REDIRECT_URI", redirect)
+
+    class FakeSession:
+        def __init__(self, **kw):
+            self.kw = kw
+
+        def generate_authcode(self):
+            return "https://api-t1.fyers.in/api/v3/generate-authcode?state=" + self.kw["state"]
+
+    import fyers_apiv3.fyersModel as fm
+    monkeypatch.setattr(fm, "SessionModel", FakeSession)
+    exchanged: dict = {}
+
+    def exchange(session, code):
+        exchanged["code"] = code
+        return {"access_token": "NEWTOKEN"}
+    monkeypatch.setattr(fyers_svc, "_exchange_code", exchange)
+    monkeypatch.setattr(fyers_svc.providers.FyersProvider, "__init__", lambda self, *a, **k: None)
+    monkeypatch.setattr(fyers_svc, "_profile", lambda p: (True, "Test User"))
+    return exchanged
+
+
+def test_fyers_one_click_login_on_the_apps_own_callback(mclient, env, monkeypatch):
+    """The Fyers app's Redirect URL is this app's callback: logging in on the Fyers tab is all it takes. Only the
+    login started here (its random state) is accepted, once."""
+    from web.api.services import fyers_svc
+    exchanged = _fake_fyers(monkeypatch, fyers_svc.APP_CALLBACK)
+    token_file = env / "data" / "fyers_token.json"
+    before = token_file.read_text(encoding="utf-8") if token_file.exists() else None
+    st = get_ok(mclient, "/api/fyers/status", M.FyersStatus)
+    assert st["direct_mode"] == "app" and st["callback_url"] == "http://127.0.0.1:8600/fyers/callback"
+    r = mclient.post("/api/fyers/login", json={"mode": "direct"}, headers=GUARD).json()
+    M.FyersLoginResponse.model_validate(r)
+    assert r["mode"] == "direct" and r["capture"] == "app"
+    state = r["login_url"].split("state=")[1]
+
+    forged = mclient.get("/fyers/callback?s=ok&code=200&auth_code=EVIL&state=forged")   # a link from another site
+    assert forged.status_code == 400 and "Security check failed" in forged.text
+    assert (token_file.read_text(encoding="utf-8") if token_file.exists() else None) == before
+
+    ok = mclient.get(f"/fyers/callback?s=ok&code=200&auth_code=C&state={state}")
+    assert ok.status_code == 200 and "Logged in to Fyers as Test User" in ok.text
+    assert ok.headers["cache-control"] == "no-store" and ok.headers["content-type"].startswith("text/html")
+    assert exchanged["code"] == "C" and json.loads(token_file.read_text(encoding="utf-8"))["access_token"] == "NEWTOKEN"
+    assert "NEWTOKEN" not in ok.text
+    assert get_ok(mclient, "/api/fyers/status", M.FyersStatus)["logged_in_today"]
+
+    again = mclient.get(f"/fyers/callback?s=ok&code=200&auth_code=C&state={state}")      # single use
+    assert again.status_code == 400 and "expired" in again.text
+    err = mclient.get("/fyers/callback?s=error&message=<b>Invalid app</b>")
+    assert err.status_code == 400 and "&lt;b&gt;Invalid app&lt;/b&gt;" in err.text and "<b>Invalid" not in err.text
+
+
+def test_fyers_one_click_login_on_a_free_local_port(mclient, env, monkeypatch):
+    """Another local Redirect URL whose port is free: a one-shot listener catches the redirect there."""
+    from web.api.services import fyers_svc
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    _fake_fyers(monkeypatch, f"http://127.0.0.1:{port}/cb")
+    assert get_ok(mclient, "/api/fyers/status", M.FyersStatus)["direct_mode"] == "listener"
+    r = mclient.post("/api/fyers/login", json={"mode": "direct"}, headers=GUARD).json()
+    assert r["mode"] == "direct" and r["capture"] == "listener"
+    state = r["login_url"].split("state=")[1]
+    assert requests.get(f"http://127.0.0.1:{port}/other?auth_code=C&state={state}", timeout=10).status_code == 404
+    got = requests.get(f"http://127.0.0.1:{port}/cb?auth_code=C&state={state}", timeout=10)
+    assert got.status_code == 200 and "Logged in to Fyers as Test User" in got.text
+    assert json.loads((env / "data" / "fyers_token.json").read_text(encoding="utf-8"))["access_token"] == "NEWTOKEN"
+    t = fyers_svc._listener.get("thread")
+    if t is not None:
+        t.join(timeout=5)
+    assert fyers_svc._listener["server"] is None and fyers_svc._port_free("127.0.0.1", port)   # the listener is gone
+
+
+def test_fyers_one_click_falls_back_to_paste_when_the_port_is_taken(mclient, env, monkeypatch):
+    """Docker (or anything) on the Redirect URL's port gets Fyers' redirect, not this app: paste the address."""
+    busy = socket.socket()
+    busy.bind(("127.0.0.1", 0))
+    busy.listen(1)
+    try:
+        _fake_fyers(monkeypatch, f"http://127.0.0.1:{busy.getsockname()[1]}/api/v1/auth/callback")
+        assert get_ok(mclient, "/api/fyers/status", M.FyersStatus)["direct_mode"] == "paste"
+        r = mclient.post("/api/fyers/login", json={"mode": "direct"}, headers=GUARD).json()
+        assert r["mode"] == "paste" and r["capture"] == "paste" and any("paste" in i for i in r["instructions"])
+    finally:
+        busy.close()
+    from web.api.services import fyers_svc
+    assert fyers_svc.capture_mode("https://example.com/cb") == "paste"
+    assert fyers_svc.capture_mode("http://127.0.0.1:8600/settings") == "paste"           # the app's own port, not its callback
+    assert fyers_svc.capture_mode("http://localhost:8600/fyers/callback/") == "app"
+
+
+def test_fyers_direct_setup_sets_only_the_redirect_line(mclient, env, monkeypatch):
+    from web.api.services import fyers_svc
+    monkeypatch.setenv("FYERS_REDIRECT_URI", "http://127.0.0.1:8000/api/v1/auth/callback")
+    (env / ".env").write_text("# my settings\nFYERS_CLIENT_ID=ABCD1234EF-100\nFYERS_SECRET_KEY=s3cret\n"
+                              "FYERS_REDIRECT_URI=http://127.0.0.1:8000/api/v1/auth/callback\nTELEGRAM_CHAT_ID=42\n",
+                              encoding="utf-8")
+    _err(mclient.post("/api/fyers/direct-setup"), 403, "CSRF")
+    r = mclient.post("/api/fyers/direct-setup", headers=GUARD)
+    assert r.status_code == 200, r.text
+    st = M.FyersStatus.model_validate(r.json())
+    assert st.direct_mode == "app" and st.redirect_uri == fyers_svc.APP_CALLBACK
+    assert (env / ".env").read_text(encoding="utf-8").splitlines() == [
+        "# my settings", "FYERS_CLIENT_ID=ABCD1234EF-100", "FYERS_SECRET_KEY=s3cret",
+        "FYERS_REDIRECT_URI=http://127.0.0.1:8600/fyers/callback", "TELEGRAM_CHAT_ID=42"]
+    assert "s3cret" not in r.text
+
+
+def test_fyers_callback_port_matches_the_server():
+    """The callback Fyers is told about must be where web/serve.py actually listens."""
+    import re as _re
+    from web.api.services import fyers_svc
+    serve = (Path(__file__).resolve().parent.parent / "web" / "serve.py").read_text(encoding="utf-8")
+    m = _re.search(r'HOST, PORT = "127\.0\.0\.1", (\d+)', serve)
+    assert m and int(m.group(1)) == fyers_svc.APP_PORT
+
+
+def test_automation_api(mclient, monkeypatch):
+    from web.api.services import automation_svc as auto
+    monkeypatch.setattr(auto.os, "name", "nt")
+    monkeypatch.setattr(auto.subprocess, "run", lambda args, **kw: SimpleNamespace(returncode=1, stdout="", stderr="not found"))
+    auto._cache.update(at=0.0, status=None)
+    try:
+        st = get_ok(mclient, "/api/automation", M.AutomationStatus)
+        assert st["available"] and st["missing"] == len(auto.JOBS) and not any(j["registered"] for j in st["jobs"])
+        _err(mclient.post("/api/automation/setup"), 403, "CSRF")
+    finally:
+        auto._cache.update(at=0.0, status=None)
+
+
+def test_intraday_history_download_needs_todays_fyers_login(mclient, env, monkeypatch):
+    from web.api.services import intraday_job
+    started = []
+    monkeypatch.setattr(intraday_job.subprocess, "Popen", lambda *a, **k: started.append(a) or SimpleNamespace(poll=lambda: None, pid=1))
+    e = _err(mclient.post("/api/intraday/run", json={"backfill": True}, headers=GUARD), 409, "FYERS_LOGIN_REQUIRED")
+    assert "Log in with Fyers" in e["hint"] and not started
+
+
+def test_intraday_results_carry_the_before_costs_trade(mclient, env):
+    """The before-costs average trade and the FYERS coverage reach the page (they explain why no strategy works)."""
+    f = env / "data" / "results" / "intraday.json"
+    raw = json.loads(f.read_text(encoding="utf-8"))
+    raw["strategies"][0]["metrics"]["avg_trade_gross_pct"] = 0.319
+    raw["data"]["fyers_coverage"] = {"symbols": 0, "from": None, "to": None}
+    f.write_text(json.dumps(raw), encoding="utf-8")
+    d = get_ok(mclient, "/api/intraday", M.IntradayResponse)
+    assert d["strategies"][0]["metrics"]["avg_trade_gross_pct"] == 0.319
+    assert d["data"]["fyers_coverage"] == {"symbols": 0, "from": None, "to": None}
 
 
 def test_profile_check_tells_rejected_from_unknown():

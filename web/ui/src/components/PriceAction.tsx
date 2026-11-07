@@ -48,7 +48,7 @@ const VERDICT: Record<LvVerdict, { label: string; cls: string }> = {
   too_few: { label: 'too few cases', cls: 'border-line text-faint' },
 }
 
-function EvidenceBadge({ e }: { e: LvEvidence | null }) {
+export function EvidenceBadge({ e }: { e: LvEvidence | null }) {
   if (!e) return <span className="text-2xs text-faint" title="The pattern study has not run yet (python -m scanner.pattern_study)">untested</span>
   const v = VERDICT[e.verdict]
   return (

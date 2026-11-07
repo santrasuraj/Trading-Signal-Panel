@@ -10,6 +10,9 @@
   python intraday_sync.py --options       option chains from NSE every options.interval_seconds until 15:31
                                           (outside the session: once, the last chains)
   python intraday_sync.py --fno           F&O positioning: participant OI and the F&O bhavcopy, last 30 days not stored
+  python intraday_sync.py --ai-forecast   Claude's option-chain forecasts: store the day's last chains, collect
+                                          finished answers, send tonight's batch (needs ANTHROPIC_API_KEY in .env)
+  python intraday_sync.py --ai-collect    only collect finished forecast answers (the 09:12 task does this)
   python intraday_sync.py --usage         FYERS calls used today vs the limits
 Options combine, e.g. --archive --run (used by the 15:45 scheduled task).
 Scheduled runs (pythonw, no console) write their output to data/logs/intraday.log.
@@ -96,6 +99,9 @@ def main() -> int:
                     help="option chains from NSE every options.interval_seconds in the session (else once)")
     ap.add_argument("--fno", action="store_true",
                     help="F&O positioning from NSE's end-of-day files (participant OI, futures build-ups)")
+    ap.add_argument("--ai-forecast", action="store_true",
+                    help="Claude's option-chain forecasts: store the last chains, collect answers, send tonight's batch")
+    ap.add_argument("--ai-collect", action="store_true", help="collect finished Claude forecast answers")
     ap.add_argument("--usage", action="store_true", help="FYERS calls used today vs the limits (the default)")
     ap.add_argument("--days", type=int, default=None, help="history to keep (default: intraday.history_days)")
     args = ap.parse_args()
@@ -115,6 +121,18 @@ def _run(args) -> int:
     cfg = load_config()
     plan = str(cfg.get("fyers_plan", "standard"))
     jobs = (args.backfill, args.archive, args.live, args.run, args.signals, args.footprints)
+    if args.ai_forecast or args.ai_collect:            # 19:30: --fno --ai-forecast; 09:12: --options --ai-collect
+        code = 0
+        if args.fno:                                    # positioning first: tonight's forecast reads it
+            from scanner import fno
+            rep = fno.refresh(log=lambda m: print(m, flush=True))
+            for e in rep["errors"] + rep["pending"]:
+                print(f"  ! {e}", flush=True)
+            code = 0 if rep["added"] or not rep["errors"] else 1
+            args.fno = False
+        code = max(code, _ai(cfg, submit=args.ai_forecast))
+        if not any((*jobs, args.options)):
+            return code
     if args.fno and not any((*jobs, args.options)):     # no price store needed
         from scanner import fno
         rep = fno.refresh(log=lambda m: print(m, flush=True))
@@ -175,6 +193,29 @@ def _run(args) -> int:
         footprints.cleanup_old_prints()
     if args.options:
         return _options(cfg)
+    return 0
+
+
+def _ai(cfg, submit: bool) -> int:
+    """Claude's option-chain forecasts (web/api/services/forecast_svc.py). The evening run first stores the day's last
+    chains (NSE serves them after the close), so a forecast never reads an old chain as today's."""
+    from web.api.errors import ApiException
+    from web.api.services import forecast_svc
+    log = lambda m: print(m, flush=True)            # noqa: E731
+    try:
+        if submit:
+            from scanner import options
+            rep = options.refresh(cfg, log=log)
+            for e in rep["errors"]:
+                print(f"  ! {e}", flush=True)
+        out = forecast_svc.run_job(submit=submit, log=log)
+    except ApiException as e:                       # no key yet, or Anthropic said no: not a failed job
+        print(f"AI forecast: {e.message} {e.hint or ''}".strip(), flush=True)
+        return 0 if e.code == "FEATURE_UNAVAILABLE" else 1
+    except Exception:                               # never stops the job it rides with (09:12 option chains)
+        print("AI forecast failed:\n" + traceback.format_exc(), flush=True)
+        return 1
+    print(f"AI forecast: {json.dumps(out, default=str)}", flush=True)
     return 0
 
 

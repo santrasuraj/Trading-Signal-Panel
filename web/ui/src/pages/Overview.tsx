@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertOctagon, AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Info, Minus, TrendingDown, TrendingUp } from 'lucide-react'
 import { useBreadth, useOverview, usePaper, useStrategies } from '@/api/hooks'
-import type { Alert, Horizon, IndexTile, Mover, OverviewResponse, ResultsEvent, StrategySummary } from '@/api/types'
+import type { Alert, Change, Horizon, IndexTile, Mover, OverviewResponse, ResultsEvent, StrategySummary } from '@/api/types'
 import { EvidenceChip, HorizonChip, StatusDot, TonePill, WarnChip } from '@/components/badges'
 import { LinesChart, type LineDef } from '@/components/charts/LinesChart'
 import { AdBar, Sparkline } from '@/components/charts/svg'
@@ -16,6 +16,7 @@ import { Pct, Price, Pts } from '@/components/num'
 import { Card, Chip, Tabs } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { date, daysUntil, keepDatesTogether, money, num, pct } from '@/lib/format'
+import { groupChanges, groupResultsAlerts } from '@/lib/overview'
 import { useIsMobile } from '@/lib/useMedia'
 import { lostMoney } from '@/lib/vocab'
 
@@ -24,9 +25,9 @@ function RegimeCard({ o }: { o: OverviewResponse }) {
   const Icon = m.label === 'Bullish' ? TrendingUp : m.label === 'Bearish' ? TrendingDown : Minus
   const tone = m.label === 'Bullish' ? 'text-profit' : m.label === 'Bearish' ? 'text-loss' : 'text-warn'
   return (
-    // flex column: beside the taller tiles + breadth column (xl) the facts sit at the card's bottom, level with the
-    // breadth chart, instead of leaving an empty block under them
-    <Card title="Market regime" subtitle="Nifty 50 vs its 200-day average, and breadth" className="flex h-full flex-col" bodyClass="flex flex-1 flex-col">
+    // Beside the breadth chart (xl) both cards are about as tall, so the facts follow the advice directly: no spacer
+    // pushing them to the bottom (it left an empty block in the middle of the card).
+    <Card title="Market regime" subtitle="Nifty 50 vs its 200-day average, and breadth" className="h-full">
       <div className="flex items-center gap-3">
         <span className={cn('grid h-11 w-11 place-items-center rounded-lg', m.label === 'Bullish' ? 'tint-profit' : m.label === 'Bearish' ? 'tint-loss' : 'tint-warn')}>
           <Icon className={cn('h-6 w-6', tone)} strokeWidth={2.25} />
@@ -41,9 +42,8 @@ function RegimeCard({ o }: { o: OverviewResponse }) {
         {m.high_vix && <Chip className="tint-warn ml-auto text-warn" icon={<AlertTriangle className="h-3 w-3" />}>High volatility</Chip>}
       </div>
       <p className="mt-3 text-[13px] leading-5 text-muted">{m.advice}</p>
-      <div className="min-h-[16px] flex-1" aria-hidden />
       {/* full-width card (below xl): the three facts sit side by side instead of stretching across the page */}
-      <div className="grid gap-3 border-t border-line pt-3 sm:grid-cols-3 sm:gap-8 xl:grid-cols-1 xl:gap-3">
+      <div className="mt-4 grid gap-3 border-t border-line pt-3 sm:grid-cols-3 sm:gap-8 xl:grid-cols-1 xl:gap-3">
         <div className="flex items-baseline justify-between text-xs">
           <span className="text-muted">Stocks above 50-DMA</span>
           <span className="num text-[15px] font-semibold text-fg">{pct(m.breadth_50, { signed: false })}</span>
@@ -97,7 +97,7 @@ function BreadthCard() {
     ]
   }, [q.data])
   return (
-    <Card title={<>Breadth · % of stocks above their <span className="whitespace-nowrap">50-DMA</span></>} subtitle="1 year; Nifty 50 and its 200-DMA on the left scale" right={<MoreLink to="/market/breadth">Breadth</MoreLink>} flush>
+    <Card title={<>Breadth · % of stocks above their <span className="whitespace-nowrap">50-DMA</span></>} subtitle="1 year; Nifty 50 and its 200-DMA on the left scale" right={<MoreLink to="/market/breadth">Breadth</MoreLink>} flush className="h-full">
       {q.error ? <ErrorState error={q.error} onRetry={() => void q.refetch()} compact /> : !q.data || !lines ? <SkeletonChart height={220} /> : <LinesChart t={q.data.t} lines={lines} height={220} />}
     </Card>
   )
@@ -164,13 +164,18 @@ const SEV: Record<Alert['severity'], { icon: typeof Info; cls: string; label: st
   good: { icon: CheckCircle2, cls: 'text-profit', label: 'Good' },
 }
 
-function AlertsCard({ alerts }: { alerts: Alert[] }) {
+const ALERTS_SHOWN = 5
+
+function AlertsCard({ alerts: raw }: { alerts: Alert[] }) {
   const [all, setAll] = useState(false)
-  const shown = all ? alerts : alerts.slice(0, 6)
+  const alerts = useMemo(() => groupResultsAlerts(raw), [raw])
+  const shown = all ? alerts : alerts.slice(0, ALERTS_SHOWN)
   return (
-    <Card title={<>Alerts <span className="num ml-1 text-muted">{alerts.length}</span></>} flush className="h-full">
+    <Card title={<>Alerts <span className="num ml-1 text-muted">{alerts.length}</span></>} flush>
       {alerts.length === 0 ? (
-        <EmptyState compact title="Nothing needs attention" icon={<CheckCircle2 className="h-5 w-5 text-profit" />}>No holding, order, data or login issues.</EmptyState>
+        <div className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-muted">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-profit" />Nothing needs attention: no holding, order, data or login issues.
+        </div>
       ) : (
         <ul className="divide-y divide-line">
           {shown.map((a) => {
@@ -181,14 +186,14 @@ function AlertsCard({ alerts }: { alerts: Alert[] }) {
                 <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', s.cls)} aria-label={s.label} />
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] text-fg">{a.title}</div>
-                  {a.detail && <div className="mt-0.5 line-clamp-2 text-xs text-muted">{a.detail}</div>}
+                  {a.detail && <div className="mt-0.5 line-clamp-3 text-xs text-muted">{a.detail}</div>}
                 </div>
                 {a.href && <ArrowRight className="mt-1 h-3.5 w-3.5 shrink-0 text-faint" />}
               </div>
             )
             return <li key={a.id}>{a.href ? <Link to={a.href} className="block hover:bg-raised/60">{body}</Link> : body}</li>
           })}
-          {alerts.length > 6 && (
+          {alerts.length > ALERTS_SHOWN && (
             <li><button type="button" onClick={() => setAll(!all)} className="w-full px-4 py-2 text-left text-xs font-medium text-accent hover:underline">{all ? 'Show fewer' : `Show all ${alerts.length}`}</button></li>
           )}
         </ul>
@@ -303,7 +308,7 @@ function ResultsCard({ events }: { events: ResultsEvent[] }) {
   }, [events])
   const more = events.length - shown.length
   return (
-    <Card title="Results · next 7 days" subtitle="Held, ordered or top-ranked stocks" right={<MoreLink to="/market/results">Calendar</MoreLink>} flush>
+    <Card title="Results · next 7 days" subtitle="Held, ordered or top-ranked stocks" right={<MoreLink to="/market/results">Calendar</MoreLink>} flush className="h-full">
       {events.length === 0 ? (
         <EmptyState compact title="No relevant results this week" />
       ) : (
@@ -330,41 +335,73 @@ function ResultsCard({ events }: { events: ResultsEvent[] }) {
   )
 }
 
+const CHANGES_SHOWN = 5
+const SYMBOLS_SHOWN = 4
+
 function ChangesCard({ c }: { c: OverviewResponse['changes'] }) {
+  const [all, setAll] = useState(false)
+  const lines = useMemo(() => groupChanges(c.items), [c.items])
+  const shown = all ? lines : lines.slice(0, CHANGES_SHOWN)
+  const dot = (k: Change['kind']) => (k === 'new_order' ? 'bg-warn' : k === 'regime' ? 'bg-info' : k === 'position_opened' ? 'bg-profit' : k === 'position_closed' ? 'bg-loss' : 'bg-muted')
   return (
-    <Card title="Since last scan" subtitle={c.since_data_date ? `vs the scan of ${date(c.since_data_date)} prices` : 'vs the previous trading day'} flush>
-      {c.items.length === 0 ? (
+    <Card title="Since last scan" subtitle={c.since_data_date ? `vs the scan of ${date(c.since_data_date)} prices` : 'vs the previous trading day'} flush className="h-full">
+      {lines.length === 0 ? (
         <EmptyState compact title={c.since_data_date ? 'Nothing changed' : 'No earlier scan to compare'}>
           {c.since_data_date ? 'Same statuses, regime, orders and model holdings.' : 'The comparison starts after scans on two different trading days.'}
         </EmptyState>
       ) : (
         <ul className="divide-y divide-line/70">
-          {c.items.map((it, i) => (
+          {shown.map((it, i) => (
             <li key={i} className="flex items-start gap-2 px-4 py-2 text-[13px]">
-              <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', it.kind === 'new_order' ? 'bg-warn' : it.kind === 'regime' ? 'bg-info' : it.kind === 'position_opened' ? 'bg-profit' : it.kind === 'position_closed' ? 'bg-loss' : 'bg-muted')} />
-              {it.strategy_key ? <Link className="hover:underline" to={it.symbol ? `/chart/${it.symbol}` : `/strategies/${it.strategy_key}`}>{it.text}</Link> : <span>{it.text}</span>}
+              <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', dot(it.kind))} />
+              {'symbols' in it ? (
+                <span className="min-w-0">
+                  <Link className="hover:underline" to={`/strategies/${it.strategy_key}`}>{it.name}</Link>
+                  {' '}{it.kind === 'position_opened' ? 'bought' : 'sold'}{it.symbols.length > 1 ? ` ${it.symbols.length}` : ''}:{' '}
+                  {it.symbols.slice(0, SYMBOLS_SHOWN).map((s, k) => (
+                    <span key={s}>{k > 0 && ', '}<Link className="font-medium hover:underline" to={`/chart/${s}`}>{s}</Link></span>
+                  ))}
+                  {it.symbols.length > SYMBOLS_SHOWN && <span className="text-muted"> +{it.symbols.length - SYMBOLS_SHOWN} more</span>}
+                </span>
+              ) : it.strategy_key ? (
+                <Link className="hover:underline" to={it.symbol ? `/chart/${it.symbol}` : `/strategies/${it.strategy_key}`}>{it.text}</Link>
+              ) : <span>{it.text}</span>}
             </li>
           ))}
+          {lines.length > CHANGES_SHOWN && (
+            <li><button type="button" onClick={() => setAll(!all)} className="w-full px-4 py-2 text-left text-xs font-medium text-accent hover:underline">{all ? 'Show fewer' : `Show all ${lines.length}`}</button></li>
+          )}
         </ul>
       )}
     </Card>
   )
 }
 
+/** Paper portfolios, best first, two columns on wide screens. A verdict every row shares ("Too early to judge") is
+ *  said once in the subtitle instead of 17 times, and a portfolio with nothing bought yet says "all cash" - that is
+ *  why several show the same small return (the cash yield). */
 function PaperStrip({ o }: { o: OverviewResponse }) {
   const minDays = usePaper().data?.min_days_to_judge ?? 21   // server config, same threshold as the Paper page
-  if (!o.paper.length) return null
+  const rows = useMemo(() => [...o.paper].sort((a, b) => (b.return_pct ?? -Infinity) - (a.return_pct ?? -Infinity)), [o.paper])
+  if (!rows.length) return null
+  const labels = rows.map((p) => verdictLabel(p, minDays))
+  const same = labels.every((l) => l === labels[0])
+  const days = Math.max(...rows.map((p) => p.days))
+  const subtitle = same && labels[0] === 'Too early to judge'
+    ? `Orders filled at the next official open with full charges · too early to judge: ${days} of the ${minDays} trading days a verdict needs`
+    : 'Orders filled at the next official open with full charges'
   return (
-    <Card title="Paper trading (live proof)" subtitle="Journaled orders filled at the next official open with full charges" right={<MoreLink to="/paper">Paper</MoreLink>} flush>
-      <ul className="divide-y divide-line/70">
-        {o.paper.map((p) => (
-          <li key={p.key}>
-            <Link to={`/paper/${p.key}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-[13px] hover:bg-raised">
-              <span className="min-w-[180px] flex-1 font-medium">{p.name}</span>
-              <span className="num text-muted">Paper <Pct v={p.return_pct} /></span>
-              <span className="num text-muted">vs N500 <Pct v={p.n500_pct} /></span>
-              <span className="num text-muted">{p.days} days</span>
-              <TonePill tone={p.level}>{verdictLabel(p, minDays)}</TonePill>
+    <Card title="Paper trading (live proof)" subtitle={subtitle} right={<MoreLink to="/paper">Paper</MoreLink>} flush>
+      <ul className="grid divide-y divide-line/70 xl:grid-cols-2 xl:gap-x-6 xl:divide-y-0 xl:px-1">
+        {rows.map((p, i) => (
+          <li key={p.key} className={cn('xl:border-line/70', i >= 2 && 'xl:border-t')}>
+            <Link to={`/paper/${p.key}`} className="flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-raised xl:px-3">
+              <span className="min-w-0 flex-1 truncate font-medium" title={p.name}>{p.name}</span>
+              {p.open === 0 && p.pending === 0 && <span className="shrink-0 rounded border border-line px-1 text-2xs text-faint" title="No position open yet: the money waits in cash">all cash</span>}
+              <span className="num w-[68px] shrink-0 text-right"><Pct v={p.return_pct} /></span>
+              <span className="num w-[92px] shrink-0 text-right text-xs text-muted max-sm:hidden">N500 <Pct v={p.n500_pct} /></span>
+              <span className="num w-[52px] shrink-0 text-right text-xs text-faint">{p.days} d</span>
+              {!same && <TonePill tone={p.level}>{labels[i]}</TonePill>}
             </Link>
           </li>
         ))}
@@ -391,26 +428,26 @@ export default function Overview() {
           <div className="card xl:col-span-12"><SkeletonRows rows={4} /></div>
         </div>
       ) : (
-        // 12-column split from xl only (spec 4.4); below xl every card is full width.
+        // 12-column split from xl only (spec 4.4); below xl every card is full width. Each row pairs cards of about
+        // the same length and the cards of a row stretch to one height, so no row ends in a ragged edge or a card
+        // that is mostly empty: index tiles | regime + breadth | alerts (full width: one alert stays one slim line)
+        // | orders | strategy pulse + since last scan | results, gainers, losers | paper.
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
-          <div className="min-w-0 xl:col-span-4"><RegimeCard o={o} /></div>
-          <div className="flex min-w-0 flex-col gap-3 xl:col-span-8">
-            <div className="qd-tiles min-w-0">
-              <div className="qd-tiles-grid scroll-x grid snap-x grid-cols-2 gap-3 max-md:flex">
-                {o.index_tiles.map((t) => <Tile key={t.name} t={t} />)}
-              </div>
+          <div className="qd-tiles min-w-0 xl:col-span-12">
+            <div className="qd-tiles-grid scroll-x no-scrollbar grid snap-x grid-cols-2 gap-3 max-md:flex">
+              {o.index_tiles.map((t) => <Tile key={t.name} t={t} />)}
             </div>
-            <BreadthCard />
           </div>
+          <div className="min-w-0 xl:col-span-4"><RegimeCard o={o} /></div>
+          <div className="min-w-0 xl:col-span-8"><BreadthCard /></div>
+          <div className="min-w-0 xl:col-span-12"><AlertsCard alerts={o.alerts} /></div>
           <div className="min-w-0 xl:col-span-12"><OrdersCard o={o} /></div>
-          <div className="min-w-0 xl:col-span-6"><AlertsCard alerts={o.alerts} /></div>
-          <div className="min-w-0 xl:col-span-6"><PulseCard items={o.strategy_pulse} pit={o.as_of.backtest_universe === 'point_in_time'} /></div>
-          {/* items-start: a 5-row list is not stretched to the height of its taller neighbour */}
-          <div className="grid min-w-0 grid-cols-1 items-start gap-3 sm:grid-cols-2 xl:col-span-12 xl:grid-cols-4">
-            <ChangesCard c={o.changes} />
+          <div className="min-w-0 xl:col-span-7"><PulseCard items={o.strategy_pulse} pit={o.as_of.backtest_universe === 'point_in_time'} /></div>
+          <div className="min-w-0 xl:col-span-5"><ChangesCard c={o.changes} /></div>
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:col-span-12 xl:grid-cols-3">
+            <ResultsCard events={o.results_soon} />
             <MoverList title="Top gainers" rows={o.movers.gainers} kind="up" />
             <MoverList title="Top losers" rows={o.movers.losers} kind="down" />
-            <ResultsCard events={o.results_soon} />
           </div>
           <div className="min-w-0 xl:col-span-12"><PaperStrip o={o} /></div>
           <div className="min-w-0 xl:col-span-12"><BiasNote asOf={o.as_of} /></div>

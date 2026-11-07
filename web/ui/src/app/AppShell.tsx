@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { WifiOff } from 'lucide-react'
-import { useStatus } from '@/api/hooks'
+import { useAutomation, useAutomationSetup, useStatus } from '@/api/hooks'
 import { isFailure } from '@/api/client'
 import { Banner, Skeleton } from '@/components/feedback'
 import { FyersLoginDialog } from '@/components/FyersLogin'
@@ -70,6 +70,11 @@ function GlobalBanners() {
   const [legacyDismissed, dismissLegacy] = useDismissed(legacyKey)
   const loginKey = `login:${s?.clock.now.slice(0, 10) ?? ''}`
   const [loginDismissed, dismissLogin] = useDismissed(loginKey)
+  const auto = useAutomation().data
+  const setupJobs = useAutomationSetup()
+  const toast = useToast()
+  const missingJobs = auto?.available ? auto.jobs.filter((j) => !j.registered).map((j) => j.name.replace(/^NSE Scanner /, '')) : []
+  const [jobsDismissed, dismissJobs] = useDismissed(`jobs:${missingJobs.join(',')}:${s?.clock.now.slice(0, 10) ?? ''}`)
   const offline = error && isFailure(error) && error.code === 'OFFLINE'
   const items: React.ReactNode[] = []
   if (offline || (error && !s)) {
@@ -104,6 +109,20 @@ function GlobalBanners() {
     items.push(
       <Banner key="login" tone="warn" onDismiss={dismissLogin} action={<Button size="sm" onClick={() => setFyersLogin(true)}>Log in</Button>}>
         Fyers is not logged in today: live prices come from Yahoo (~15 min delayed).
+      </Banner>,
+    )
+  }
+  if (missingJobs.length > 0 && !jobsDismissed) {
+    const go = () => setupJobs.mutate(undefined, {
+      onSuccess: (r) => toast(r.ok
+        ? { tone: 'good', title: 'Automatic jobs are set up', detail: 'Scans, option chains, F&O, forecasts and studies now run by themselves.' }
+        : { tone: 'bad', title: 'Some jobs could not be set up', detail: 'Settings › Automatic jobs shows what Windows said.' }),
+      onError: (e) => toast({ tone: 'bad', title: isFailure(e) ? e.message : 'Could not set up the jobs', detail: isFailure(e) ? e.hint ?? undefined : undefined }),
+    })
+    items.push(
+      <Banner key="jobs" tone="warn" onDismiss={dismissJobs} action={<Button size="sm" loading={setupJobs.isPending} onClick={go}>Set up now</Button>}>
+        <span className="font-medium">{missingJobs.length} automatic job{missingJobs.length > 1 ? 's are' : ' is'} not set up</span>{' '}
+        <span className="text-muted">({missingJobs.join(', ')}). One click sets everything up; no command to run.</span>
       </Banner>,
     )
   }

@@ -179,6 +179,22 @@ def test_min_price_filter_can_use_prices_as_traded(frames_factory):
     assert as_traded["A"].iloc[20:].all()
 
 
+def test_etfs_are_exempt_from_the_stock_filters(frames_factory):
+    """GOLDBEES traded below Rs 50 until 2023 and JUNIORBEES under Rs 5 crore a day for years: the stock price
+    and turnover filters must not sell an ETF strategy out of its own assets. A stock at the same price and
+    turnover stays filtered, and an ETF is still untradable before it has a price."""
+    from scanner.strategies import tradable_mask
+    fr = frames_factory({"STOCK": [30.0] * 40, "ETF": [np.nan] * 10 + [30.0] * 30}, volume=1_000)
+    f = Factors(panel_from_wide(fr), etfs={"ETF"})
+    t = tradable_mask(f, 50, 5)
+    assert not t["STOCK"].any()
+    assert not t["ETF"].iloc[:10].any() and t["ETF"].iloc[10:].all()
+    # on a point-in-time panel an ETF is never a universe member, and stays tradable
+    uni = pd.DataFrame(False, index=f.p.dates, columns=f.p.close.columns)
+    fp = Factors(panel_from_wide(fr, universe=uni), etfs={"ETF"})
+    assert tradable_mask(fp, 50, 5)["ETF"].iloc[10:].all()
+
+
 # ------------------------------------------------------------------ engine
 def _flat_market(frames_factory, n=300, price=100.0):
     fr = frames_factory({"A": [price] * n, "B": [price] * n})

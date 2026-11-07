@@ -18,7 +18,7 @@ A personal, evidence-based tool for the Indian stock market. Every day it:
 
 | When (IST) | What to do |
 |---|---|
-| Every trading morning, after 6 AM (best before 9:14 AM) | **🔑 Log in to Fyers.** Use **Log in to Fyers** in Quant Desk (Settings › Fyers), or double-click `1_login.bat`. A token made before 6 AM stops working at 6 AM, and the 9:14 intraday live feed waits for the login. SEBI rules require a daily login since April 2026. |
+| Every trading morning, after 6 AM (best before 9:14 AM) | **🔑 Log in to Fyers.** Click the **Fyers** chip in Quant Desk's top bar, then **Log in with Fyers** (no command needed; see below). A token made before 6 AM stops working at 6 AM, and the 9:14 intraday live feed waits for the login. SEBI rules require a daily login since April 2026. |
 | Any time | Double-click **`3_dashboard.bat`** (Quant Desk opens at http://127.0.0.1:8600), then start a scan in **Settings › Scan** (**Full scan**). A scan takes a few minutes because it re-tests every strategy (a re-check without download took about 2.5 minutes on 24 Oct 2026); longer when it downloads new prices. The old Streamlit dashboard (`3b_dashboard_streamlit.bat`) has a **🔄 Run scan now** button. |
 | 3:40 PM / 7:15 PM | Automatic Telegram summaries, if you set them up (section 6). |
 | **After about 7 PM** | **Best time to decide.** NSE's official end-of-day data is published, so signals are final. |
@@ -32,15 +32,17 @@ No demo, sample or simulated data anywhere: every price, volume, open interest a
 or Yahoo. Backtests and paper trading are calculations on those real prices, and every page labels them as such.
 
 ### Fyers login, step by step
-1. Click **Log in to Fyers** in Quant Desk (or double-click `1_login.bat`). The Fyers login page opens.
-2. Log in with your Fyers ID, PIN and TOTP.
-3. Your app's redirect address is `127.0.0.1:8000`, which your Docker setup is also using. So after login the browser may show an error page. **That's fine.** Copy the **full address** from the browser's address bar (it contains `auth_code=`), paste it into Quant Desk's login box (or the `1_login.bat` window), and press Enter.
-4. You'll see "✅ Logged in".
+No command to run: everything happens in Quant Desk.
+1. Click the **Fyers** chip in the top bar (or **Log in** in Settings › Fyers, or the yellow banner), then **Log in with Fyers**. The Fyers login page opens in a new tab.
+2. Log in there with your Fyers ID, PIN and TOTP.
+3. Fyers sends that tab back to your app's Redirect URL:
+   - If that is Quant Desk's own `http://127.0.0.1:8600/fyers/callback`, Quant Desk finishes the login by itself, the Fyers tab says "✓ Logged in" and closes, and the dialog closes. **One click.**
+   - If it is another address on a free port, Quant Desk listens there for the login (also one click).
+   - If it is `127.0.0.1:8000`, which your Docker setup also uses, the browser may show an error or another app's page. **That's fine.** Copy the **full address** from the address bar (it contains `auth_code=`), paste it into the dialog, and click **Complete login**.
 
-`1_login.bat` first tries to catch the redirect itself on that address. If another program (Docker) is using the port it
-says so and asks for the pasted address at once; otherwise it waits up to 5 minutes before asking.
+*To make it one click (one-time setup):* in the [Fyers API dashboard](https://myapi.fyers.in/dashboard), set your app's Redirect URL to `http://127.0.0.1:8600/fyers/callback`, then click **I've changed it in Fyers** in the login dialog (it writes `FYERS_REDIRECT_URI` in `.env` for you). If your Docker app uses the same Fyers app, create a second Fyers app for Quant Desk instead and put its App ID and Secret in `.env`.
 
-*To make login fully automatic:* in the [Fyers API dashboard](https://myapi.fyers.in/dashboard), change your app's Redirect URL to `http://127.0.0.1:8765/fyers/callback`. Then put the same address in `.env` as `FYERS_REDIRECT_URI`.
+`1_login.bat` still works as a fallback when Quant Desk isn't running.
 
 ---
 
@@ -220,7 +222,7 @@ Usage is counted in `data/fyers_usage.json`, which every process shares. If the 
 |---|---|---|
 | Live prices in a scan | FYERS quotes → Yahoo | about 11 per scan (50 symbols per call) |
 | Today's intraday bars | FYERS WebSocket live feed → Yahoo (delayed) | 0 (WebSocket) |
-| Intraday history (1 year) | FYERS → Yahoo (60 days only) | about 600 once (`5_intraday_backfill.bat`, ~14 min), then about 150 a day |
+| Intraday history (1 year) | FYERS → Yahoo (60 days only) | about 600 once (automatic at 15:45 after a Fyers login, or **Download 1 year of FYERS history** on the Intraday page; ~14 min), then about 150 a day |
 | Completed daily candles | NSE official file → Yahoo | 0 (NSE is the exchange's own data) |
 
 ### The survivorship-free backtest universe (`scanner/pit.py`)
@@ -267,7 +269,8 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
 - Every test uses FYERS intraday charges and slippage, squares off at 15:00 for F&O stocks (5 minutes before FYERS' 15:05 MIS cut-off) and 15:15 for others, and taxes profit as speculative business income.
 - **Result so far (60 Yahoo sessions, 29 Jul – 23 Oct 2026):** all nine strategies **lose money after costs**, eight of them by a statistically significant margin. This matches SEBI's July 2024 study, which found that 71% of individual intraday traders lost money.
 - **Three pre-registered research tests** were added on 25 Oct 2026 (large-cap gap fade, stocks-in-play ORB-15, NIFTYBEES last-half-hour momentum; `docs/intraday_data.md` §5). They have no results yet and none is expected to beat Indian MIS costs; they are there to measure that honestly, never to produce orders.
-- **One year of FYERS history** gives a much stronger test. Run `5_intraday_backfill.bat` once after logging in. A daily 15:45 task keeps it growing; FYERS itself only keeps a rolling year.
+- **One year of FYERS history** gives a much stronger test. Nothing to run: the 15:45 task downloads it on the first afternoon you are logged in to Fyers (or click **Download 1 year of FYERS history** on the Intraday page), then keeps it growing; FYERS itself only keeps a rolling year.
+- **Why none of them works:** before costs the average trade makes about nothing (between -0.2% and +0.3%), and brokerage, STT, exchange fees, GST and slippage take 0.15-0.30% a trade. The Intraday page shows both columns. No 200-day or 200-EMA filter is involved.
 - **Live bars:** `4_intraday_live.bat` builds live 5-minute bars from the FYERS WebSocket. The scheduled task starts it at 09:14.
 - **Live signals, only from proven strategies:** every 5 minutes from 09:20 to 15:05 (`intraday_sync.py --signals`), the strategies whose backtest shows a real edge after costs (a profit beyond luck over 40+ sessions) are run on today's bars. Their trades appear on the Signals page, Intraday tab. A strategy that loses money or can't be told from luck never gives a signal; while none qualifies, the tab says so.
 
@@ -320,7 +323,7 @@ backtest in this app shows that PCR, max pain, open-interest levels or candle pa
   20 days, t-statistic on monthly averages. **No pattern beat the average stock after costs (~0.45% round trip).**
   Gap-ups did worse than it (-0.20% over 10 days, t -5.0), ascending-triangle breakouts too (-0.36% over 20 days,
   t -2.2). The closest to an edge, symmetrical-triangle breakouts, made +0.69% in 5 days (t 4.6) - +0.24% after
-  costs, gone by 20 days. Re-run with `python -m scanner.pattern_study` (~17 minutes) to add new months.
+  costs, gone by 20 days. It re-runs by itself every Saturday at 11:00 (an automatic job, ~17 minutes).
 - **Big trades live** (`scanner/fno_live.py`, Options page): the 09:14 live service (FYERS WebSocket, needs
   today's FYERS login) also streams the nearest NIFTY and BANKNIFTY futures and NIFTY's nearest-expiry calls and
   puts within 4 strikes of the money (`live_fno` in `config.yaml`; picked from FYERS' public symbol list). Every
@@ -328,6 +331,20 @@ backtest in this app shows that PCR, max pain, open-interest levels or candle pa
   most likely started it: at the ask a buyer, at the bid a seller (tick rule). Totals per instrument show which side
   was more aggressive today. These 20 symbols come off the 100 the live feed allows, so 80 stocks stay. Not yet
   seen on a live session: the first one after a FYERS login confirms the tick fields.
+- **Claude's forecast** (`scanner/ai_forecast.py`, `web/api/services/forecast_svc.py`, Options page, needs
+  `ANTHROPIC_API_KEY` in `.env`). Claude (Opus 5.5) reads the stored chain near the money, NSE's participant
+  positions, the futures build-up, recent official closes and levels, and the app's tested readings. For the next
+  official close and the expiry close it gives:
+  - the chance the close ends above the spot it saw;
+  - a range for about 2 closes in 3;
+  - the level that would prove it wrong.
+
+  Its answer has a fixed JSON shape. Every forecast is journalled (`data/results/ai_forecasts.json`, with the exact
+  snapshot it read) and scored from NSE's official closes against a coin flip, "always up" and the options-implied
+  1-SD range. The 19:30 task (`intraday_sync.py --fno --ai-forecast`) stores the day's last chains and sends one
+  forecast per `ai_forecast.underlyings` (Batch API, half price); the 09:12 task collects the answers. "Ask Claude
+  now" on the page costs roughly Rs 8-13. A chain older than the last official close is never forecast.
+  **Unproven** until 60+ settled forecasts beat a coin flip beyond luck; it never changes the options verdict.
 
 What no one can show: who is behind a trade while it happens, or when a big trader will exit. NSE names buyers
 and sellers only later (block / bulk deals the same evening, insider disclosures within two days, shareholding
@@ -339,7 +356,7 @@ each quarter: see Smart money).
 
 1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token. Then send any message to your new bot, and message **@userinfobot** to get your chat ID.
 2. Put both in `.env` (`TELEGRAM_BOT_TOKEN=...`, `TELEGRAM_CHAT_ID=...`).
-3. Right-click **`setup_schedule.ps1`** and choose **Run with PowerShell**. This sets up weekday scans at 8:30 AM, 3:40 PM and 7:15 PM that send a summary to your phone, a live scan every 30 minutes from 9:45 AM to 3:15 PM (provisional signals on today's live candle, no Telegram), plus the three intraday jobs (section 5). While the market is open, the top bar and the Signals page also show live prices every 30 seconds (FYERS real time when logged in, else Yahoo ~15 min delayed). Run it again after updating the app, so the tasks get the current settings.
+3. In Quant Desk, open **Settings › Automatic jobs** and click **Set up automatic jobs** (a banner offers the same when a job is missing; no window or command). This sets up weekday scans at 8:30 AM, 3:40 PM and 7:15 PM that send a summary to your phone, a live scan every 30 minutes from 9:45 AM to 3:15 PM (provisional signals on today's live candle, no Telegram), plus the three intraday jobs (section 5). While the market is open, the top bar and the Signals page also show live prices every 30 seconds (FYERS real time when logged in, else Yahoo ~15 min delayed). Click **Repair / update** there after updating the app, so the tasks get the current settings. The option chains (09:12), F&O positioning and Claude forecasts (19:30) and the weekly pattern study (Saturday 11:00) are set up the same way.
 
 If a scan fails, you get a Telegram alert; a scheduled scan skipped because another scan was running sends a short
 note too. Details go to `data\logs\scanner.log` (a scheduled scan that cannot even start, e.g. a missing

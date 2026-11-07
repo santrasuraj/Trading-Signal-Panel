@@ -5,10 +5,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Query
 
-from ..models import (ConfigResponse, CostPreview, DataHealth, FyersLoginCompleteRequest, FyersLoginCompleteResponse,
-                      FyersLoginRequest, FyersLoginResponse, FyersStatus, IntradayResponse, IntradayRunAccepted,
-                      IntradayRunRequest, IntradaySignalsResponse, ScanAccepted, ScanHistory, ScanLog, ScanRequest)
-from ..services import alerts, fyers_svc, intraday_job, intraday_view, scan_runner, settings_svc
+from ..models import (AutomationSetupResult, AutomationStatus, ConfigResponse, CostPreview, DataHealth,
+                      FyersLoginCompleteRequest, FyersLoginCompleteResponse, FyersLoginRequest, FyersLoginResponse,
+                      FyersStatus, IntradayResponse, IntradayRunAccepted, IntradayRunRequest, IntradaySignalsResponse,
+                      ScanAccepted, ScanHistory, ScanLog, ScanRequest)
+from ..services import alerts, automation_svc, fyers_svc, intraday_job, intraday_view, scan_runner, settings_svc
 
 router = APIRouter(prefix="/api", tags=["operations"])
 
@@ -51,6 +52,12 @@ def fyers_login_complete(body: FyersLoginCompleteRequest):
     return fyers_svc.complete(body.redirect_url)
 
 
+@router.post("/fyers/direct-setup", response_model=FyersStatus)
+def fyers_direct_setup():
+    """After the Fyers app's Redirect URL was set to this app's callback: point FYERS_REDIRECT_URI in .env at it."""
+    return fyers_svc.use_direct_redirect()
+
+
 # ------------------------------------------------------------------ config, costs, data health
 @router.get("/config", response_model=ConfigResponse)
 def config():
@@ -80,5 +87,18 @@ def intraday_signals():
 
 @router.post("/intraday/run", response_model=IntradayRunAccepted, status_code=202)
 def intraday_run(body: IntradayRunRequest | None = None):
-    run = intraday_job.start(update=True if body is None else body.update)
+    run = intraday_job.start(update=True if body is None else body.update, backfill=bool(body and body.backfill))
     return {"accepted": True, "run": run}
+
+
+# ------------------------------------------------------------------ automatic jobs
+@router.get("/automation", response_model=AutomationStatus)
+def automation_status(refresh: bool = False):
+    """The scheduled jobs (Windows Task Scheduler): registered or not, next and last run (cached for a minute)."""
+    return automation_svc.status(refresh=refresh)
+
+
+@router.post("/automation/setup", response_model=AutomationSetupResult)
+def automation_setup():
+    """Register or repair every automatic job (runs setup_schedule.ps1; no window opens)."""
+    return automation_svc.setup()

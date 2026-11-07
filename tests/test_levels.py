@@ -107,6 +107,76 @@ def test_bull_flag_confirmed_on_the_breakout():
     assert p and p[0]["status"] == "confirmed" and p[0]["target"] > p[0]["breakout"]
 
 
+ASC_TRIANGLE = [(0, 90), (10, 100), (20, 92), (30, 100), (40, 95), (50, 100), (60, 97), (70, 100), (78, 99)]
+RISING_WEDGE = [(0, 85), (10, 100), (20, 90), (30, 106), (40, 98), (50, 110), (60, 104), (70, 113), (78, 110)]
+BULL_FLAG = [(0, 100), (40, 100), (50, 125), (62, 121), (63, 128)]
+DOUBLE_TOP = [(0, 80), (30, 100), (45, 88), (60, 100), (75, 85)]
+HEAD_SHOULDERS = [(0, 80), (20, 95), (30, 88), (45, 105), (60, 88), (75, 95), (85, 90)]
+# (pattern, closes, status): one textbook shape per chart pattern; the bearish / bullish twins are mirror images
+SHAPES = [
+    ("double_top", path(DOUBLE_TOP), "confirmed"),
+    ("double_bottom", 200 - path(DOUBLE_TOP), "confirmed"),
+    ("head_shoulders", path(HEAD_SHOULDERS), "forming"),
+    ("inverse_head_shoulders", 200 - path(HEAD_SHOULDERS), "forming"),
+    ("ascending_triangle", path(ASC_TRIANGLE), "forming"),
+    ("descending_triangle", 200 - path(ASC_TRIANGLE), "forming"),
+    ("symmetrical_triangle", path([(0, 90), (10, 110), (20, 92), (30, 107), (40, 95), (50, 104), (60, 97), (70, 102),
+                                   (78, 99)]), "forming"),
+    ("rectangle", path([(0, 90), (10, 110), (20, 95), (30, 110), (40, 95), (50, 110), (60, 95), (70, 110), (78, 102)]),
+     "forming"),
+    ("rising_wedge", path(RISING_WEDGE), "forming"),
+    ("falling_wedge", 200 - path(RISING_WEDGE), "forming"),
+    ("bull_flag", path(BULL_FLAG), "confirmed"),
+    ("bear_flag", 200 - path(BULL_FLAG), "confirmed"),
+]
+
+
+def test_every_chart_pattern_has_a_shape_here():
+    assert sorted(k for k, _, _ in SHAPES) == sorted(lv.CHART_INFO)
+
+
+@pytest.mark.parametrize("key,closes,status", SHAPES, ids=[s[0] for s in SHAPES])
+def test_each_chart_pattern_on_its_textbook_shape(key, closes, status):
+    df = bars(closes)
+    pats = [p for p in lv.chart_patterns(df) if p["key"] == key]
+    assert pats, f"{key} not found; found {found(df)}"
+    p = pats[0]
+    assert p["status"] == status
+    bias = lv.CHART_INFO[key][1]
+    up = bias == "bullish" or (bias == "neutral" and p["direction"] == "up")
+    if p["target"] is not None:                       # the measured move points the pattern's way
+        assert (p["target"] > p["breakout"]) if up else (p["target"] < p["breakout"])
+    assert (p["confirmed_on"] is not None) == (status == "confirmed")
+    if p["confirmed_on"]:
+        assert df.index[len(df) - 1 - p["confirmed_bars_ago"]].date().isoformat() == p["confirmed_on"]
+
+
+@pytest.mark.parametrize("key,closes,status", SHAPES, ids=[s[0] for s in SHAPES])
+def test_chart_pattern_geometry_matches_the_bars(key, closes, status):
+    """What the chart draws: every point and line end sits on a real bar (`t` and `ago` agree), a point is that
+    bar's exact high or low, and a line's two ends lie on the line the sketch draws."""
+    df = bars(closes)
+    p = next(p for p in lv.chart_patterns(df) if p["key"] == key)
+    last = len(df) - 1
+    day = lambda j: df.index[j].date().isoformat()        # noqa: E731
+    assert p["end"] == day(last)
+    s0 = last - (len(p["series"]) - 1)
+    for pt in p["points"]:
+        j = last - pt["ago"]
+        assert pt["t"] == day(j) and pt["i"] == j - s0
+        bar = df.iloc[j]
+        assert pt["price"] == pytest.approx(bar["high"] if pt["side"] == "high" else bar["low"], abs=0.01)
+    for ln in p["lines"]:
+        assert ln["t1"] == day(last - ln["ago1"]) and ln["t2"] == day(last - ln["ago2"])
+        assert ln["ago1"] > ln["ago2"] >= 0 and ln["i1"] == last - ln["ago1"] - s0
+    highs = [pt for pt in p["points"] if pt["side"] == "high"]
+    lows = [pt for pt in p["points"] if pt["side"] == "low"]
+    assert highs and lows
+    if len(p["lines"]) == 2 and not key.endswith("flag"):      # triangles, wedges, rectangles: upper, lower line
+        upper, lower = p["lines"]
+        assert upper["t1"] == min(pt["t"] for pt in highs) and lower["t1"] == min(pt["t"] for pt in lows)
+
+
 def test_no_chart_pattern_in_a_steady_trend_or_short_history():
     assert lv.chart_patterns(bars(np.linspace(100, 160, 200))) == []
     assert lv.chart_patterns(bars(np.linspace(100, 110, 40))) == []

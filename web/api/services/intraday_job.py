@@ -26,6 +26,8 @@ def main() -> int:
     ap.add_argument("--status", required=True)
     ap.add_argument("--lock", help="lock file held while the job runs (default: .intraday.lock next to --status)")
     ap.add_argument("--no-update", action="store_true")
+    ap.add_argument("--backfill", action="store_true",
+                    help="first download ~1 year of FYERS 5-minute history (resumable, inside the daily FYERS limits)")
     args = ap.parse_args()
     root = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(root))
@@ -60,6 +62,8 @@ def main() -> int:
                     pass
         write()
         try:
+            if args.backfill:
+                _backfill(load_config(), write)
             r = run_intraday_all(load_config(), update=not args.no_update, log=lambda m: write(message=str(m)[:300]))
         except Exception as e:
             write(state="failed", message=f"{type(e).__name__}: {e}"[:500], trace=traceback.format_exc()[-2000:])
@@ -69,6 +73,27 @@ def main() -> int:
     finally:
         _unlock(fh)
         fh.close()
+
+
+def _backfill(cfg: dict, write) -> None:
+    """~1 year of FYERS 5-minute history for the intraday universe (what `intraday_sync.py --backfill` does), so the
+    re-test right after it runs on a year instead of Yahoo's ~60 sessions. Resumable: what FYERS' daily budget
+    leaves out is fetched by the next run or the 15:45 task."""
+    from scanner.intraday import fyers_sync
+    from scanner.intraday.run import INTRADAY_DIR, intraday_universe
+    from scanner.providers import get_fyers
+    from scanner.store import load_store
+    fy, note = get_fyers(cfg)
+    if fy is None:
+        raise RuntimeError(f"FYERS is not available ({note}) - log in to Fyers first")
+    symbols, _ = intraday_universe(cfg, load_store())
+    days = int((cfg.get("intraday") or {}).get("history_days", 365))
+    est = fyers_sync.plan_calls(symbols, INTRADAY_DIR, days)
+    write(message=f"FYERS history: {est['calls']} calls to make (~{est['minutes']} min)")
+    rep = fyers_sync.sync(fy, symbols, INTRADAY_DIR, days, log=lambda m: write(message=f"FYERS history: {m}"[:300]),
+                          progress=lambda i, n, s: write(message=f"FYERS history {i}/{n} ({s})") if i % 5 == 0 else None)
+    if rep.get("stopped"):
+        write(message=f"FYERS history paused: {rep['stopped']}"[:300])
 
 
 # ------------------------------------------------------------------ used by the API process
@@ -119,9 +144,14 @@ def run_status() -> dict:
             "pid": pop.pid if alive else s.get("pid"), "exit_code": code}
 
 
-def start(update: bool = True) -> dict:
+def start(update: bool = True, backfill: bool = False) -> dict:
     from ..errors import ApiException
     from ..paths import P
+    if backfill:
+        from . import fyers_svc
+        if not fyers_svc.status()["logged_in_today"]:
+            raise ApiException("FYERS_LOGIN_REQUIRED", "Log in to Fyers first: the history comes from FYERS.",
+                               "Click the Fyers chip in the top bar, then Log in with Fyers.")
     with _lock:
         pop = _proc["popen"]
         if pop is not None and pop.poll() is None:
@@ -135,6 +165,8 @@ def start(update: bool = True) -> dict:
                 "--lock", str(P.intraday_lock)]
         if not update:
             args.append("--no-update")
+        if backfill:
+            args.append("--backfill")
         _proc["popen"] = subprocess.Popen(args, cwd=str(P.root), creationflags=NO_WINDOW, stdout=subprocess.DEVNULL,
                                           stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     return run_status()

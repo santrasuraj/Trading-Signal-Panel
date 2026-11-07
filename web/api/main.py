@@ -11,23 +11,48 @@ the NSE caches. Only explicit POSTs (scan, intraday run, Fyers login, Fyers hold
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from urllib.parse import parse_qs
+
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.routing import APIRoute
-from fastapi.staticfiles import StaticFiles
 
 from . import errors
 from .errors import ApiException, SafeJSONResponse
 from .routers import ai, fno, levels, lookup, market, ops, options, outlook, overview, portfolio, smart_money, strategies, system
 from .security import SecurityMiddleware
+from .services import fyers_svc
 
 DIST = Path(__file__).resolve().parent.parent / "ui" / "dist"
 OPENAPI_FILE = Path(__file__).resolve().parent / "openapi.json"
+
+# One segment of a path under web/ui/dist: Vite's file names (index-Be40HyvD.js, inter-latin-wght-normal-x.woff2).
+# No backslash, colon, empty segment or leading dot, so no "..", no drive letter and no \\host\share UNC path.
+_SAFE_SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._@+~-]*")
+
+
+def dist_file(root: Path, path: str) -> Path | None:
+    """The file under `root` (web/ui/dist) that the URL path names, or None. The path is checked as text BEFORE
+    the filesystem sees it: on Windows, resolving `\\\\host\\share\\x` (the URL /%5C%5Chost%5Cshare%5Cx) or
+    `//host/share` opens an SMB connection that sends the user's NTLM hash to that host, before any
+    is_relative_to check could reject it."""
+    parts = path.split("/")
+    if not all(_SAFE_SEGMENT.fullmatch(p) for p in parts):
+        return None
+    f = root.joinpath(*parts)
+    try:
+        if not f.is_file():
+            return None
+        f = f.resolve()
+    except (OSError, ValueError):
+        return None
+    return f if f.is_relative_to(root) else None      # a symlink inside dist must not lead out of it
 
 
 def warm_up(app: FastAPI | None = None) -> None:
@@ -75,26 +100,36 @@ def create_app(warm: bool = True) -> FastAPI:
                                {"allowed": allowed}, status=405)
         raise ApiException("NOT_FOUND", f"No API endpoint /api/{rest}.", "See /api/docs for the endpoint list.")
 
+    # ---- Fyers' redirect after a one-click login (registered before the SPA catch-all) ---------------------------
+    # A page, not JSON: it is the tab the user lands on. It finishes only a login started here (its random state),
+    # so a link from another site can't log the app into someone else's account (fyers_svc.callback_page).
+    @app.get(fyers_svc.CALLBACK_PATH, include_in_schema=False)
+    def fyers_callback(request: Request):
+        status_code, page = fyers_svc.callback_page(parse_qs(request.url.query))
+        return HTMLResponse(page, status_code=status_code, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
     # ---- the React single-page app (registered last) ------------------------------------------------
-    if (DIST / "assets").exists():
-        app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+    # No StaticFiles mount for /assets: it resolves the path on disk before its own containment check (the
+    # same UNC problem as dist_file's docstring), so every file, /assets included, goes through dist_file.
 
     # The app shell must be revalidated on every load: a heuristically cached index.html would keep asking for
     # the hashed /assets of an older build, which a rebuild deleted (blank app until a hard refresh).
     no_cache = {"Cache-Control": "no-cache"}
+    # Vite puts a content hash in every /assets file name, so a name never changes meaning
+    immutable = {"Cache-Control": "public, max-age=31536000, immutable"}
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
         root = DIST.resolve()
         index = root / "index.html"
         if path:
-            try:
-                f = (root / path).resolve()
-            except (OSError, ValueError):
-                f = None
             # path-traversal guard: only files inside web/ui/dist are ever served
-            if f is not None and f.is_relative_to(root) and f.is_file():
-                return FileResponse(f, headers=no_cache if f == index else None)
+            f = dist_file(root, path)
+            if f is not None:
+                headers = no_cache if f == index else immutable if path.startswith("assets/") else None
+                return FileResponse(f, headers=headers)
+            if path.startswith("assets/"):     # a missing script must not get index.html (a MIME error, not a 404)
+                raise ApiException("NOT_FOUND", "Asset not found.", "Reload the page: the app was rebuilt.")
         if not index.exists():
             raise ApiException("FEATURE_UNAVAILABLE", "Frontend not built yet: run `npm ci && npm run build` in web/ui.",
                                "3_dashboard.bat builds it automatically.", {"feature": "ui"})

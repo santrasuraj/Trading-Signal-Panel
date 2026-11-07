@@ -13,6 +13,7 @@ import {
   BUILDUP_HELP, BUILDUP_LABEL, optKeys, useOptBigTrades, useOptChain, useOptHistory, useOptRefresh, useOptResearch, useOptStatus,
   type OptBigInstrument, type OptBuildup, type OptChainResponse, type OptHistoryResponse, type OptLeg, type OptLevel, type OptRow, type OptStatus,
 } from '@/api/options'
+import { AiForecastCard } from '@/components/AiForecast'
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { Banner, EmptyState, ErrorState, SkeletonKpis, SkeletonRows } from '@/components/feedback'
 import { useToast } from '@/components/toast'
@@ -515,7 +516,7 @@ export default function Options() {
 
   const lr = st?.last_refresh
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {header}
       {c?.stale && <Banner tone="warn">The newest stored chain is from {dateTimeIST(c.time)} although the market is open: the live job may have stopped. Fetch now, or check data\logs\intraday.log.</Banner>}
       {lr?.refused && <Banner tone="warn">NSE refused the last request ({lr.errors[0] ?? 'blocked'}). The app waits 5 minutes before asking again.</Banner>}
@@ -548,7 +549,9 @@ export default function Options() {
             <p className="mt-3 text-2xs text-muted">{c.note}</p>
           </Card>
 
-          <div className="grid gap-4 lg:grid-cols-5">
+          <AiForecastCard symbol={c.symbol} />
+
+          <div className="grid gap-3 lg:grid-cols-5">
             <Card className="lg:col-span-3" title="Open interest by strike" subtitle={mode === 'oi' ? 'Contracts open, 12 strikes each side of the money' : mode === 'chg' ? 'Change since yesterday' : c.window_since ? `Change since ${timeIST(c.window_since)} (${c.window_minutes} min)` : `Change over ${c.window_minutes} min: no chain that old today yet`}
               right={<>
                 <Segmented size="xs" ariaLabel="Open interest view" value={mode} onChange={setMode}
@@ -558,7 +561,7 @@ export default function Options() {
               </>}>
               <OiBars c={c} mode={mode} />
             </Card>
-            <div className="space-y-4 lg:col-span-2">
+            <div className="space-y-3 lg:col-span-2">
               <Card title="Open-interest levels" subtitle="Contracts · change since yesterday"><Levels c={c} /></Card>
               <Card title={`The day so far · ${hist.data ? date(hist.data.day, { year: false }) : ''}`} subtitle="Every stored chain of this expiry">
                 {hist.data ? <DaySoFar h={hist.data} /> : hist.error ? <ErrorState compact error={hist.error} onRetry={() => void hist.refetch()} /> : <SkeletonRows rows={4} cols={3} />}

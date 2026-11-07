@@ -3,7 +3,7 @@
 // which drives the "server unreachable" banner.
 
 import type {
-  ApiError, AppStatus, BreadthResponse, ChartResponse, ChartRange, ChartTf, ClientErrorCode, ConfigResponse, CostPreviewResponse,
+  ApiError, AppStatus, AutomationSetupResult, AutomationStatus, BreadthResponse, ChartResponse, ChartRange, ChartTf, ClientErrorCode, ConfigResponse, CostPreviewResponse,
   CurveRange, CurveResponse, DataHealth, FactorsResponse, FyersImportResponse, FyersLoginCompleteResponse, FyersLoginMode,
   FyersLoginResponse, FyersStatus, HealthResponse, HoldingInput, HoldingsPutResponse, HoldingsResponse, IndicatorId, IntradayResponse, IntradayRunAccepted, IntradaySignalsResponse, QuotesResponse, TrackRecordResponse, TrackState,
   MoversResponse, OverviewResponse, PaperDetail, PaperListResponse, ResultsResponse, ScanHistoryResponse, ScanLogResponse,
@@ -127,11 +127,15 @@ export const api = {
   fyersLogin: (mode: FyersLoginMode) => fetchJson<FyersLoginResponse>('/api/fyers/login', { method: 'POST', body: body({ mode }) }),
   fyersComplete: (redirect_url: string) =>
     fetchJson<FyersLoginCompleteResponse>('/api/fyers/login/complete', { method: 'POST', body: body({ redirect_url }) }),
+  fyersDirectSetup: () => fetchJson<FyersStatus>('/api/fyers/direct-setup', { method: 'POST' }),
 
   config: () => fetchJson<ConfigResponse>('/api/config'),
   costPreview: (value: number) => fetchJson<CostPreviewResponse>(`/api/costs/preview${qs({ value: Math.round(value) })}`),
   dataHealth: () => fetchJson<DataHealth>('/api/data/health'),
   intraday: () => fetchJson<IntradayResponse>('/api/intraday'),
   intradaySignals: () => fetchJson<IntradaySignalsResponse>('/api/intraday/signals'),
-  intradayRun: (update = true) => fetchJson<IntradayRunAccepted>('/api/intraday/run', { method: 'POST', body: body({ update }) }),
+  intradayRun: (update = true, backfill = false) =>
+    fetchJson<IntradayRunAccepted>('/api/intraday/run', { method: 'POST', body: body({ update, backfill }) }),
+  automation: (refresh = false) => fetchJson<AutomationStatus>(`/api/automation${qs({ refresh: refresh || undefined })}`),
+  automationSetup: () => fetchJson<AutomationSetupResult>('/api/automation/setup', { method: 'POST' }),
 }

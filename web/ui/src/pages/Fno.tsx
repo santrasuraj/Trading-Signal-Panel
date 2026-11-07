@@ -68,16 +68,28 @@ function FetchButton({ st }: { st: FnoStatus | undefined }) {
 }
 
 // ------------------------------------------------------------------ positions
+/** Long share of index futures per day on a 0-100% scale, with the scale and the 50% line drawn: without them a group
+ *  that is mostly short (FII ~12% long) showed tiny bars under a blank box that looked like a broken chart. */
 function LongPctBars({ dates, v }: { dates: string[]; v: (number | null)[] }) {
   return (
-    <div className="flex h-24 items-end gap-[3px]" role="img" aria-label="Index futures long share by day">
-      {v.map((x, i) => (
-        <Tip key={dates[i]} text={`${date(dates[i])}: ${ok(x) ? `${num(x, 1)}% long` : 'no data'}`}>
-          <div className="flex h-24 w-3 flex-col justify-end">
-            <div className={cn('w-full rounded-sm', ok(x) && x >= 50 ? 'bg-profit' : 'bg-loss')} style={{ height: `${ok(x) ? Math.max(4, x) : 0}%` }} />
-          </div>
-        </Tip>
-      ))}
+    <div className="flex h-36 gap-2" role="img" aria-label="Index futures long share by day">
+      <div className="num flex flex-col justify-between py-0 text-right text-2xs leading-none text-faint" aria-hidden>
+        <span>100%</span><span>50%</span><span>0%</span>
+      </div>
+      <div className="relative min-w-0 flex-1">
+        <div className="absolute inset-x-0 top-0 border-t border-line/70" aria-hidden />
+        <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-line-strong" aria-hidden />
+        <div className="absolute inset-x-0 bottom-0 border-t border-line" aria-hidden />
+        <div className="relative flex h-full items-end gap-[3px]">
+          {v.map((x, i) => (
+            <Tip key={dates[i]} className="h-full min-w-0 max-w-[14px] flex-1" text={`${date(dates[i])}: ${ok(x) ? `${num(x, 1)}% long` : 'no data'}`}>
+              <div className="flex h-full w-full flex-col justify-end">
+                <div className={cn('w-full rounded-t-sm', ok(x) && x >= 50 ? 'bg-profit' : 'bg-loss')} style={{ height: `${ok(x) ? Math.max(2, x) : 0}%` }} />
+              </div>
+            </Tip>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -93,7 +105,7 @@ function Positions() {
   const last = dates.length - 1
   const rows = dates.map((d, i) => ({ d, i })).reverse()
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <Segmented ariaLabel="Participant" value={client} onChange={setClient}
         items={(Object.keys(CLIENT_LABEL) as FnoClient[]).map((c) => ({ id: c, label: CLIENT_LABEL[c], title: CLIENT_HELP[c] }))} />
       <KpiStrip min={160}>
@@ -105,10 +117,10 @@ function Positions() {
         <KpiTile label="Index puts net" value={signed(s.put_net[last])} title="Puts bought minus puts written (contracts)" />
         <KpiTile label="Stock futures net" value={signed(s.stk_fut_net[last])} />
       </KpiStrip>
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-3">
         <Card title="Index futures: long share by day" subtitle={`${CLIENT_LABEL[client]} · green = more long than short`}>
           <LongPctBars dates={dates} v={s.fut_long_pct} />
-          <div className="mt-1 flex justify-between text-2xs text-faint"><span>{date(dates[0], { year: false })}</span><span>{date(dates[last], { year: false })}</span></div>
+          <div className="mt-1 flex justify-between pl-9 text-2xs text-faint"><span>{date(dates[0], { year: false })}</span><span>{date(dates[last], { year: false })}</span></div>
         </Card>
         <Card className="lg:col-span-2" title="All groups on the last day" subtitle={date(dates[last])}>
           <table className="w-full text-[13px]">

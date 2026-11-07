@@ -147,7 +147,9 @@ export function useSaveHoldings() {
 export function useIntradayRun() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (update: boolean) => api.intradayRun(update),
+    // true / false = update the bars or not; { backfill: true } = first a year of FYERS history (needs today's login)
+    mutationFn: (v: boolean | { update?: boolean; backfill?: boolean }) =>
+      typeof v === 'boolean' ? api.intradayRun(v) : api.intradayRun(v.update ?? true, v.backfill ?? false),
     onSuccess: (r) => {
       qc.setQueryData<IntradayResponse>(keys.intraday, (d) => (d ? { ...d, run: r.run } : d))
       void qc.invalidateQueries({ queryKey: keys.intraday })
@@ -155,8 +157,29 @@ export function useIntradayRun() {
   })
 }
 
+/** The Windows scheduled jobs (server caches the Task Scheduler read for a minute). */
+export const useAutomation = () =>
+  useQuery({ queryKey: ['automation'], queryFn: () => api.automation(), staleTime: 60_000, refetchInterval: 300_000 })
+export function useAutomationSetup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: api.automationSetup,
+    onSuccess: (r) => { qc.setQueryData(['automation'], r.status) },
+  })
+}
+
 export const useImportFyers = () => useMutation({ mutationFn: api.importFyers })
 export const useFyersLogin = () => useMutation({ mutationFn: api.fyersLogin })
+/** While a one-click login waits for the Fyers tab: the status every 2 s (file reads only on the server). */
+export const useFyersWait = (enabled: boolean) =>
+  useQuery({ queryKey: ['fyers', 'wait'], queryFn: () => api.fyersStatus(false), refetchInterval: 2_000, enabled, staleTime: 0 })
+export function useFyersDirectSetup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: api.fyersDirectSetup,
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.status }) },
+  })
+}
 export function useFyersComplete() {
   const qc = useQueryClient()
   return useMutation({

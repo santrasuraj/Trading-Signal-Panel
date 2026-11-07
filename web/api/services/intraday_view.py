@@ -44,7 +44,8 @@ def _strategy(s: dict) -> dict:
         "status": s.get("status") if s.get("status") in STATUS else "unknown",
         "metrics": {"days": int(m.get("days") or 0), "trades": int(m.get("trades") or 0),
                     **{k: num(m.get(k)) for k in ("trades_per_day", "return_pct", "after_tax_return_pct", "annualised_pct",
-                                                  "sharpe", "max_dd_pct", "win_rate", "avg_trade_pct", "profit_factor",
+                                                  "sharpe", "max_dd_pct", "win_rate", "avg_trade_pct",
+                                                  "avg_trade_gross_pct", "profit_factor",
                                                   "avg_day_pct", "t_stat")},
                     "ci95_day_pct": [num(ci[0]), num(ci[1])] if isinstance(ci, list) and len(ci) == 2
                     and num(ci[0]) is not None and num(ci[1]) is not None else None,
@@ -98,6 +99,10 @@ def payload() -> dict:
         data_block = {"source": str(d.get("source") or ""), "interval": "5m", "from": str(d.get("from") or ""),
                       "to": str(d.get("to") or ""), "sessions": int(d.get("sessions") or 0),
                       "symbols": int(d.get("symbols") or 0), "note": str(d.get("note") or "")}
+        fc = d.get("fyers_coverage")
+        if isinstance(fc, dict):
+            data_block["fyers_coverage"] = {"symbols": int(fc.get("symbols") or 0), "from": fc.get("from") or None,
+                                            "to": fc.get("to") or None}
     sebi = r.get("sebi") if isinstance(r.get("sebi"), dict) else _sebi()
     return {"available": True, "reason": None, "generated_at": r.get("generated_at"), "elapsed_s": num(r.get("elapsed_s")),
             "data": data_block, "rules": {str(k): str(v) for k, v in (r.get("rules") or {}).items()},

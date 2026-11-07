@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Camera, ChevronDown, ChevronLeft, ChevronRight, Layers, PanelRightClose, PanelRightOpen, Radio, Ruler, Search, SlidersHorizontal } from 'lucide-react'
 import { useChart, useLiveQuotes, useStock, useSymbols } from '@/api/hooks'
-import { useLevels } from '@/api/levels'
+import { useLevels, type LvChartPattern } from '@/api/levels'
 import { useOutlook } from '@/api/outlook'
 import type { ChartMarker, ChartRange, ChartTf, IndicatorId } from '@/api/types'
 import { useUi } from '@/app/uiState'
@@ -22,10 +22,11 @@ import { Money, Pct, Price } from '@/components/num'
 import { SmartMoneyPanel } from '@/components/SmartMoneyPanel'
 import { Button, Card, IconButton, KV, MenuCheck, Popover, Segmented, Switch } from '@/components/ui'
 import { cn } from '@/lib/csv'
-import { date, daysBetween, num, qty, todayIST } from '@/lib/format'
+import { date, daysBetween, num, pct, price, qty, todayIST } from '@/lib/format'
+import { patternDrawings, patternTone } from '@/lib/patternDrawing'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 import { typingTarget, useIsMobile } from '@/lib/useMedia'
-import { PriceAction } from '@/components/PriceAction'
+import { EvidenceBadge, PriceAction } from '@/components/PriceAction'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
 type Ind = IndicatorId | 'volume'
@@ -34,16 +35,20 @@ const IND_MENU: { id: Ind; label: string }[] = [
   { id: 'bb_mid', label: 'Bollinger 20, 2' }, { id: 'volume', label: 'Volume' }, { id: 'rsi14', label: 'RSI 14 pane' }, { id: 'macd', label: 'MACD pane' },
 ]
 
-type LevelId = 'sr' | 'pivots' | 'intraday' | 'options' | 'range' | 'patterns'
+type LevelId = 'sr' | 'pivots' | 'intraday' | 'options' | 'range' | 'chart_patterns' | 'candles'
 const LEVEL_MENU: { id: LevelId; label: string; hint: string }[] = [
+  { id: 'chart_patterns', label: 'Chart patterns (drawn)', hint: 'double tops / bottoms, head & shoulders, triangles, wedges, rectangles, flags: shape, lines, target (1D chart)' },
   { id: 'sr', label: 'Support & resistance', hint: 'swing highs / lows of the last year; thicker = formed more often' },
   { id: 'pivots', label: 'Pivots (next session)', hint: 'P, R1-R2, S1-S2 from the last completed day' },
   { id: 'intraday', label: 'Today: VWAP, opening range, POC', hint: 'from 5-minute bars, when the stock has them' },
   { id: 'options', label: 'Option walls & max pain', hint: 'from a current NSE option chain (F&O symbols)' },
   { id: 'range', label: 'Expected 5-day range', hint: 'options-implied when a current chain exists, else recent volatility' },
-  { id: 'patterns', label: 'Pattern markers', hint: 'candle and chart patterns on the last bars' },
+  { id: 'candles', label: 'Candle patterns', hint: 'engulfing, hammer, doji ... as markers on the last 3 bars' },
 ]
-const LEVEL_DEFAULT: LevelId[] = ['sr', 'intraday', 'options', 'range', 'patterns']
+const LEVEL_DEFAULT: LevelId[] = ['chart_patterns', 'sr', 'intraday', 'options', 'range']
+/** Saved before chart patterns were drawn, 'patterns' meant candle + chart pattern markers: now the drawn patterns. */
+const levelList = (saved: string[]): LevelId[] =>
+  [...new Set(saved.map((x) => (x === 'patterns' ? 'chart_patterns' : x)))].filter((x): x is LevelId => LEVEL_MENU.some((m) => m.id === x))
 
 function apiIndicators(sel: Ind[]): IndicatorId[] {
   const out = new Set<IndicatorId>(['vol_avg20'])
@@ -52,6 +57,38 @@ function apiIndicators(sel: Ind[]): IndicatorId[] {
     if (s === 'bb_mid') { out.add('bb_upper'); out.add('bb_mid'); out.add('bb_lower') } else if (s === 'macd') { out.add('macd'); out.add('macd_signal'); out.add('macd_hist') } else out.add(s)
   }
   return [...out].sort()
+}
+
+const TONE_TEXT = { profit: 'text-profit', loss: 'text-loss', info: 'text-info', warn: 'text-warn' } as const
+
+/** The chart patterns drawn on the chart, top right: name (in the drawing's colour), status, levels, tested record. */
+function PatternLegend({ patterns, drawn, compact }: { patterns: LvChartPattern[]; drawn: boolean; compact: boolean }) {
+  const chip = 'rounded bg-panel/85 px-1.5 py-0.5'
+  return (
+    <div className="absolute right-[76px] top-2 z-10 flex max-w-[min(380px,calc(100%-96px))] flex-col items-end gap-1 text-2xs">
+      {patterns.length === 0 ? (
+        <span className={cn(chip, 'pointer-events-none text-faint')}>No chart pattern on the last bars</span>
+      ) : !drawn ? (
+        <span className={cn(chip, 'text-muted')}>{patterns.length} chart pattern{patterns.length > 1 ? 's' : ''}: shown on the 1D chart</span>
+      ) : patterns.map((p) => (
+        <div key={`${p.key}:${p.start}`} title={p.what} className={cn(chip, 'flex flex-wrap items-center justify-end gap-x-1.5')}>
+          <span className={cn('font-semibold', TONE_TEXT[patternTone(p)])}>{p.name}</span>
+          <span className="text-muted">
+            {p.status === 'confirmed' ? `confirmed${p.confirmed_bars_ago ? ` ${p.confirmed_bars_ago} bar${p.confirmed_bars_ago > 1 ? 's' : ''} ago` : ' today'}` : 'forming'}
+          </span>
+          {!compact && (
+            <span className="num text-muted">
+              {p.status === 'forming' && p.breakout != null ? `breaks at ${price(p.breakout)}` : ''}
+              {p.status === 'forming' && p.breakout != null && p.target != null ? ' · ' : ''}
+              {p.target != null ? `target ${price(p.target)}${p.target_pct != null ? ` (${pct(p.target_pct)})` : ''}` : ''}
+              {p.invalidation != null && p.breakout != null ? ` · void ${p.invalidation < p.breakout ? 'below' : 'above'} ${price(p.invalidation)}` : ''}
+            </span>
+          )}
+          {!compact && <EvidenceBadge e={p.evidence} />}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function SidePanel({ symbol }: { symbol: string }) {
@@ -143,7 +180,8 @@ export default function ChartPage() {
   const { setPalette, setFyersLogin } = useUi()
   const nav = useNavigate()
   const ref = useRef<PriceChartHandle>(null)
-  const [lvSel, setLvSel] = useLocalStorage<LevelId[]>('qd.chart.levels', LEVEL_DEFAULT)
+  const [lvSaved, setLvSel] = useLocalStorage<string[]>('qd.chart.levels', LEVEL_DEFAULT)
+  const lvSel = useMemo(() => levelList(lvSaved), [lvSaved])
   const lvOn = useMemo(() => new Set(lvSel), [lvSel])
   const lv = useLevels(symbol).data
   const liveQ = useLiveQuotes([symbol])
@@ -229,23 +267,31 @@ export default function ChartPage() {
   }, [lv, ol, lvOn])
   const patternMarkers = useMemo<ChartMarker[]>(() => {
     const dl = lv?.daily
-    if (!dl || !lvOn.has('patterns')) return []
+    if (!dl) return []
     const out: ChartMarker[] = []
-    for (const p of dl.patterns) {
-      const bull = p.bias === 'bullish', bear = p.bias === 'bearish'
-      out.push({ t: p.at.slice(0, 10), position: bear ? 'aboveBar' : 'belowBar', shape: bull ? 'arrowUp' : bear ? 'arrowDown' : 'circle', kind: 'pattern',
-        tone: bull ? 'profit' : bear ? 'loss' : 'neutral', text: p.name, detail: p.what, strategy_key: null })
+    if (lvOn.has('candles')) {
+      for (const p of dl.patterns) {
+        const bull = p.bias === 'bullish', bear = p.bias === 'bearish'
+        out.push({ t: p.at.slice(0, 10), position: bear ? 'aboveBar' : 'belowBar', shape: bull ? 'arrowUp' : bear ? 'arrowDown' : 'circle', kind: 'pattern',
+          tone: bull ? 'profit' : bear ? 'loss' : 'neutral', text: p.name, detail: p.what, strategy_key: null })
+      }
     }
-    for (const p of dl.chart_patterns) {
-      if (p.status !== 'confirmed') continue
-      const up = p.direction === 'up'
-      out.push({ t: p.end, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'arrowUp' : 'arrowDown', kind: 'pattern',
-        tone: up ? 'profit' : 'loss', text: p.name, detail: p.what, strategy_key: null })
+    if (lvOn.has('chart_patterns')) {
+      // the breakout bar of a confirmed chart pattern (the pattern itself is drawn: see `drawings`)
+      for (const p of dl.chart_patterns) {
+        if (p.status !== 'confirmed') continue
+        const up = p.direction ? p.direction === 'up' : p.bias === 'bullish'
+        out.push({ t: p.confirmed_on ?? p.end, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'arrowUp' : 'arrowDown', kind: 'pattern',
+          tone: up ? 'profit' : 'loss', text: '', detail: `${p.name} breakout: ${p.what}`, strategy_key: null })
+      }
     }
     return out
   }, [lv, lvOn])
   const height = mobile ? 300 + (indSet.has('macd') ? 80 : 0) : Math.max(460, (typeof window !== 'undefined' ? window.innerHeight : 800) - 250)
   const d = q.data
+  const chartPatterns = useMemo(() => (lvOn.has('chart_patterns') ? lv?.daily?.chart_patterns ?? [] : []), [lv, lvOn])
+  // Patterns are found on daily bars: drawn on the 1D chart only (on 1W the legend says so)
+  const drawings = useMemo(() => (d && d.tf === '1d' && chartPatterns.length ? patternDrawings(chartPatterns, d.bars.t) : []), [d, chartPatterns])
 
   return (
     <div className="flex flex-col gap-3">
@@ -326,7 +372,8 @@ export default function ChartPage() {
           {q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : (
             <div className="relative">
               <PriceChart ref={ref} data={d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile}
-                overlays={overlays} extraMarkers={patternMarkers} live={liveTick} />
+                overlays={overlays} extraMarkers={patternMarkers} drawings={drawings} live={liveTick} />
+              {lvOn.has('chart_patterns') && lv?.daily && <PatternLegend patterns={chartPatterns} drawn={d.tf === '1d'} compact={mobile} />}
               {ol?.derivatives.verdict && (
                 <button type="button" title={ol.derivatives.verdict.headline}
                   onClick={() => document.getElementById('chart-options')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
@@ -345,7 +392,7 @@ export default function ChartPage() {
       {ol && <ChartOptions d={ol.derivatives} live={liveQ.live} lastDay={ol.date} />}
       {ol && <BigMoneyCard symbol={symbol} b={ol.big_money} kind={ol.kind} />}
       <PriceAction symbol={symbol} />
-      <p className="text-2xs text-faint">Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data; while the market is open the last candle follows the live price. Markers: ▲ model buy / bullish pattern, ▼ model sell / bearish pattern, ● open model position, ■ corporate action, small ● results day. Lines (Levels menu): red resistance / call wall, green support / put wall, blue VWAP, violet expected range. Keys: 1-6 range, d/w timeframe, [ ] symbol.</p>
+      <p className="text-2xs text-faint">Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data; while the market is open the last candle follows the live price. Chart patterns (Levels menu, 1D): the pattern's shape through its swing points, its lines (dashed while forming, solid once a close broke through), the textbook target and the level that voids it; ▲▼ Breakout marks the confirming bar. Markers: ▲ model buy / bullish candle pattern, ▼ model sell / bearish candle pattern, ● open model position, ■ corporate action, small ● results day. Lines (Levels menu): red resistance / call wall, green support / put wall, blue VWAP, violet expected range. Keys: 1-6 range, d/w timeframe, [ ] symbol.</p>
     </div>
   )
 }

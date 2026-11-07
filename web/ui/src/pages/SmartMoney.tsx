@@ -158,7 +158,8 @@ function FreshnessLine({ f }: { f: SmFreshness }) {
 }
 
 function HonestNote({ note }: { note?: string }) {
-  const [open, setOpen] = useLocalStorage('qd.smartmoney.note', true)
+  // collapsed by default: the page leads with the data; the one-line summary says what matters most
+  const [open, setOpen] = useLocalStorage('qd.smartmoney.note', false)
   const toggle = (
     <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="focus-ring inline-flex shrink-0 items-center gap-0.5 rounded text-xs font-medium text-accent hover:underline">
       {open ? 'Show less' : 'Show more'}
@@ -183,7 +184,8 @@ function HonestNote({ note }: { note?: string }) {
           </>
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <span className="font-medium text-fg">Disclosed data, not live, not a tip.</span>
+            <span className="font-medium text-fg">Disclosed data, not live, not a tip:</span>
+            <span className="text-muted">deals, insider trades and holdings are reported days to weeks after the trade - one clue next to your own analysis, never a buy or sell signal.</span>
             {toggle}
           </div>
         )}

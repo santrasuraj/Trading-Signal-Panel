@@ -489,7 +489,11 @@ export interface FyersStatus {
   token_present: boolean; token_created: ISODateTime | null;
   logged_in_today: boolean;                  // token.created[:10] == IST today (app.py rule)
   verified: boolean | null; verified_at: ISODateTime | null; user_name: string | null;   // only with ?verify=true (5-min cache)
-  redirect_uri: string; login_modes: ('paste' | 'window')[];   // 'callback' is P2
+  redirect_uri: string; login_modes: FyersLoginMode[];
+  // who receives Fyers' redirect: this app's callback / a one-shot listener on a free local port (one click), or
+  // nobody here (the port is taken, e.g. Docker on 8000: paste the address)
+  direct_mode: 'app' | 'listener' | 'paste';
+  callback_url: string;                      // this app's callback, to register as the Fyers app's Redirect URL
   note: string;
 }
 // GET /api/fyers/status?verify=false|true
@@ -538,7 +542,7 @@ export interface IntradayStrategy {
   metrics: {                                 // scanner/intraday/engine.intraday_metrics
     days: number; trades: number; trades_per_day: number | null; return_pct: number | null; after_tax_return_pct: number | null;
     annualised_pct: number | null; sharpe: number | null; max_dd_pct: number | null; win_rate: number | null;
-    avg_trade_pct: number | null; profit_factor: number | null; avg_day_pct: number | null;
+    avg_trade_pct: number | null; avg_trade_gross_pct: number | null; profit_factor: number | null; avg_day_pct: number | null;
     ci95_day_pct: [number, number] | null; t_stat: number | null; significant: boolean; start: ISODate | null; end: ISODate | null;
   };
   equity: TimeSeries;                        // rupees
@@ -563,7 +567,10 @@ export interface IntradayRun {
 export interface IntradayResponse {
   available: boolean; reason: string | null;           // e.g. 'Intraday backtest not run yet'
   generated_at: ISODateTime | null; elapsed_s: number | null;
-  data: { source: string; interval: '5m'; from: ISODate; to: ISODate; sessions: number; symbols: number; note: string } | null;
+  data: {
+    source: string; interval: '5m'; from: ISODate; to: ISODate; sessions: number; symbols: number; note: string
+    fyers_coverage: { symbols: number; from: ISODate | null; to: ISODate | null } | null   // symbols 0 = Yahoo only
+  } | null;
   rules: Record<string, string>;                       // server text (square-off times etc.) - never hard-coded in the UI
   sebi: { source: string; url: string; points: string[] };
   costs: { value: number; round_trip_pct: number } | null;
@@ -573,6 +580,13 @@ export interface IntradayResponse {
 }
 // POST /api/intraday/run  {update?: boolean} -> 202 (409 SCAN_BUSY while one is running)
 export interface IntradayRunAccepted { accepted: boolean; run: IntradayRun }
+// GET /api/automation, POST /api/automation/setup: the Windows scheduled jobs (setup_schedule.ps1)
+export interface AutomationJob {
+  name: string; when: string; what: string; registered: boolean; state: string | null
+  next_run: string | null; last_run: string | null; last_result: string | null; ok: boolean | null
+}
+export interface AutomationStatus { available: boolean; jobs: AutomationJob[]; missing: number; note: string }
+export interface AutomationSetupResult { ok: boolean; output: string[]; status: AutomationStatus }
 
 // ------------------------------------------------------------------ response wrappers for endpoints the contract
 // documents only in comments (shapes transcribed from those comments; keep in sync with web/api/models)
@@ -589,8 +603,10 @@ export interface ScanStartResponse { accepted: true; status: ScanStatus }
 export interface ScanHistoryItem { scan_id: ISODateTime; file: string; data_date: ISODate | null; live: boolean | null; elapsed_s: number | null; strategies: number | null }
 export interface ScanHistoryResponse { scans: ScanHistoryItem[] }
 export interface ScanLogResponse { path: string; lines: string[] }
-export type FyersLoginMode = 'paste' | 'window';
-export interface FyersLoginResponse { mode: FyersLoginMode; login_url: string | null; expires_at: ISODateTime | null; instructions: string[] }
+export type FyersLoginMode = 'direct' | 'paste' | 'window';
+export interface FyersLoginResponse {
+  mode: FyersLoginMode; capture: 'app' | 'listener' | 'paste' | null; login_url: string | null; expires_at: ISODateTime | null; instructions: string[]
+}
 export interface FyersLoginCompleteResponse { ok: boolean; user_name: string | null; status: FyersStatus }
 export interface ConfigResponse { values: ConfigView; file_mtime: ISODateTime; needs_rescan: boolean }
 export interface CostPreviewResponse { value: number; buy: CostBreakdown; sell: CostBreakdown; round_trip_pct: number }

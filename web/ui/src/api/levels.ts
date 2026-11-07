@@ -22,12 +22,18 @@ export interface PatternEvidenceResponse {
   generated_at: ISODateTime | null; first_day: ISODate | null; last_day: ISODate | null; events: number | null
   cost_pct: number | null; min_events: number | null; min_months: number | null; patterns: LvStudyRow[]; note: string
 }
+/** One swing point of a chart pattern. `i`: bar within `series` (the sketch); `t` / `ago`: its date and bars before
+ *  the pattern's last bar (`end`), for drawing on the price chart; `side`: a swing high (label above) or low. */
+export interface LvPatternPoint { i: number; price: number | null; label: string; t: ISODate; ago: number; side: 'high' | 'low' }
+export interface LvPatternLine {
+  i1: number; p1: number | null; i2: number; p2: number | null; t1: ISODate; t2: ISODate; ago1: number; ago2: number
+}
 export interface LvChartPattern {
   key: string; name: string; bias: 'bullish' | 'bearish' | 'neutral'; status: 'forming' | 'confirmed'
-  direction: 'up' | 'down' | null; confirmed_bars_ago: number | null; what: string; start: ISODate; end: ISODate
+  direction: 'up' | 'down' | null; confirmed_bars_ago: number | null; confirmed_on: ISODate | null
+  what: string; start: ISODate; end: ISODate
   breakout: number | null; invalidation: number | null; target: number | null; target_pct: number | null
-  series: (number | null)[]; points: { i: number; price: number | null; label: string }[]
-  lines: { i1: number; p1: number | null; i2: number; p2: number | null }[]
+  series: (number | null)[]; points: LvPatternPoint[]; lines: LvPatternLine[]
   evidence: LvEvidence | null
 }
 export interface LvLevel { price: number | null; touches: number; last: ISODate; dist_pct: number | null }

@@ -202,6 +202,13 @@ live_fno:
   future_print_cr: 5                # a futures trade of Rs 5 crore notional or more is "large"
   option_print_lakh: 25             # an options trade of Rs 25 lakh premium or more is "large"
 
+# Claude's option-chain forecasts (Options page; needs ANTHROPIC_API_KEY in .env). The 19:30 task stores the day's
+# last chains and sends one forecast per underlying (Message Batches API: half price, ~Rs 4-7 each); the 09:12 task
+# collects the answers. Every forecast is scored against NSE's official closes vs a coin flip and the options-implied
+# range. Unproven until 60+ settled forecasts beat a coin flip; it never changes the options verdict or any order.
+ai_forecast:
+  underlyings: [NIFTY, BANKNIFTY]   # must also be in options.underlyings (the chain is what Claude reads)
+
 # Individual intraday strategies can be switched off, e.g.:
 # intraday_strategies:
 #   supertrend: {enabled: false}

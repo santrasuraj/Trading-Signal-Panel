@@ -25,9 +25,14 @@ def tradable_mask(f: Factors, min_price: float, min_turnover_cr: float,
     point-in-time panel, only that day's universe members (ETFs are funds, never universe members:
     they stay tradable for the ETF strategies). `price`: the prices the minimum-price test uses
     (default f.p.close). On a panel back-adjusted for corporate actions, pass the prices as they traded
-    that day, so a later split or bonus cannot decide whether a stock was tradable before it."""
+    that day, so a later split or bonus cannot decide whether a stock was tradable before it.
+    The price and turnover filters are stock filters: the configured ETFs are exempt. A fund's unit price says
+    nothing about it (GOLDBEES traded below Rs 50 until 2023) and market makers quote it whatever its turnover,
+    so filtering them would sell an ETF strategy out of its own assets. Thin ETFs still pay the illiquid
+    slippage in the engine. Stock strategies never trade ETFs (engine: `strategy.universe`)."""
     px = f.p.close if price is None else price.reindex(index=f.p.dates, columns=f.p.close.columns)
-    ok = (px >= min_price) & (f.turnover_avg20_cr >= min_turnover_cr) & f.p.close.notna()
+    liquid = (px >= min_price) & (f.turnover_avg20_cr >= min_turnover_cr)
+    ok = (liquid | f.etf_mask) & f.p.close.notna()
     return ok if f.p.universe is None else ok & (f.p.universe | f.etf_mask)
 
 

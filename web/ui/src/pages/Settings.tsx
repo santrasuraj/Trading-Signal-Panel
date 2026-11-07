@@ -3,24 +3,24 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useNavigate, useParams } from 'react-router-dom'
-import { Download, LogIn, RotateCw, Terminal } from 'lucide-react'
+import { Download, LogIn, RotateCw } from 'lucide-react'
 import { isFailure } from '@/api/client'
-import { useConfig, useCostPreview, useDataHealth, useFyersLogin, useFyersStatus, useScanHistory, useScanLog, useStatus } from '@/api/hooks'
+import { useAutomation, useAutomationSetup, useConfig, useCostPreview, useDataHealth, useFyersStatus, useScanHistory, useScanLog, useStatus } from '@/api/hooks'
+import { useToast } from '@/components/toast'
 import type { ConfigView, CostBreakdown, ScanHistoryItem } from '@/api/types'
 import { useUi } from '@/app/uiState'
 import { DataTable, type Col } from '@/components/DataTable'
 import { PageHeader } from '@/components/domain'
 import { Banner, ErrorState, SkeletonRows } from '@/components/feedback'
 import { ProgressBar, useRunScan } from '@/components/layout/ScanButton'
-import { useToast } from '@/components/toast'
 import { Button, Card, Chip, KV, Segmented, Switch } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { date, dateTimeIST, duration, money, num, pct, relative, timeIST } from '@/lib/format'
 import { useTheme, type Density, type ThemePref } from '@/lib/theme'
 
-type Section = 'data' | 'fyers' | 'scan' | 'capital' | 'strategies' | 'costs' | 'filters' | 'appearance' | 'about'
+type Section = 'data' | 'fyers' | 'automation' | 'scan' | 'capital' | 'strategies' | 'costs' | 'filters' | 'appearance' | 'about'
 const SECTIONS: { id: Section; label: string }[] = [
-  { id: 'data', label: 'Data health' }, { id: 'fyers', label: 'Fyers login' }, { id: 'scan', label: 'Scan' },
+  { id: 'data', label: 'Data health' }, { id: 'fyers', label: 'Fyers login' }, { id: 'automation', label: 'Automatic jobs' }, { id: 'scan', label: 'Scan' },
   { id: 'capital', label: 'Capital & allocations' }, { id: 'strategies', label: 'Strategies' }, { id: 'costs', label: 'Costs & tax' },
   { id: 'filters', label: 'Filters' }, { id: 'appearance', label: 'Appearance' }, { id: 'about', label: 'About & disclaimer' },
 ]
@@ -90,18 +90,11 @@ function DataSection() {
 function FyersSection() {
   const { data: s } = useStatus()
   const { setFyersLogin } = useUi()
-  const toast = useToast()
-  const login = useFyersLogin()
   // One profile check (server caches it 5 min and skips it while a scan runs), only when today's token exists.
   const verify = useFyersStatus(!!s?.fyers.logged_in_today)
   const f = s?.fyers
   if (!f) return <Card><SkeletonRows rows={4} /></Card>
   const v = verify.data
-  const openWindow = () =>
-    login.mutate('window', {
-      onSuccess: (r) => toast({ tone: 'info', title: 'Fyers login window opened', detail: r.instructions.join(' ') }),
-      onError: (e) => toast({ tone: 'bad', title: isFailure(e) ? e.message : 'Could not open the login window', detail: isFailure(e) ? e.hint ?? undefined : undefined }),
-    })
   return (
     <div className="space-y-3">
       <Card title="Fyers" subtitle={v?.note ?? f.note}>
@@ -122,14 +115,21 @@ function FyersSection() {
           />
         )}
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="primary" icon={<LogIn className="h-4 w-4" />} disabled={!f.configured} onClick={() => setFyersLogin(true)}>Log in</Button>
-          <Button icon={<Terminal className="h-4 w-4" />} disabled={!f.configured} loading={login.isPending} onClick={openWindow} title="Runs 1_login.bat in a console window on this computer">Open login window (legacy)</Button>
+          <Button variant="primary" icon={<LogIn className="h-4 w-4" />} disabled={!f.configured} onClick={() => setFyersLogin(true)}>
+            {f.logged_in_today ? 'Log in again' : 'Log in with Fyers'}
+          </Button>
         </div>
       </Card>
       <Card title="How login works">
         <ol className="list-decimal space-y-1.5 pl-5 text-[13px] text-muted">
-          <li>Fyers tokens expire daily, so log in once each trading day (before the 15:40 scheduled scan if you want real-time prices).</li>
-          <li>The login page redirects to your app's redirect URL (<span className="break-all font-mono text-fg">{f.redirect_uri}</span>). That page may not load; copy the full address from the browser bar and paste it into the dialog.</li>
+          <li>Fyers tokens expire every morning at 6 AM, so log in once each trading day (before 9:14 for the live intraday feed, before the 15:40 scan for real-time prices). No command or window to run: click Log in.</li>
+          {f.direct_mode === 'paste' ? (
+            <li>
+              Fyers sends you back to <span className="break-all font-mono text-fg">{f.redirect_uri}</span>, which another program on this PC answers, so for now you paste that address into the dialog after logging in. To make it one click, set your Fyers app's Redirect URL to <span className="break-all font-mono text-fg">{f.callback_url}</span> (the login dialog walks you through it).
+            </li>
+          ) : (
+            <li>One click: Fyers sends you back to <span className="break-all font-mono text-fg">{f.redirect_uri}</span>, where Quant Desk finishes the login by itself and the Fyers tab closes.</li>
+          )}
           <li>The secret and the access token never leave this computer and are never shown in the app.</li>
         </ol>
       </Card>
@@ -366,12 +366,63 @@ function AboutSection() {
   )
 }
 
+/** "2026-11-09T08:30" -> "9 Nov 08:30"; anything Windows printed in another format is shown as it is. */
+const jobTime = (s: string | null) => (s && /^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(s) ? `${date(s.slice(0, 10), { year: false })} ${s.slice(11, 16)}` : s ?? '—')
+
+function AutomationSection() {
+  const q = useAutomation()
+  const setup = useAutomationSetup()
+  const toast = useToast()
+  const a = q.data
+  if (q.error && !a) return <Card><ErrorState error={q.error} onRetry={() => void q.refetch()} /></Card>
+  if (!a) return <Card><SkeletonRows rows={6} /></Card>
+  const run = () =>
+    setup.mutate(undefined, {
+      onSuccess: (r) => toast(r.ok
+        ? { tone: 'good', title: 'Automatic jobs are set up', detail: `${r.status.jobs.length} jobs in Windows Task Scheduler. Nothing to run by hand any more.` }
+        : { tone: 'bad', title: 'Some jobs could not be set up', detail: r.output.slice(-2).join(' ') || 'See the output below.' }),
+      onError: (e) => toast({ tone: 'bad', title: isFailure(e) ? e.message : 'Could not set up the jobs', detail: isFailure(e) ? e.hint ?? undefined : undefined }),
+    })
+  return (
+    <div className="space-y-3">
+      <Card
+        title="Automatic jobs"
+        subtitle={a.missing ? `${a.missing} of ${a.jobs.length} are not set up` : `All ${a.jobs.length} are set up in Windows Task Scheduler`}
+        right={<Button size="sm" variant={a.missing ? 'primary' : 'secondary'} loading={setup.isPending} disabled={!a.available} onClick={run}>{a.missing ? 'Set up automatic jobs' : 'Repair / update'}</Button>}
+        flush
+      >
+        <ul className="divide-y divide-line/70">
+          {a.jobs.map((j) => (
+            <li key={j.name} className="flex flex-wrap items-start gap-x-4 gap-y-1 px-4 py-2.5 text-[13px]">
+              <span className={cn('mt-1.5 h-2 w-2 shrink-0 rounded-full', !j.registered ? 'bg-loss' : j.ok === false ? 'bg-warn' : 'bg-profit')} aria-hidden />
+              <span className="min-w-0 flex-1 basis-[260px]"><span className="font-medium">{j.when}</span> <span className="text-muted">· {j.what}</span></span>
+              <span className="num shrink-0 text-xs text-muted">
+                {!j.registered ? <span className="font-medium text-loss">not set up</span> : (
+                  <>next {jobTime(j.next_run)} · last {j.last_run ? <>{jobTime(j.last_run)} <span className={j.ok === false ? 'text-warn' : undefined}>({j.last_result})</span></> : 'never'}</>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="border-t border-line px-4 py-2 text-2xs text-faint">
+          {a.note} The one step that stays manual is the morning Fyers login (Fyers and SEBI require it each day): one click on the Fyers chip in the top bar.
+        </p>
+      </Card>
+      {setup.data && !setup.data.ok && (
+        <Card title="Setup output">
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-2xs text-muted">{setup.data.output.join('\n')}</pre>
+        </Card>
+      )}
+    </div>
+  )
+}
+
 export default function Settings() {
   const { section = 'data' } = useParams()
   const s = (SECTIONS.some((x) => x.id === section) ? section : 'data') as Section
   const nav = useNavigate()
   const content = useMemo(() => ({
-    data: <DataSection />, fyers: <FyersSection />, scan: <ScanSection />, capital: <CapitalSection />, strategies: <StrategiesSection />,
+    data: <DataSection />, fyers: <FyersSection />, automation: <AutomationSection />, scan: <ScanSection />, capital: <CapitalSection />, strategies: <StrategiesSection />,
     costs: <CostsSection />, filters: <FiltersSection />, appearance: <AppearanceSection />, about: <AboutSection />,
   }), [])
   return (

@@ -39,11 +39,12 @@ class ScanLog(Model):
 
 # ------------------------------------------------------------------ fyers
 class FyersLoginRequest(Model):
-    mode: Literal["paste", "window"] = "paste"
+    mode: Literal["direct", "paste", "window"] = "paste"
 
 
 class FyersLoginResponse(Model):
-    mode: Literal["paste", "window"]
+    mode: Literal["direct", "paste", "window"]     # 'direct' answered 'paste' when nothing here can receive it
+    capture: Literal["app", "listener", "paste"] | None = None
     login_url: str | None = None
     expires_at: ISODateTime | None = None
     instructions: list[str]
@@ -252,6 +253,7 @@ class IntradayMetrics(Model):
     max_dd_pct: float | None = None
     win_rate: float | None = None
     avg_trade_pct: float | None = None
+    avg_trade_gross_pct: float | None = None      # the same trades before any cost: the gap to avg_trade_pct is costs
     profit_factor: float | None = None
     avg_day_pct: float | None = None
     ci95_day_pct: tuple[float, float] | None = None
@@ -272,6 +274,12 @@ class IntradayStrategy(Model):
     equity: TimeSeries                            # rupees
 
 
+class IntradayCoverage(Model):
+    symbols: int = 0                              # symbols with FYERS history stored (0 = Yahoo's ~60 sessions only)
+    from_: ISODate | None = Field(default=None, alias="from")
+    to: ISODate | None = None
+
+
 class IntradayData(Model):
     source: str
     interval: Literal["5m"]
@@ -280,6 +288,7 @@ class IntradayData(Model):
     sessions: int
     symbols: int
     note: str
+    fyers_coverage: IntradayCoverage | None = None
 
 
 class SebiFacts(Model):
@@ -355,6 +364,33 @@ class IntradaySignalsResponse(Model):
 
 class IntradayRunRequest(Model):
     update: bool = True                           # false = re-test on the stored 5-minute bars only
+    backfill: bool = False                        # first download ~1 year of FYERS 5-minute history (needs today's login)
+
+
+# ------------------------------------------------------------------ automatic jobs (Windows Task Scheduler)
+class AutomationJob(Model):
+    name: str                                     # the Task Scheduler task name (setup_schedule.ps1)
+    when: str
+    what: str
+    registered: bool
+    state: str | None = None                      # Ready / Running / Disabled
+    next_run: str | None = None                   # ISO when Windows' date could be read, else as Windows shows it
+    last_run: str | None = None
+    last_result: str | None = None                # 'ok', 'not run yet', 'running' or a short reason with the code
+    ok: bool | None = None                        # None = never ran
+
+
+class AutomationStatus(Model):
+    available: bool                               # Windows Task Scheduler is there (it is on this app's PCs)
+    jobs: list[AutomationJob]
+    missing: int
+    note: str
+
+
+class AutomationSetupResult(Model):
+    ok: bool
+    output: list[str]                             # what setup_schedule.ps1 printed (last lines)
+    status: AutomationStatus
 
 
 class IntradayRunAccepted(Model):
