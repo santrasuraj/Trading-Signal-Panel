@@ -1346,6 +1346,19 @@ def test_a_corrupt_saved_scan_is_skipped(mclient, env):
         assert "scan_20991231_2359.json" not in json.dumps(body), url
 
 
+def test_data_health_shows_only_errors_since_the_last_finished_scan(mclient):
+    """A scan error that a later scan got past is history, not 'Last error' (a 2-week-old crash stayed on screen)."""
+    from web.api.paths import P
+    P.scan_log.parent.mkdir(parents=True, exist_ok=True)
+    old = "2026-10-24 20:59:39,411 ERROR Scan failed: boom\n"
+    done = "2026-11-07 12:22:15,856 INFO Done in 1069.6s: 14 strategies tested on 485 stocks.\n"
+    P.scan_log.write_text(old + done, encoding="utf-8")
+    assert get_ok(mclient, "/api/data/health", M.DataHealth)["logs"]["last_error"] is None
+    new = "2026-11-07 12:30:00,000 ERROR Smart money: NSE refused\n"
+    P.scan_log.write_text(old + done + new, encoding="utf-8")
+    assert get_ok(mclient, "/api/data/health", M.DataHealth)["logs"]["last_error"] == new.strip()
+
+
 def test_intraday_job_status_is_written_atomically(tmp_path, monkeypatch):
     """The job's status file is replaced, never rewritten in place (a poll mid-write saw an empty file)."""
     from web.api.services import intraday_job

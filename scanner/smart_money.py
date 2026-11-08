@@ -303,6 +303,11 @@ def _finite(x) -> bool:
             and math.isfinite(x))
 
 
+def _present(x) -> bool:
+    """Not missing (None / NaN / NA): what pandas' nunique and fillna(0).sum() skip."""
+    return x is not None and x is not pd.NA and not (isinstance(x, float) and math.isnan(x))
+
+
 def _sv(x) -> str | None:
     """A cell as str, None when missing (NaN is truthy, so never test cells with `or`)."""
     return None if _missing(x) else str(x)
@@ -2187,7 +2192,10 @@ def holder_changes(holders: pd.DataFrame, holdings: pd.DataFrame) -> pd.DataFram
     # promoter-group members filed with no shares (0.00%) name the promoters (promoter_sets) but hold no stake:
     # they never make a new / cut / dropped holder
     h = h[pd.to_numeric(h["pct"], errors="coerce") >= 0.01]
-    by_rid = {int(rid): g.to_dict("records") for rid, g in h.groupby("record_id", sort=False)}
+    # one to_dict for the whole table, grouped in Python: a to_dict per filing (about a thousand) took ~13 s
+    by_rid: dict[int, list[dict]] = {}
+    for r in h.to_dict("records"):
+        by_rid.setdefault(int(r["record_id"]), []).append(r)
     rows = []
     for sym, (rp, rq) in pq.items():
         now = by_rid.get(int(rp["record_id"]), [])
@@ -2372,6 +2380,19 @@ def top_reasons(ev: pd.DataFrame, direction: str | None = None, n: int = 4) -> l
     return [str(t) for t in _reason_order(e)["text"].head(n)]
 
 
+def reasons_by_symbol(ev: pd.DataFrame, direction: str | None = None, n: int = 4) -> dict[str, list[str]]:
+    """top_reasons of every symbol at once: one sort of the whole table (a sort per stock took ~7 s for 200
+    stocks). A symbol without events of `direction` is left out."""
+    if ev is None or len(ev) == 0:
+        return {}
+    e = ev if direction is None else ev[ev["direction"] == direction]
+    top = _reason_order(e).groupby("symbol", sort=False).head(n)          # head keeps the sorted order
+    out: dict[str, list[str]] = {}
+    for s, t in zip(top["symbol"], top["text"]):
+        out.setdefault(s, []).append(str(t))
+    return out
+
+
 def _big_deals(net: pd.DataFrame | None, since: str | None) -> pd.DataFrame:
     if net is None or len(net) == 0:
         return _empty(NET_DEAL_COLS)
@@ -2392,45 +2413,57 @@ def stock_signals(ev: pd.DataFrame, net: pd.DataFrame, holdings: pd.DataFrame, s
     if ev is None or len(ev) == 0:
         return _empty(SIGNAL_COLS)
     nd = _big_deals(net, since)
-    nd_by = {s: g for s, g in nd.groupby("symbol", sort=False)} if len(nd) else {}
+    # Plain lists, read once: pandas filters and sums on each stock's few rows took ~25 ms per stock (20 s for 800).
+    deals: dict[str, list[tuple]] = {}
+    if len(nd):
+        for t in zip(nd["symbol"].tolist(), nd["net_value"].tolist(), nd["category"].tolist(), nd["side"].tolist(),
+                     nd["client_key"].tolist(), nd["investor"].tolist()):
+            deals.setdefault(t[0], []).append(t[1:])
     pq = _pq_rows(holdings)
+    # REASON_ORDER once; each stock's rows keep that order, so its reasons need no sort of their own
+    e_all = _reason_order(ev)
+    by_sym: dict[str, list[tuple]] = {}
+    for t in zip(e_all["symbol"].tolist(), e_all["direction"].tolist(), e_all["weight"].tolist(),
+                 e_all["event"].tolist(), e_all["source"].tolist(), e_all["category"].tolist(),
+                 e_all["value"].tolist(), e_all["exit_kind"].tolist(), e_all["text"].tolist(),
+                 e_all["company"].tolist(), e_all["date"].tolist()):
+        by_sym.setdefault(t[0], []).append(t[1:])
     rows = []
-    for sym, e in ev.groupby("symbol", sort=False):
-        up, dn = e[e["direction"] == "up"], e[e["direction"] == "down"]
-        up_score, down_score = int(up["weight"].sum()), int(dn["weight"].sum())
-        d = nd_by.get(sym)
+    for sym, e in by_sym.items():
+        up = [r for r in e if r[0] == "up"]
+        dn = [r for r in e if r[0] == "down"]
+        up_score, down_score = int(sum(r[1] for r in up)), int(sum(r[1] for r in dn))
         buy_v = sell_v = 0.0
         inst_b = inst_s = 0
         fam_b: list[str] = []
         fam_s: list[str] = []
-        if d is not None and len(d):
-            nv = d["net_value"]
-            buy_v, sell_v = float(nv[nv > 0].sum()), float(-nv[nv < 0].sum())
-            inst = d[d["category"].isin(list(INSTITUTIONS))]
-            inst_b = int(inst.loc[inst["side"] == "BUY", "client_key"].nunique())
-            inst_s = int(inst.loc[inst["side"] == "SELL", "client_key"].nunique())
-            fam = d[d["category"] == "famous"]
-            fam_b = sorted({x for x in fam.loc[fam["side"] == "BUY", "investor"] if isinstance(x, str)})
-            fam_s = sorted({x for x in fam.loc[fam["side"] == "SELL", "investor"] if isinstance(x, str)})
-        prom = e[e["source"].isin(["bulk", "block", "insider"]) & (e["category"] == "promoter")]
+        d = deals.get(sym)
+        if d:
+            buy_v = float(sum(v for v, *_ in d if _present(v) and v > 0))
+            sell_v = float(-sum(v for v, *_ in d if _present(v) and v < 0))
+            inst_b = len({k for _, c, side, k, _i in d if c in INSTITUTIONS and side == "BUY" and _present(k)})
+            inst_s = len({k for _, c, side, k, _i in d if c in INSTITUTIONS and side == "SELL" and _present(k)})
+            fam_b = sorted({i for _, c, side, _k, i in d if c == "famous" and side == "BUY" and isinstance(i, str)})
+            fam_s = sorted({i for _, c, side, _k, i in d if c == "famous" and side == "SELL" and isinstance(i, str)})
+        prom = [r for r in e if r[3] in ("bulk", "block", "insider") and r[4] == "promoter"]
         rp, rq = pq.get(sym, (None, None))
         pref, other = (up, dn) if up_score >= down_score else (dn, up)
-        reasons = (list(_reason_order(pref)["text"]) + list(_reason_order(other)["text"]))[:4]
-        names = [c for c in e["company"] if isinstance(c, str)]
-        dates = [x for x in e["date"] if isinstance(x, str)]
+        reasons = [r[7] for r in pref + other][:4]
+        names = [r[8] for r in e if isinstance(r[8], str)]
+        dates = [r[9] for r in e if isinstance(r[9], str)]
         rows.append({
             "symbol": sym, "company": names[0] if names else None,
-            "direction": "up" if dn.empty else "down" if up.empty else "mixed",
+            "direction": "up" if not dn else "down" if not up else "mixed",
             "up_events": len(up), "down_events": len(dn), "up_score": up_score, "down_score": down_score,
             "deal_buy_value": buy_v, "deal_sell_value": sell_v, "deal_net_value": buy_v - sell_v,
             "inst_buyers": inst_b, "inst_sellers": inst_s, "famous_buyers": fam_b, "famous_sellers": fam_s,
-            "insider_buy_value": float(e.loc[e["event"] == "insider_buy", "value"].fillna(0.0).sum()),
-            "insider_sell_value": float(e.loc[e["event"].isin(["insider_sell", "insider_exit"]), "value"]
-                                        .fillna(0.0).sum()),
-            "promoter_buying": bool((prom["direction"] == "up").any()),
-            "promoter_selling": bool((prom["direction"] == "down").any()),
-            "pledge_invoked": bool((e["event"] == "pledge_invoked").any()),
-            "exits": int(dn["exit_kind"].isin(list(EXIT_KINDS)).sum()),
+            "insider_buy_value": float(sum(r[5] for r in e if r[2] == "insider_buy" and _present(r[5]))),
+            "insider_sell_value": float(sum(r[5] for r in e
+                                            if r[2] in ("insider_sell", "insider_exit") and _present(r[5]))),
+            "promoter_buying": any(r[0] == "up" for r in prom),
+            "promoter_selling": any(r[0] == "down" for r in prom),
+            "pledge_invoked": any(r[2] == "pledge_invoked" for r in e),
+            "exits": sum(1 for r in dn if r[6] in EXIT_KINDS),
             "fii_chg_pts": _chg(rp, rq, "fii_pct"), "dii_chg_pts": _chg(rp, rq, "dii_pct"),
             "mf_chg_pts": _chg(rp, rq, "mf_pct"), "promoter_chg_pts": _chg(rp, rq, "promoter_pct"),
             "period": rp["period"] if rp is not None else None,

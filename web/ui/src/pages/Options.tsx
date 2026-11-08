@@ -9,6 +9,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Layers, RefreshCw } from 'lucide-react'
 import { isFailure } from '@/api/client'
+import { useStatus } from '@/api/hooks'
 import {
   BUILDUP_HELP, BUILDUP_LABEL, optKeys, useOptBigTrades, useOptChain, useOptHistory, useOptRefresh, useOptResearch, useOptStatus,
   type OptBigInstrument, type OptBuildup, type OptChainResponse, type OptHistoryResponse, type OptLeg, type OptLevel, type OptRow, type OptStatus,
@@ -94,9 +95,15 @@ function AddSymbol({ st }: { st: OptStatus | undefined }) {
 }
 
 function LiveState({ st, c }: { st: OptStatus; c: OptChainResponse | undefined }) {
+  const lastDay = useStatus().data?.clock.last_completed_day
   const asOf = c ? <>NSE data as of <span className="num text-fg">{dateTimeIST(c.time)}</span></> : null
   if (st.live_running) return <span className="flex items-center gap-1.5"><span className="h-2 w-2 animate-pulse rounded-full bg-profit" />Live: stored every {st.interval_seconds} s{asOf && <> · {asOf}</>}</span>
   if (st.market_open) return <span>Market open, live job not running (scheduled at 09:12; or use Fetch now){asOf && <> · {asOf}</>}</span>
+  // closed: say so when the stored chain is older than the last session (e.g. the daily job did not run)
+  const day = c?.time.slice(0, 10)
+  if (day && lastDay && day < lastDay) {
+    return <span>Market closed · <span className="text-warn">this chain is from {date(day)}, not the last session ({date(lastDay)})</span> - Fetch now gets the newer one</span>
+  }
   return <span>Market closed: the last session's chain{asOf && <> · {asOf}</>}</span>
 }
 

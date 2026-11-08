@@ -59,11 +59,13 @@ def warm_up(app: FastAPI | None = None) -> None:
     """Load the slow first-time caches in the background, so the first overview / strategies / chart after a start
     is fast. Ordered by what the first page load needs: the paper report (~2 s, used by overview, strategies and
     signals) right after the files it is built from, then the results calendar and index history; market
-    statistics after; the OpenAPI schema (4-6 s of CPU, only /api/docs uses it) last."""
-    from .services import data, market_derived, paper_svc
+    statistics after; then big money's 30- and 90-day views (~15 s cold, mostly reading its files: the Smart Money
+    pages and big money live read them); the OpenAPI schema (4-6 s of CPU, only /api/docs uses it) last."""
+    from .services import data, market_derived, paper_svc, smart_money_svc
     steps = [data.latest, data.curves, data.store, paper_svc.report, data.symbol_meta, data.results_events,
              data.index_history, market_derived.factors, lambda: market_derived.breadth("1y"),
-             market_derived.industries, data._past_results_index]
+             market_derived.industries, data._past_results_index, lambda: smart_money_svc._derived(30),
+             lambda: smart_money_svc._derived(90)]
     if app is not None:
         steps.append(app.openapi)
     for step in steps:
