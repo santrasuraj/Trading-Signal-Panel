@@ -60,6 +60,11 @@ function useDismissed(key: string): [boolean, () => void] {
   return [list.includes(key), dismiss]
 }
 
+/** The build this page was loaded from (its entry script's hashed name); null on the dev server (no build). */
+const MY_BUILD = typeof document !== 'undefined'
+  ? document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/index-"]')?.src.split('/').pop() ?? null
+  : null
+
 function GlobalBanners() {
   const { data: s, error } = useStatus()
   const nav = useNavigate()
@@ -81,6 +86,14 @@ function GlobalBanners() {
     items.push(
       <Banner key="off" tone="danger" icon={<WifiOff className="h-4 w-4 text-loss" />}>
         <span className="font-medium">Can't reach the local server (127.0.0.1:8600).</span> <span className="text-muted">Is 3_dashboard.bat still running? Retrying automatically…</span>
+      </Banner>,
+    )
+  }
+  // A tab left open across an update keeps running the old screens until it reloads: say so, once a new build is served
+  if (MY_BUILD && s?.ui_build && s.ui_build !== MY_BUILD) {
+    items.push(
+      <Banner key="update" tone="info" action={<Button size="sm" variant="primary" onClick={() => window.location.reload()}>Reload</Button>}>
+        <span className="font-medium">Quant Desk was updated.</span> <span className="text-muted">Reload this page to see the new version.</span>
       </Banner>,
     )
   }

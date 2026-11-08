@@ -4418,6 +4418,17 @@
       "type": "string",
       "title": "Server Version"
      },
+     "ui_build": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ui Build"
+     },
      "latest": {
       "anyOf": [
        {
@@ -4458,6 +4469,7 @@
     "type": "object",
     "required": [
      "server_version",
+     "ui_build",
      "latest",
      "scan",
      "fyers",

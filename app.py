@@ -140,6 +140,11 @@ def scan_monitor():
         st.rerun(scope="app")
 
 
+# This old dashboard gets no new features: say where they are, at the top of every page
+st.info("**This is the old dashboard.** Everything new (chart patterns on the chart, Claude's option-chain forecast, "
+        "one-click Fyers login, automatic jobs, the cleaned-up pages) is in **Quant Desk**: "
+        "[open http://127.0.0.1:8600](http://127.0.0.1:8600) - start it with **3_dashboard.bat**.")
+
 # ----------------------------------------------------------------------------- sidebar
 latest = load_latest()
 with st.sidebar:

@@ -81,6 +81,7 @@ class FyersStatus(Model):
 
 class AppStatus(Model):
     server_version: str
+    ui_build: str | None = None         # the served build's entry script: a tab from an older build offers to reload
     latest: AsOf | None = None          # null => onboarding
     scan: ScanStatus
     fyers: FyersStatus

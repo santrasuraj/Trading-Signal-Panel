@@ -1194,10 +1194,14 @@ def test_screener_preset_and_sparkline_limits(client):
     assert list(sp["series"]) == ["IGIL"] and len(sp["series"]["IGIL"]) == 20
 
 
-def test_screener_results_within_filter(client):
-    """Missing results dates are NaN in a pandas-3 string column: the filter must not compare NaN with a date."""
-    from datetime import date
+def test_screener_results_within_filter(client, monkeypatch):
+    """Missing results dates are NaN in a pandas-3 string column: the filter must not compare NaN with a date.
+    'Today' is the fixture scan's day: its results calendar (23 Oct - 6 Nov 2026) is in the past on later runs."""
+    from datetime import date, datetime
+    from web.api import util
     from web.api.util import today_ist
+    scan_day = datetime(2026, 10, 23, 12, 28, tzinfo=util.now_ist().tzinfo)
+    monkeypatch.setattr(util, "now_ist", lambda: scan_day)
     allr = get_ok(client, "/api/screener?preset=all&min_turnover_cr=0", M.ScreenerResponse)["rows"]
     s = get_ok(client, "/api/screener?preset=all&min_turnover_cr=0&results_within=30", M.ScreenerResponse)
     assert s["rows"] and len(s["rows"]) < len(allr)                  # some symbols report, most do not

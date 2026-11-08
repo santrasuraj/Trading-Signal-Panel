@@ -19,7 +19,7 @@ A personal, evidence-based tool for the Indian stock market. Every day it:
 | When (IST) | What to do |
 |---|---|
 | Every trading morning, after 6 AM (best before 9:14 AM) | **🔑 Log in to Fyers.** Click the **Fyers** chip in Quant Desk's top bar, then **Log in with Fyers** (no command needed; see below). A token made before 6 AM stops working at 6 AM, and the 9:14 intraday live feed waits for the login. SEBI rules require a daily login since April 2026. |
-| Any time | Double-click **`3_dashboard.bat`** (Quant Desk opens at http://127.0.0.1:8600), then start a scan in **Settings › Scan** (**Full scan**). A scan takes a few minutes because it re-tests every strategy (a re-check without download took about 2.5 minutes on 24 Oct 2026); longer when it downloads new prices. The old Streamlit dashboard (`3b_dashboard_streamlit.bat`) has a **🔄 Run scan now** button. |
+| Any time | Double-click **`3_dashboard.bat`** (Quant Desk opens at http://127.0.0.1:8600). It keeps itself current: after an update it restarts its server by itself, and an open page shows **Quant Desk was updated - Reload** (the old Streamlit dashboard, `3b_dashboard_streamlit.bat`, gets no new features), then start a scan in **Settings › Scan** (**Full scan**). A scan takes a few minutes because it re-tests every strategy (a re-check without download took about 2.5 minutes on 24 Oct 2026); longer when it downloads new prices. The old Streamlit dashboard (`3b_dashboard_streamlit.bat`) has a **🔄 Run scan now** button. |
 | 3:40 PM / 7:15 PM | Automatic Telegram summaries, if you set them up (section 6). |
 | **After about 7 PM** | **Best time to decide.** NSE's official end-of-day data is published, so signals are final. |
 

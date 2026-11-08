@@ -112,6 +112,7 @@ export interface Ticker {
 }
 export interface AppStatus {               // GET /api/status - polled; MUST be file-stat/cached reads only (no NSE, no Fyers)
   server_version: string;
+  ui_build: string | null;                  // the served build's entry script; a tab from an older build offers to reload
   latest: AsOf | null;                      // null => onboarding
   scan: ScanStatus;
   fyers: FyersStatus;                       // verify=false variant

@@ -111,3 +111,36 @@ def test_dates_in_other_formats_and_unknown_codes():
     assert auto._when("Montag 9.11.") == "Montag 9.11."                 # shown as Windows printed it
     assert auto._result("1") == ("failed (code 0x1)", False)
     assert auto._result(None) == (None, None)
+
+
+def test_status_reports_the_served_ui_build(monkeypatch, tmp_path):
+    """A tab compares its own entry script with this: a different one means it runs an older build."""
+    from web.api.routers import system
+    idx = tmp_path / "index.html"
+    idx.write_text('<script type="module" crossorigin src="/assets/index-AbC_12-x.js"></script>', encoding="utf-8")
+    monkeypatch.setattr(system, "UI_INDEX", idx)
+    monkeypatch.setattr(system, "_ui", {"mtime": None, "build": None})
+    assert system.ui_build() == "index-AbC_12-x.js"
+    monkeypatch.setattr(system, "UI_INDEX", tmp_path / "missing.html")
+    assert system.ui_build() is None
+
+
+def test_server_watcher_sees_code_changes(tmp_path, monkeypatch):
+    """--reload restarts the server when a watched .py file changes, and only for the app's own code."""
+    import os
+    from web import serve
+    (tmp_path / "a").mkdir()
+    f = tmp_path / "a" / "x.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "a" / "data.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(serve, "WATCH_DIRS", [tmp_path / "a"])
+    snap = serve.code_snapshot()
+    assert list(snap) == [str(f)]
+    os.utime(f, (f.stat().st_atime, f.stat().st_mtime + 5))
+    assert serve.code_snapshot() != snap
+    assert {d.name for d in serve.WATCH_DIRS} == {"a"}
+
+
+def test_real_watch_dirs_are_the_apps_code():
+    from web import serve
+    assert [d.relative_to(serve.ROOT).as_posix() for d in serve.WATCH_DIRS] == ["web/api", "scanner"]
