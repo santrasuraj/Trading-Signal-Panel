@@ -25,7 +25,7 @@ from fastapi.routing import APIRoute
 
 from . import errors
 from .errors import ApiException, SafeJSONResponse
-from .routers import (action, ai, builder, coach, fno, levels, lookup, market, ops, options, outlook, overview, portfolio, smart_money,
+from .routers import (action, ai, builder, coach, desk, fno, levels, lookup, market, ops, options, outlook, overview, portfolio, smart_money,
                       orders, replay, research, scans, sim, strategies, stream, system, views, watch)
 from .security import SecurityMiddleware
 from .services import fyers_svc
@@ -92,7 +92,7 @@ def create_app(warm: bool = True) -> FastAPI:
     app.add_middleware(SecurityMiddleware)
     errors.install(app)
     for r in (system, overview, strategies, lookup, portfolio, market, ops, smart_money, options, fno, levels, outlook, ai,
-              action, watch, scans, research, orders, replay, coach, sim, builder, views, stream):
+              action, watch, scans, research, orders, replay, coach, sim, builder, views, desk, stream):
         app.include_router(r.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)

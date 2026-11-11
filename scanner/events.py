@@ -170,3 +170,40 @@ def trading_holidays(year: int) -> set[str]:
         if d.year == year:
             out.add(d.isoformat())
     return out
+
+
+def holiday_list(year: int) -> list[dict]:
+    """[{date, name}] of NSE's equity trading holidays in `year` (empty if unavailable), oldest first."""
+    try:
+        raw = _cached(f"holidays_{year}.json", 7 * 86400, lambda: _get_json("holiday-master", {"type": "trading"}),
+                      expect=dict)
+    except Exception:
+        return []
+    out = {}
+    rows = raw.get("CM", [])
+    for r in rows if isinstance(rows, list) else []:
+        if isinstance(r, dict):
+            d = _nse_date(r.get("tradingDate"))
+            if d is not None and d.year == year:
+                name = str(r.get("description") or "Market holiday").strip()
+                out[d.isoformat()] = name[:-1] + " (Muhurat trading in the evening)" if name.endswith("*") else name
+    return [{"date": k, "name": out[k]} for k in sorted(out)]
+
+
+def board_meetings(today: date, days: int) -> list[dict]:
+    """[{symbol, date, purpose}] of NSE's event calendar from `today` for `days` days (results, dividends, bonus,
+    fund raising...), cached for 6 hours under its own name (upcoming_results keeps its 14-day file). Raises when
+    NSE can't be reached and nothing is cached."""
+    def fetch():
+        return _get_json("event-calendar", {"index": "equities", "from_date": today.strftime("%d-%m-%Y"),
+                                            "to_date": (today + timedelta(days=days)).strftime("%d-%m-%Y")})
+    rows = _cached(f"events_{today:%Y%m%d}_{days}d.json", 6 * 3600, fetch)
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        d = _nse_date(r.get("date"))
+        sym = str(r.get("symbol", "")).strip().upper()
+        if d is not None and sym and today <= d <= today + timedelta(days=days):
+            out.append({"symbol": sym, "date": d.isoformat(), "purpose": str(r.get("purpose") or "").strip()})
+    return out

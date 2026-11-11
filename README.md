@@ -207,6 +207,34 @@ survivorship-free top 500, costs, slippage, tax, the "working" test, plus the fi
 years before it only, shown next to the hindsight best and a deflated Sharpe ratio, so the optimism of tuning is
 visible. A spec is data, never code (`scanner/custom.py`); saved in `data/custom_strategies.json`.
 
+### Market calendar (`g q`)
+Results dates (NSE's event calendar), ex-dividend / rights / bonus / split / buyback dates (NSE's corporate actions),
+F&O expiries (weekly and monthly, from NSE's contract list) and market holidays, 2 weeks to 3 months ahead, nearest
+first. Your holdings and watchlist stocks are flagged; a dividend shows its amount, its yield on the last close and the
+"buy by" day (with T+1 settlement the record date is the ex-date: own the shares at the close of the trading day
+before). Each source can fail on its own: the page says which.
+
+### Tax harvesting (`/tax`)
+Each holdings.csv lot as short or long term (long = held more than 12 months), with the date it turns long term; this
+financial year's tax on gains already booked (type your broker's tax P&L totals, or the real orders Quant Desk recorded
+are used) after the set-off rules; and before 31 March: long-term winners to sell and buy back on a later day to use
+the Rs 1.25 lakh exemption, losers that cut the tax on booked gains (only as many shares as still lower it), and
+short-term winners worth waiting for. Shares bought before 1 Feb 2018 (grandfathered cost) are flagged, not computed.
+Not tax advice.
+
+### Option strategy builder (`/option-builder`)
+Eleven ready-made strategies (spreads, straddles, strangles, iron condor / butterfly) placed at the money on a stored
+chain, every leg editable (side, call / put / future, strike, lots, price, volatility). Profit and loss at expiry and
+"today" (any number of days ahead, volatility shifted), breakevens, maximum profit and loss (or "unlimited"), net
+credit / debit, the position's delta / theta / vega / gamma and the chance of profit (lognormal at the at-the-money
+volatility: a model). Black-76 on the chain's forward; margin is not computed.
+
+### Portfolio risk (`g z`)
+Money at risk to your stops, one-day loss estimates (95% / 99% value at risk and expected shortfall from today's
+holdings replayed over two years), beta to the Nifty 50 and what -5/-10/-20% would do, the worst day in the store for
+today's holdings, the deepest fall, concentration (largest holding, industries, effective number of stocks) and a
+correlation matrix with pairs that move together.
+
 ### Your strategies in every scan, basket orders
 - Strategy builder > **Re-test in every scan**: a saved strategy joins the daily scan like the built-in ones (re-tested
   on the survivorship-free universe, a "working" status); its BUY / SELL appear on Today only while it is working.

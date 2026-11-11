@@ -5495,6 +5495,178 @@
      }
     }
    }
+  },
+  "/api/calendar": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Calendar",
+    "description": "Results, ex-dividend / rights / bonus / split / buyback dates, F&O expiries and market holidays, nearest first.",
+    "operationId": "calendar_api_calendar_get",
+    "parameters": [
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 90,
+       "minimum": 1,
+       "default": 30,
+       "title": "Days"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/tax": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Tax",
+    "description": "Your lots as short / long term, this financial year's tax, and gain / loss harvesting before 31 March.\n`st` / `lt`: net short / long-term gains already booked this year (losses negative); default: Quant Desk's\nrecorded real orders.",
+    "operationId": "tax_api_tax_get",
+    "parameters": [
+     {
+      "name": "st",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "number",
+         "maximum": 10000000000.0,
+         "minimum": -10000000000.0
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "St"
+      }
+     },
+     {
+      "name": "lt",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "number",
+         "maximum": 10000000000.0,
+         "minimum": -10000000000.0
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lt"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options/payoff": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Options Payoff",
+    "description": "Profit and loss of a multi-leg options position on a stored chain: at expiry and today, breakevens, maximum\nprofit / loss, Greeks and the chance of profit.",
+    "operationId": "options_payoff_api_options_payoff_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PayoffBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/risk": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Risk",
+    "description": "Money at risk to your stops, concentration, beta, one-day loss estimate, stress and correlation.",
+    "operationId": "risk_api_risk_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -19988,6 +20160,142 @@
      "note"
     ],
     "title": "PatternEvidenceResponse"
+   },
+   "PayoffBody": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "maxLength": 25,
+      "title": "Symbol"
+     },
+     "expiry": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 10
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Expiry"
+     },
+     "legs": {
+      "items": {
+       "$ref": "#/components/schemas/PayoffLeg"
+      },
+      "type": "array",
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Legs"
+     },
+     "days": {
+      "type": "number",
+      "maximum": 400.0,
+      "minimum": 0.0,
+      "title": "Days",
+      "default": 0
+     },
+     "iv_shift": {
+      "type": "number",
+      "maximum": 100.0,
+      "minimum": -50.0,
+      "title": "Iv Shift",
+      "default": 0
+     },
+     "lot": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 100000.0,
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lot"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "legs"
+    ],
+    "title": "PayoffBody"
+   },
+   "PayoffLeg": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "CE",
+       "PE",
+       "FUT"
+      ],
+      "title": "Kind"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "buy",
+       "sell"
+      ],
+      "title": "Side"
+     },
+     "strike": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 10000000.0,
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Strike"
+     },
+     "lots": {
+      "type": "integer",
+      "maximum": 500.0,
+      "minimum": 1.0,
+      "title": "Lots",
+      "default": 1
+     },
+     "price": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 10000000.0,
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Price"
+     },
+     "iv_pct": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 500.0,
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iv Pct"
+     }
+    },
+    "type": "object",
+    "required": [
+     "kind",
+     "side"
+    ],
+    "title": "PayoffLeg"
    },
    "PendingOrder": {
     "properties": {

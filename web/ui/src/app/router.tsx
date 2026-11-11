@@ -16,6 +16,10 @@ const Charts = lazy(() => import('@/pages/Charts'))
 const Sim = lazy(() => import('@/pages/Sim'))
 const Builder = lazy(() => import('@/pages/Builder'))
 const Heatmap = lazy(() => import('@/pages/Heatmap'))
+const Calendar = lazy(() => import('@/pages/Calendar'))
+const Tax = lazy(() => import('@/pages/Tax'))
+const Risk = lazy(() => import('@/pages/Risk'))
+const OptionBuilder = lazy(() => import('@/pages/OptionBuilder'))
 const Coach = lazy(() => import('@/pages/Coach'))
 const Signals = lazy(() => import('@/pages/Signals'))
 const SignalTrack = lazy(() => import('@/pages/SignalTrack'))
@@ -84,6 +88,10 @@ export const router = createBrowserRouter([
       { path: 'sim', element: g(<Sim />) },
       { path: 'builder', element: g(<Builder />) },
       { path: 'heatmap', element: g(<Heatmap />) },
+      { path: 'calendar', element: g(<Calendar />) },
+      { path: 'tax', element: g(<Tax />) },
+      { path: 'risk', element: g(<Risk />) },
+      { path: 'option-builder', element: g(<OptionBuilder />) },
       { path: 'coach', element: g(<Coach />) },
       { path: 'paper', element: g(<Paper />) },
       { path: 'paper/:key', element: g(<Paper />) },
