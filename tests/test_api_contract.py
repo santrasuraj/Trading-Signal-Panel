@@ -1504,3 +1504,24 @@ def test_late_entry_and_text_scans_degrade_cleanly(client, monkeypatch):
     monkeypatch.setattr(ai_svc, "_key", lambda: "")
     t = client.post("/api/scans/from-text", json={"text": "stocks at a new 52-week high"}, headers={"X-Quant-Desk": "1"})
     assert t.status_code == 501 and t.json()["error"]["code"] == "FEATURE_UNAVAILABLE"
+
+
+# ------------------------------------------------------------------ orders (never reach FYERS here: no token in the fixture)
+def test_orders_are_off_two_step_and_guarded(client):
+    H = {"X-Quant-Desk": "1"}
+    v = client.get("/api/orders").json()
+    assert v["enabled"] is False and v["kill"] is False and v["logged_in"] is False
+    t = {"symbol": "IGIL", "side": "BUY", "qty": 1, "type": "LIMIT", "product": "CNC", "limit_price": 100.0}
+    assert client.post("/api/orders/preview", json=t).status_code == 403          # CSRF header required
+    pv = client.post("/api/orders/preview", json=t, headers=H).json()
+    failed = {c["key"] for c in pv["checks"] if c["blocking"] and not c["ok"]}
+    assert pv["ok"] is False and pv["preview_id"] is None and {"enabled", "login"} <= failed
+    assert client.post("/api/orders/place", json={"preview_id": "0" * 16, "confirm": True}, headers=H).status_code == 422
+    assert client.post("/api/orders/enable", json={"on": True, "phrase": "yes"}, headers=H).status_code == 422
+    assert client.post("/api/orders/enable", json={"on": True, "phrase": "ENABLE"}, headers=H).json() == {"enabled": True}
+    k = client.post("/api/orders/kill", json={"on": True, "reason": "test"}, headers=H).json()
+    assert k["kill"] is True
+    assert client.post("/api/orders/kill", json={"on": False}, headers=H).json()["kill"] is False
+    client.post("/api/orders/enable", json={"on": False}, headers=H)
+    events = [e["event"] for e in client.get("/api/orders").json()["audit"]]
+    assert {"preview", "enabled", "kill_on", "kill_off", "disabled"} <= set(events)

@@ -129,6 +129,28 @@ or *likely luck*. On 11 Nov 2026: momentum leaders "could be luck" (deflated 66%
   volume, and panes for RSI, MACD, Stochastic, ADX (+DI / -DI), ATR, on-balance volume, CCI, money flow, Williams %R and
   rate of change (textbook parameters).
 
+### Placing orders on your own FYERS account (Orders page, `g e`)
+Off until you switch it on (Orders page, type ENABLE). Then every BUY / SELL card has **Buy on FYERS… / Sell on
+FYERS…**, which opens an order ticket prefilled from the signal (quantity sized for your capital, limit at the live
+price, the strategy's stop-loss):
+1. **Review order** sends nothing: the server returns the exact FYERS order, every check, the charges and the risk if
+   stopped (`web/api/services/orders_svc.py`).
+2. Tick *I have checked this order* and **Send** within 60 s. One attempt only: if FYERS doesn't answer, the app says
+   "check the order book" and never resends (a retry could buy twice).
+
+Checks enforced on the server (limits in `config.yaml` → `orders:`): switched on, kill switch off, logged in to FYERS
+today, market open (no after-market orders through the API), limit orders only (unless `allow_market`), the limit within
+3% of the last price, one order at most 10% of capital, at most 20 orders a day, at least 1 s apart, no repeat of the
+same order within 2 minutes, **daily-loss lockout** (today's P&L below -2% of capital: no new buys for the day; exits are
+always allowed), and for a delivery sell no more than you hold. The **kill switch** blocks every new order and cancels
+every pending one. Once a delivery buy fills, **Protect** places a FYERS GTT OCO sell: the target above the price and the
+stop-loss below it, whichever comes first, live across days. Slippage of each signal's fill against its reference price
+and an append-only audit of everything sent or blocked (`data/orders_audit.jsonl`) are on the same page.
+
+SEBI's retail algo framework (in force for all brokers from 1 Apr 2026) applies to API orders: register this PC's
+**static IP** in the FYERS API dashboard and log in every trading day. Below 10 orders a second your own orders need no
+strategy registration; the app stays at 1 a second. Your own account only: the app never trades for anyone else.
+
 ### Fyers login, step by step
 No command to run: everything happens in Quant Desk.
 1. Click the **Fyers** chip in the top bar (or **Log in** in Settings › Fyers, or the yellow banner), then **Log in with Fyers**. The Fyers login page opens in a new tab.
@@ -520,6 +542,7 @@ web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), s
   api/services/action_svc.py   one answer per stock: BUY / SELL (exit) / HOLD / NO EDGE (Today, Chart)
   api/services/intraday_chart.py  5 / 15-minute candles with VWAP for the Chart page
   api/services/robustness.py   Monte Carlo, deflated Sharpe and consistency per strategy
+  api/services/orders_svc.py   your own FYERS orders: preview, checks, place once, kill switch, protection, audit
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 intraday_sync.py intraday jobs: backfill, 15:45 archive, live feed, re-test

@@ -26,19 +26,21 @@ export interface ActionCardData {
              stop_price: number | null; target_price: number | null; level: string | null; alerts: string[] } | null
   near: string[]
   risks: { kind: 'results' | 'ban' | 'regime' | 'provisional'; text: string }[]
-  as_of: AsOf; note: string
+  as_of: AsOf; note: string; pending: string[]
 }
 
 export interface TodayData {
   as_of: AsOf; actions: ActionCardData[]; holds: ActionCardData[]
   counts: { buy: number; sell: number; hold: number }
   unproven_strategies: string[]; history: { sessions: number; with_actions: number }
-  empty_note: string | null; note: string
+  empty_note: string | null; note: string; pending: string[]
 }
 
 export const useAction = (symbol: string) =>
   useQuery({ queryKey: ['action', symbol], queryFn: () => fetchJson<ActionCardData>(`/api/action/${encodeURIComponent(symbol)}`),
-    staleTime: Infinity, placeholderData: keepPreviousData, enabled: !!symbol })
+    staleTime: Infinity, placeholderData: keepPreviousData, enabled: !!symbol,
+    refetchInterval: (q) => (q.state.data?.pending?.length ? 4000 : false) })
 
 export const useToday = () =>
-  useQuery({ queryKey: ['today'], queryFn: () => fetchJson<TodayData>('/api/today'), staleTime: Infinity })
+  useQuery({ queryKey: ['today'], queryFn: () => fetchJson<TodayData>('/api/today'), staleTime: Infinity,
+    refetchInterval: (q) => (q.state.data?.pending?.length ? 4000 : false) })   // until the late-entry check is done

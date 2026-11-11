@@ -1,11 +1,15 @@
 // The one answer for a stock: BUY · SELL (exit) · HOLD · NO EDGE (web/api/services/action_svc.py), with the strategy
 // behind it, its tested record, the live price, and the risk facts that never change the answer.
 
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, CircleSlash, ShieldCheck } from 'lucide-react'
 import { useAction, type ActionCardData, type ActionOrder, type ActionState } from '@/api/action'
 import { useLiveQuotes } from '@/api/hooks'
 import { PriceStamp } from '@/components/LivePrice'
+import { OrderTicket } from '@/components/OrderTicket'
+import { Button } from '@/components/ui'
+import type { Ticket } from '@/api/orders'
 import { Money, Pct, Price } from '@/components/num'
 import { Skeleton } from '@/components/feedback'
 import { cn } from '@/lib/csv'
@@ -57,6 +61,15 @@ export function ActionCardView({ a, compact }: { a: ActionCardData; compact?: bo
   const q = lq.quotes[a.symbol]
   const s = ACTION_STYLE[a.state]
   const p = a.primary
+  const [ticket, setTicket] = useState<Ticket | null>(null)
+  const price = q?.price ?? p?.price ?? a.holding?.price ?? null
+  const open = (side: 'BUY' | 'SELL') => setTicket({
+    symbol: a.symbol, side, type: 'LIMIT', product: 'CNC',
+    qty: Math.max(1, side === 'SELL' ? Math.floor(a.holding?.qty ?? p?.qty ?? 1) : (p?.qty ?? 1)),
+    limit_price: price != null ? Math.round(price * 100) / 100 : null,
+    stop: side === 'BUY' ? (p?.stop ?? null) : null, target: a.holding?.target_price ?? null,
+    ref_price: p?.price ?? price, strategy_key: p?.strategy_key ?? null, source: 'action_card',
+  })
   return (
     <div className={cn('rounded-lg border p-3', s.cls)} data-testid="action-card" data-state={a.state}>
       <div className="flex flex-wrap items-center gap-2">
@@ -68,7 +81,11 @@ export function ActionCardView({ a, compact }: { a: ActionCardData; compact?: bo
           {q && <Pct v={q.change_pct} dp={2} />}
           <PriceStamp q={q} session={lq.data?.session} fallbackDate={a.as_of.data_date} />
         </span>
+        {a.state === 'BUY' && <Button size="sm" variant="primary" onClick={() => open('BUY')}>Buy on FYERS…</Button>}
+        {a.state === 'SELL' && <Button size="sm" onClick={() => open('SELL')} className="border-loss/50 text-loss">Sell on FYERS…</Button>}
+        {a.state === 'HOLD' && <Button size="sm" variant="ghost" onClick={() => open('SELL')}>Sell…</Button>}
       </div>
+      {ticket && <OrderTicket open onClose={() => setTicket(null)} initial={ticket} />}
       {p && (a.state === 'BUY' || a.state === 'SELL') && (
         <div className="mt-2 space-y-1.5">
           <OrderLine o={p} live={q?.price} />

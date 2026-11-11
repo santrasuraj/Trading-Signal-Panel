@@ -4134,6 +4134,267 @@
      }
     }
    }
+  },
+  "/api/orders": {
+   "get": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Orders View",
+    "description": "Switches, limits, today's FYERS orders / positions / stop-loss-target orders, the audit log and slippage.",
+    "operationId": "orders_view_api_orders_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/orders/preview": {
+   "post": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Preview",
+    "description": "The exact order, every check and the charges. Sends nothing.",
+    "operationId": "preview_api_orders_preview_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Ticket"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/orders/place": {
+   "post": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Place",
+    "description": "Sends a previewed order to FYERS (once; never retried).",
+    "operationId": "place_api_orders_place_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PlaceBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/orders/cancel/{order_id}": {
+   "post": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Cancel",
+    "operationId": "cancel_api_orders_cancel__order_id__post",
+    "parameters": [
+     {
+      "name": "order_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9A-Za-z-]{1,40}$",
+       "title": "Order Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/orders/kill": {
+   "post": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Kill",
+    "description": "On: blocks every new order and cancels every pending order. Off: orders allowed again.",
+    "operationId": "kill_api_orders_kill_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Switch"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/orders/enable": {
+   "post": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Enable",
+    "description": "Switch order placement on (type ENABLE) or off.",
+    "operationId": "enable_api_orders_enable_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Switch"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/orders/protect": {
+   "post": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Protect",
+    "description": "A FYERS GTT OCO sell on a delivery holding: the target above the price, the stop-loss below it.",
+    "operationId": "protect_api_orders_protect_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProtectBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -4263,6 +4524,14 @@
      "note": {
       "type": "string",
       "title": "Note"
+     },
+     "pending": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Pending",
+      "default": []
      }
     },
     "type": "object",
@@ -4281,7 +4550,8 @@
      "near",
      "risks",
      "as_of",
-     "note"
+     "note",
+     "pending"
     ],
     "title": "ActionCard"
    },
@@ -18579,6 +18849,25 @@
     ],
     "title": "PitHealth"
    },
+   "PlaceBody": {
+    "properties": {
+     "preview_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "title": "Preview Id"
+     },
+     "confirm": {
+      "type": "boolean",
+      "title": "Confirm"
+     }
+    },
+    "type": "object",
+    "required": [
+     "preview_id",
+     "confirm"
+    ],
+    "title": "PlaceBody"
+   },
    "PriceAlert": {
     "properties": {
      "id": {
@@ -18708,6 +18997,41 @@
      "kind"
     ],
     "title": "PriceLine"
+   },
+   "ProtectBody": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "maxLength": 25,
+      "title": "Symbol"
+     },
+     "qty": {
+      "type": "integer",
+      "minimum": 1.0,
+      "title": "Qty"
+     },
+     "stop": {
+      "type": "number",
+      "title": "Stop"
+     },
+     "target": {
+      "type": "number",
+      "title": "Target"
+     },
+     "confirm": {
+      "type": "boolean",
+      "title": "Confirm"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "qty",
+     "stop",
+     "target",
+     "confirm"
+    ],
+    "title": "ProtectBody"
    },
    "Quote": {
     "properties": {
@@ -24336,6 +24660,31 @@
     ],
     "title": "StrengthPart"
    },
+   "Switch": {
+    "properties": {
+     "on": {
+      "type": "boolean",
+      "title": "On"
+     },
+     "phrase": {
+      "type": "string",
+      "maxLength": 20,
+      "title": "Phrase",
+      "default": ""
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 120,
+      "title": "Reason",
+      "default": ""
+     }
+    },
+    "type": "object",
+    "required": [
+     "on"
+    ],
+    "title": "Switch"
+   },
    "SymbolInfo": {
     "properties": {
      "symbol": {
@@ -24570,6 +24919,129 @@
     ],
     "title": "Ticker"
    },
+   "Ticket": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "maxLength": 25,
+      "title": "Symbol"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "BUY",
+       "SELL"
+      ],
+      "title": "Side"
+     },
+     "qty": {
+      "type": "integer",
+      "maximum": 1000000.0,
+      "minimum": 1.0,
+      "title": "Qty"
+     },
+     "type": {
+      "type": "string",
+      "enum": [
+       "LIMIT",
+       "MARKET",
+       "SL-M",
+       "SL-L"
+      ],
+      "title": "Type",
+      "default": "LIMIT"
+     },
+     "product": {
+      "type": "string",
+      "enum": [
+       "CNC",
+       "INTRADAY"
+      ],
+      "title": "Product",
+      "default": "CNC"
+     },
+     "limit_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limit Price"
+     },
+     "trigger_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trigger Price"
+     },
+     "stop": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop"
+     },
+     "target": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target"
+     },
+     "ref_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ref Price"
+     },
+     "strategy_key": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 40
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Strategy Key"
+     },
+     "source": {
+      "type": "string",
+      "maxLength": 20,
+      "title": "Source",
+      "default": "manual"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "side",
+     "qty"
+    ],
+    "title": "Ticket"
+   },
    "TimeSeries": {
     "properties": {
      "t": {
@@ -24722,6 +25194,14 @@
      "note": {
       "type": "string",
       "title": "Note"
+     },
+     "pending": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Pending",
+      "default": []
      }
     },
     "type": "object",
@@ -24733,7 +25213,8 @@
      "unproven_strategies",
      "history",
      "empty_note",
-     "note"
+     "note",
+     "pending"
     ],
     "title": "TodayResponse"
    },

@@ -213,3 +213,14 @@ ai_forecast:
 # Individual intraday strategies can be switched off, e.g.:
 # intraday_strategies:
 #   supertrend: {enabled: false}
+
+# Orders on your own FYERS account (Orders page; switched on there, off by default). Every order is previewed and
+# confirmed by you; these limits are enforced on the server.
+orders:
+  product: CNC                 # CNC (delivery) or INTRADAY
+  max_order_value_pct: 10      # one order at most this % of account.capital
+  max_orders_per_day: 20
+  daily_loss_limit_pct: 2      # today's P&L below -2% of capital: no new buys for the rest of the day
+  price_band_pct: 3            # a limit price at most 3% away from the last price (fat-finger guard)
+  min_seconds_between_orders: 1
+  allow_market: false          # market orders (the broker converts them to price-protected orders)

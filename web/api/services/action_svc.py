@@ -245,8 +245,14 @@ def card(ctx: Context, sym: str) -> dict:
                     if held else None),
         "near": _near(ctx, sym) if state == "NO_EDGE" or not primary else [],
         "risks": _risks(ctx, sym, provisional),
-        "as_of": st.as_of(ctx.lt), "note": NOTE,
+        "as_of": st.as_of(ctx.lt), "note": NOTE, "pending": _pending(ctx),
     }
+
+
+def _pending(ctx: Context) -> list[str]:
+    """Checks still computing in the background whose answer could change a card (the page polls until done)."""
+    holds = any(ctx.working(s) and s.get("positions") for s in ctx.active)
+    return ["late_entry"] if ctx.late is None and holds else []
 
 
 def one(sym: str) -> dict:
@@ -293,6 +299,8 @@ def today() -> dict:
     hist = _journal_days()
     if acts:
         empty = None
+    elif _pending(ctx):
+        empty = "Checking which held stocks can still be joined late (late-entry test, a few seconds)..."
     else:
         empty = ("No tested BUY or SELL today: no working strategy acts at the next open."
                  + (f" For comparison, the paper journal has model orders (any strategy) on {hist['with_actions']} of "
@@ -300,4 +308,5 @@ def today() -> dict:
     return {"as_of": st.as_of(ctx.lt), "actions": acts, "holds": holds,
             "counts": {"buy": sum(c["state"] == "BUY" for c in acts), "sell": sum(c["state"] == "SELL" for c in acts),
                        "hold": len(holds)},
-            "unproven_strategies": unproven, "history": hist, "empty_note": empty, "note": NOTE}
+            "unproven_strategies": unproven, "history": hist, "empty_note": empty, "note": NOTE,
+            "pending": _pending(ctx)}

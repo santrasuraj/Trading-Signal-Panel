@@ -70,6 +70,7 @@ class ActionCard(Model):
     risks: list[ActionRisk]                       # facts that never change the answer
     as_of: AsOf
     note: str
+    pending: list[str] = []                       # background checks still running (late_entry): poll again
 
 
 class ActionHistory(Model):
@@ -92,6 +93,7 @@ class TodayResponse(Model):
     history: ActionHistory
     empty_note: str | None = None
     note: str
+    pending: list[str] = []
 
 
 __all__ = ["ActionState", "ActionOrder", "ActionHolding", "ActionRisk", "ActionCard", "ActionHistory", "TodayCounts",
