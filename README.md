@@ -165,6 +165,59 @@ when one bar touches both), intraday positions are squared off at the close, and
 session with trades is saved to `data/replay_log.jsonl` with the P&L recomputed on the server from the bars, never
 taken from the browser; the page shows your practice record (win rate, per trade, R, profit factor, exits).
 
+### Charts: types, drawings, multi-chart (`g c`, `g l`)
+- **Chart types** on the daily / weekly chart: candles, Heikin Ashi (smoothed; indicators and drawings still line up),
+  Renko (1-5% bricks) and three-line break (time left out, so they get their own simple chart).
+- **Drawings**: level, trendline, Fibonacci, zone, text note and anchored VWAP (from any bar). A level or a trendline
+  becomes an alert in one click; a trendline alert follows the line as it rises or falls.
+- **Multi-chart** (`/charts`): 1, 2 or 4 charts, each its own stock and timeframe (1W / 1D / 15m / 5m / 1m), or one
+  stock on four timeframes at once.
+
+### Alerts beyond price
+Besides price, day-change and trendline alerts (checked on every live tick), alerts on **RSI(14)**, a **moving-average
+cross** (10 to 200 days), a **saved scan getting a new stock**, and a **candle pattern with a tested edge** on a stock
+(only patterns whose 8-year study verdict is "edge"). The RSI / average / scan ones use the live price on the daily
+history (`scanner/rule_alerts.py`) and are checked by the 5-minute intraday job, the open dashboard and each scan;
+patterns after each scan. Telegram and, after **Turn on notifications** (Watchlist > Alerts), a desktop notification.
+
+### Installable app
+The dashboard can be installed as an app (the install icon in Edge / Chrome's address bar): its own window and a
+Start-menu / taskbar icon. Notifications then show with the window in the background, and a click opens the right page.
+Only the build files are cached; prices, signals and orders always come from the server. A phone gets alerts through
+Telegram (the dashboard runs on this PC).
+
+### Live scans
+Scans > **Live prices** runs the scan on today's live prices (re-run every minute): today's candle is the last bar,
+indicators included; only stocks with a live quote can match. The bell on a saved scan sets a new-hit alert.
+
+### Practice account (`g u`) and trading from the chart
+A practice account on today's live prices: the same order ticket as the real one (switch **Practice / Real · FYERS**),
+market and limit orders, stop-loss and target, intraday shorts squared off at 15:20, FYERS charges, nothing sent to
+FYERS (`web/api/services/sim_svc.py`, `data/sim_account.json`). On a chart, **Trade on chart** opens a ticket at the
+price you click; the **Market depth** card shows FYERS' five best bids and offers (needs today's login, refreshed every
+2 s while open) and a click on a price opens a ticket there. Personal use only: NSE's data policy does not allow
+offering simulated trading on live prices to others.
+
+### Strategy builder (`g j`)
+Describe a strategy in plain English (Claude turns it into rules; it never says whether they work) or build it from
+the rule editor: entry rules from the scan fields, exits by stop, target, trailing stop, holding days or exit rules,
+up to 50 positions, ranked by any field. **Test 8 years** runs it exactly like the built-in strategies: the
+survivorship-free top 500, costs, slippage, tax, the "working" test, plus the first 70% of the years against the last
+30%. **Optimise exits** tries 27 exit settings with a walk-forward: each year uses the settings that did best on the
+years before it only, shown next to the hindsight best and a deflated Sharpe ratio, so the optimism of tuning is
+visible. A spec is data, never code (`scanner/custom.py`); saved in `data/custom_strategies.json`.
+
+### Dated charges and 1-minute history
+- Backtests charge the SEBI fee, stamp duty and NSE transaction charge **as they were on each trade date** (documented
+  changes of Jun 2020, Jul 2020, Oct 2024 and Mar 2026; everything else at today's rates).
+- **1-minute bars from FYERS** history after the daily archive (last 60 days; `intraday.one_minute_days`, ~150 calls a
+  day, 0 turns it off), alongside the ones the live feed builds.
+
+### Browser tests
+`npm run build` then `npm run e2e` in web/ui: Playwright drives the built dashboard in the Edge installed on this PC
+(no browser download), served by the real API on port 8620. Read-only: pages, a replay, chart types, the practice
+ticket (cancelled) and a strategy-builder test.
+
 ### 1-minute charts, login reminder
 - **1-minute candles** (Chart › 1m, up to 5 sessions): the live service builds them from the same FYERS ticks as the
   5-minute bars (`data/intraday/live/1m_YYYYMMDD.parquet`) and keeps them in the intraday store at each close, so they
@@ -585,6 +638,8 @@ web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), s
   api/services/orders_svc.py   your own FYERS orders: preview, checks, place once, kill switch, protection, audit
   api/services/replay_svc.py   market replay: past sessions bar by bar, results recomputed with real charges
   api/services/coach_svc.py    trade coach: your own record's process checks, and Claude's review of them
+  api/services/sim_svc.py      practice account on live prices; depth_svc.py: FYERS market depth
+  api/services/builder_svc.py  strategy builder: plain English -> spec, tests, walk-forward optimiser
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 intraday_sync.py intraday jobs: backfill, 15:45 archive, live feed, re-test
