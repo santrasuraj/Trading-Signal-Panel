@@ -27,8 +27,7 @@ export function OrderTicket({ open, onClose, initial }: { open: boolean; onClose
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           {!pv?.ok ? <Button onClick={review} loading={a.preview.isPending}>Review order</Button>
-            : <Button variant="primary" disabled={!checked} loading={a.place.isPending} onClick={() => a.place.mutate(pv.preview_id!)}
-                className={buy ? '' : 'bg-loss hover:bg-loss'}>Send {t.side} to FYERS</Button>}
+            : <Button variant={buy ? 'buy' : 'sell'} disabled={!checked} loading={a.place.isPending} onClick={() => a.place.mutate(pv.preview_id!)}>Send {t.side} to FYERS</Button>}
         </>
       )}>
       {res ? (

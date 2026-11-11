@@ -6,6 +6,7 @@ universe - builds 5-minute bars from the ticks, and every few seconds writes:
   data/intraday/live/YYYYMMDD.parquet   completed bars of today
   data/intraday/live/forming.json       the bar currently forming per symbol, and when the last tick came
   data/intraday/live/prints_YYYYMMDD.parquet, book.json   large trades and order-book totals (footprints.py)
+  data/intraday/live/orders_feed.json   your FYERS order updates from the order socket (order_feed.py, read-only)
 At the end of the session the completed bars are merged into the intraday store, so they are kept
 even though FYERS' REST history only covers a rolling year. The intraday scanner reads these files
 for today's setups instead of Yahoo's ~15-minute delayed data, as long as ticks keep arriving.
@@ -28,7 +29,7 @@ from .. import watch
 from ..providers import load_token
 from ..settings import IST, LOG_DIR, ist_now
 from . import data as idata
-from . import quote_hub
+from . import order_feed, quote_hub
 from .fyers_sync import is_trading_day
 
 MAX_SYMBOLS = 100               # FYERS Standard plan WebSocket limit (all connections together)
@@ -269,6 +270,7 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
         log(f"Live: now streaming {len(want)} symbols (+{len(add)} for the screen, -{len(drop)})")
 
     stop_quotes = threading.Event()
+    feed = order_feed.OrderFeed(live_dir(root))         # your order updates (fills, rejections) pushed by FYERS
 
     def quote_writer() -> None:
         """quotes.json about twice a second while ticks arrive: the browser's live prices."""
@@ -282,6 +284,10 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
                         log("Alerts: " + "; ".join(watch.message(a) for a in fired))
             except Exception:
                 pass                           # the next round tries again
+            try:
+                feed.write(idata._replace)     # cheap when nothing changed; a heartbeat once a minute
+            except Exception:
+                pass
 
     sock = data_ws.FyersDataSocket(access_token=f"{tok['client_id']}:{tok['access_token']}", log_path=str(LOG_DIR),
                                    litemode=False, write_to_file=False, reconnect=True, reconnect_retry=10,
@@ -292,10 +298,19 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     sock.background_flag = True
     written, write_fails = 0, 0
     threading.Thread(target=quote_writer, name="quotes", daemon=True).start()
+    osock = None
     try:
         sock.connect()
+        try:
+            osock = order_feed.start_socket(tok, feed, log, LOG_DIR)
+        except Exception as e:                              # orders still show on the page's own poll
+            log(f"Order updates: could not start the FYERS order socket ({type(e).__name__}: {e})")
         while not _session_over():
             time.sleep(FLUSH_SECONDS)
+            try:
+                order_feed.keep_subscribed(osock, feed)
+            except Exception:
+                pass
             if status["live"]:
                 try:
                     resubscribe()
@@ -325,6 +340,12 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     finally:
         stop_quotes.set()
         _stop_socket(sock)
+        order_feed.stop_socket(osock)
+        feed.set_connected(False)
+        try:
+            feed.write(idata._replace)
+        except Exception:
+            pass
         try:
             book.write_if_changed(live_dir(root), idata._replace)     # the last trade of the day stays on screen
         except Exception:

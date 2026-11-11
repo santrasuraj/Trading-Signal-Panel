@@ -146,10 +146,32 @@ always allowed), and for a delivery sell no more than you hold. The **kill switc
 every pending one. Once a delivery buy fills, **Protect** places a FYERS GTT OCO sell: the target above the price and the
 stop-loss below it, whichever comes first, live across days. Slippage of each signal's fill against its reference price
 and an append-only audit of everything sent or blocked (`data/orders_audit.jsonl`) are on the same page.
+While the live service runs (`4_intraday_live.bat`, market hours) it also listens on FYERS' order socket: a fill,
+rejection or cancellation of any of your orders shows as a notice on every open page within about a second
+(`scanner/intraday/order_feed.py`, read-only; without it the Orders page checks every 5 s). Each filled order is kept in
+`data/fills.jsonl`, since FYERS' order book only covers today: that is your trade history for the Coach.
 
 SEBI's retail algo framework (in force for all brokers from 1 Apr 2026) applies to API orders: register this PC's
 **static IP** in the FYERS API dashboard and log in every trading day. Below 10 orders a second your own orders need no
 strategy registration; the app stays at 1 a second. Your own account only: the app never trades for anyone else.
+
+### Replay (`g y`): practise on real past sessions
+Pick a stock and a past day, or **Random, blind** (the name and date stay hidden until the end, so memory can't help),
+then reveal one bar at a time (Space play / pause, → next bar, `b` buy, `s` sell). 5- and 15-minute replays cover the
+~150 most liquid F&O stocks over the months in the intraday store, after two sessions of context; Daily replays the
+next 60 sessions from any date since 2018 (long only: delivery can't be sold short). Market orders fill at the last
+close plus slippage, stops and targets on the bars after (at the open when the price gaps past them, the stop first
+when one bar touches both), intraday positions are squared off at the close, and FYERS' real charges apply. A finished
+session with trades is saved to `data/replay_log.jsonl` with the P&L recomputed on the server from the bars, never
+taken from the browser; the page shows your practice record (win rate, per trade, R, profit factor, exits).
+
+### Coach (`g h`): where your own trading leaks money
+Reads only your own record: replays, real fills (`data/fills.jsonl`, matched buy to sell first-in, first-out) and your
+holdings against their stops. It checks your process: trades without a stop, holding losers longer than winners, one
+loss wiping out several wins, busy sessions, the trade right after a loss, charges, and whether recent trades are
+better. With an `ANTHROPIC_API_KEY` in `.env`, **Write my review** sends those numbers (nothing else) to Claude for a
+written review with concrete if-then rules (one call, about Rs 5-15), kept until your numbers change. Fewer than ~30
+practice trades or ~15 real round trips: it says the patterns are first hints, not findings.
 
 ### Fyers login, step by step
 No command to run: everything happens in Quant Desk.
@@ -543,6 +565,8 @@ web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), s
   api/services/intraday_chart.py  5 / 15-minute candles with VWAP for the Chart page
   api/services/robustness.py   Monte Carlo, deflated Sharpe and consistency per strategy
   api/services/orders_svc.py   your own FYERS orders: preview, checks, place once, kill switch, protection, audit
+  api/services/replay_svc.py   market replay: past sessions bar by bar, results recomputed with real charges
+  api/services/coach_svc.py    trade coach: your own record's process checks, and Claude's review of them
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 intraday_sync.py intraday jobs: backfill, 15:45 archive, live feed, re-test

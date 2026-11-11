@@ -1093,7 +1093,7 @@ def test_signal_track_record_follows_journaled_buys(client):
 
 def test_quotes_endpoint_shape_and_validation(client):
     d = get_ok(client, "/api/quotes?symbols=NIFTY50,IGIL", M.QuotesResponse)
-    if d["session"] != "open":
+    if d["session"] not in ("open", "post_close"):    # just after the close the last trade still shows (quotes_svc)
         assert d["source"] == "close" and {x["symbol"] for x in d["quotes"]} <= {"NIFTY50", "IGIL"}
     assert client.get("/api/quotes?symbols=bad%20one").status_code == 422
     assert client.get("/api/quotes").status_code == 422

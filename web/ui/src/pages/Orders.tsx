@@ -60,13 +60,14 @@ export default function Orders() {
               </span>
               <span className="text-xs text-muted">
                 {d.logged_in ? 'Logged in to FYERS today' : 'Not logged in to FYERS today'} · {d.today_count} order{d.today_count === 1 ? '' : 's'} today
+                {' · '}<span title="FYERS' order socket, run by the live service (4_intraday_live.bat) during market hours">{d.feed?.connected ? 'order updates pushed live by FYERS' : 'order updates checked every 5 s'}</span>
                 {d.pnl_today != null && <> · today's P&L <Money v={d.pnl_today} signed color /></>}
               </span>
               <div className="flex-1" />
               {d.enabled ? <Button size="sm" variant="ghost" icon={<Power className="h-3.5 w-3.5" />} onClick={() => a.enable.mutate({ on: false }, { onError: fail('Not changed') })}>Switch orders off</Button>
                 : <Button size="sm" icon={<Power className="h-3.5 w-3.5" />} onClick={() => { setPhrase(''); setEnableOpen(true) }}>Switch orders on…</Button>}
               {d.kill ? <Button size="sm" onClick={() => a.kill.mutate({ on: false }, { onError: fail('Not changed') })}>Release kill switch</Button>
-                : <Button size="sm" className="border-loss bg-loss text-white hover:bg-loss/90" icon={<OctagonX className="h-3.5 w-3.5" />} loading={a.kill.isPending}
+                : <Button size="sm" variant="danger" icon={<OctagonX className="h-3.5 w-3.5" />} loading={a.kill.isPending}
                     onClick={() => { if (window.confirm('Stop all trading now? This blocks every new order and cancels every pending order on FYERS.')) a.kill.mutate({ on: true, reason: 'kill switch pressed' }, { onSuccess: (r) => toast({ tone: 'info', title: `Kill switch on: ${r.cancelled.length} pending order(s) cancelled` }), onError: fail('Kill switch failed') }) }}>
                     Kill switch</Button>}
             </div>

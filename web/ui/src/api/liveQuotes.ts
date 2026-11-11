@@ -16,6 +16,12 @@ export interface StreamMeta { as_of: string; session: MarketSession; note: strin
 
 type Listener = () => void
 
+/** One update of your own FYERS order, pushed over the quote stream (scanner/intraday/order_feed.py). */
+export interface OrderEvent {
+  order: { id: string; symbol: string; side: 'BUY' | 'SELL'; status: string; qty: number | null; filled: number | null; avg_price: number | null; message: string | null }
+  text: string
+}
+
 export class QuoteStream {
   private counts = new Map<string, number>()
   private quotes = new Map<string, LiveQuote>()
@@ -46,6 +52,15 @@ export class QuoteStream {
   onAlert(l: (a: { alert: { id: string; symbol: string }; text: string }) => void): () => void {
     this.alertListeners.add(l)
     return () => { this.alertListeners.delete(l) }
+  }
+
+  private orderListeners = new Set<(o: OrderEvent) => void>()
+  private seenOrders = new Set<string>()
+
+  /** Called once for every update of your FYERS orders (fill, rejection, cancel) the live service's order socket sees. */
+  onOrder(l: (o: OrderEvent) => void): () => void {
+    this.orderListeners.add(l)
+    return () => { this.orderListeners.delete(l) }
   }
 
   get(sym: string): LiveQuote | undefined { return this.quotes.get(sym) }
@@ -118,6 +133,15 @@ export class QuoteStream {
         if (this.seenAlerts.has(key)) return
         this.seenAlerts.add(key)
         for (const l of this.alertListeners) l(d)
+      } catch { /* skip */ }
+    })
+    es.addEventListener('order', (ev) => {
+      try {
+        const d = JSON.parse((ev as MessageEvent<string>).data) as OrderEvent
+        const key = `${d.order.id}@${d.order.status}@${d.order.filled ?? ''}`
+        if (this.seenOrders.has(key)) return
+        this.seenOrders.add(key)
+        for (const l of this.orderListeners) l(d)
       } catch { /* skip */ }
     })
     es.onopen = () => { this.connected = true; this.bump() }

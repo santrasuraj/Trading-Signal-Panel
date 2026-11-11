@@ -25,6 +25,7 @@ export interface OrdersView {
     avg_price: number | null; status: string; pending: boolean; product: string; time: string; message: string | null }[]
   positions: { symbol: string; qty: number; avg: number | null; ltp: number | null; pl: number | null; product: string }[]
   pnl_today: number | null; gtt: { id: string; symbol: string; status: string | number; info: unknown }[]
+  feed?: { connected: boolean; updated: number | null; seq: number }
   errors: string[]; audit: { ts: string; event: string; [k: string]: unknown }[]
   reconciliation: { id: string; symbol: string; side: OrderSide; ref_price: number; fill: number; slippage_pct: number; strategy_key: string | null }[]
   note: string
@@ -33,7 +34,11 @@ export interface OrdersView {
 const post = <T,>(path: string, body: unknown) => fetchJson<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
 export const useOrdersView = (poll = true) =>
-  useQuery({ queryKey: ['orders'], queryFn: () => fetchJson<OrdersView>('/api/orders'), staleTime: 3_000, refetchInterval: poll ? 5_000 : false, retry: false })
+  useQuery({
+    queryKey: ['orders'], queryFn: () => fetchJson<OrdersView>('/api/orders'), staleTime: 3_000, retry: false,
+    // FYERS pushes order updates while the live service runs (the stream invalidates this query): a slow safety poll
+    refetchInterval: (q) => (!poll ? false : q.state.data?.feed?.connected ? 30_000 : 5_000),
+  })
 
 export function useOrderActions() {
   const qc = useQueryClient()

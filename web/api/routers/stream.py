@@ -5,7 +5,8 @@ from the FYERS live feed (quotes.json, checked four times a second, about a seco
 for symbols the feed doesn't stream yet, the REST / Yahoo quotes every 30 s (cached per symbol and shared by
 every tab, so more tabs cost no more calls). The stream registers its symbols, so the live service starts
 streaming them within a few seconds (services/live_subs.py). A comment line every 15 s keeps the connection
-open; the browser's EventSource reconnects by itself if it drops.
+open; the browser's EventSource reconnects by itself if it drops. Your FYERS order updates (fills, rejections) from the
+live service's order socket (scanner/intraday/order_feed.py) ride the same stream as "order" events.
 """
 from __future__ import annotations
 
@@ -17,8 +18,10 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
 from scanner import watch
+from scanner.intraday import order_feed
 
 from .. import errors
+from ..paths import P
 from ..services import clock, live_subs, quotes_svc
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
@@ -27,6 +30,7 @@ TICK_S = 0.25
 REST_EVERY_S = {"open": 30.0, "post_close": 300.0}
 HEARTBEAT_S = 15.0
 CLOCK_EVERY_S = 1.0
+ORDERS_EVERY_S = 0.5
 
 
 def _key(q: dict) -> tuple:
@@ -35,6 +39,13 @@ def _key(q: dict) -> tuple:
 
 def _event(payload: dict, kind: str = "quotes") -> str:
     return f"event: {kind}\ndata: {json.dumps(payload, default=str, separators=(',', ':'))}\n\n"
+
+
+def _feed_mtime() -> float | None:
+    try:
+        return (P.intraday_live / order_feed.FILE_NAME).stat().st_mtime
+    except OSError:
+        return None
 
 
 def _check_alerts(quotes: list[dict]) -> None:
@@ -49,9 +60,10 @@ def _check_alerts(quotes: list[dict]) -> None:
 async def quote_events(request: Request, syms: list[str]):
     sid = live_subs.open_stream(syms)
     sent: dict[str, tuple] = {}
-    last_rest = last_beat = last_clock = last_alert = 0.0
+    last_rest = last_beat = last_clock = last_alert = last_orders = 0.0
     session = None
-    alerts_after = time.time()
+    alerts_after = started = time.time()
+    order_seq, order_mtime = 0, _feed_mtime()
     try:
         # first what is at hand without a network call (live feed, today's cached quotes): instant on screen, even
         # for 100 symbols; then the full snapshot, which may wait seconds on Yahoo / FYERS for the rest
@@ -78,6 +90,15 @@ async def quote_events(request: Request, syms: list[str]):
                 for a in fired:
                     last_beat = now
                     yield _event({"alert": a, "text": a.get("text") or watch.message(a)}, "alert")
+            if now - last_orders >= ORDERS_EVERY_S:           # your order updates, pushed by FYERS' order socket
+                last_orders = now
+                m = _feed_mtime()
+                if m != order_mtime:
+                    order_mtime = m
+                    order_seq, evs = await asyncio.to_thread(order_feed.since, P.intraday_live, order_seq, started)
+                    for e in evs:
+                        last_beat = now
+                        yield _event({"order": e, "text": e.get("text") or order_feed.text(e)}, "order")
             every = REST_EVERY_S.get(session)
             if every is None:                         # market shut: prices don't change, only keep the line open
                 if now - last_beat >= HEARTBEAT_S:

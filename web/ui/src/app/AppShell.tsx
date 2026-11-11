@@ -67,6 +67,16 @@ function AlertWatcher() {
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('Quant Desk alert', { body: a.text })
     } catch { /* notifications unavailable */ }
   }), [toast, qc])
+  // your FYERS orders: a fill or rejection shows at once, on any page, and the Orders page / cards refresh
+  useEffect(() => quoteStream.onOrder((o) => {
+    const st = o.order.status
+    toast({ tone: st === 'rejected' ? 'bad' : st === 'filled' ? 'good' : 'info', title: `FYERS: ${o.text}`, detail: st === 'filled' ? 'Protect it with a stop-loss and target on the Orders page.' : undefined })
+    void qc.invalidateQueries({ queryKey: ['orders'] })
+    if (st === 'filled') void qc.invalidateQueries({ queryKey: ['coach'] })
+    try {
+      if ((st === 'filled' || st === 'rejected') && typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('Quant Desk order', { body: o.text })
+    } catch { /* notifications unavailable */ }
+  }), [toast, qc])
   return null
 }
 
@@ -169,6 +179,8 @@ const HELP: [string, string][] = [
   ['g o / g s / g t', 'Go to Overview / Signals / Strategies'],
   ['g c / g p / g m / g b', 'Go to Chart / Portfolio / Market / Smart money'],
   ['g r / g a / g i / g ,', 'Go to Screener / Paper / Intraday / Settings'],
+  ['g d / g w / g x / g e', 'Go to Today / Watchlist / Scans / Orders'],
+  ['g y / g h / g k', 'Go to Replay / Coach / Benchmarks'],
   ['/', "Focus the current table's filter"],
   ['j / k, Enter', 'Move the table selection; open it'],
   ['[ / ]', 'Previous / next strategy (detail) or symbol (chart)'],

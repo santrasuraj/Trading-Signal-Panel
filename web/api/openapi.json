@@ -4395,6 +4395,298 @@
      }
     }
    }
+  },
+  "/api/replay/info": {
+   "get": {
+    "tags": [
+     "replay"
+    ],
+    "summary": "Info",
+    "description": "What can be replayed: intraday symbols, one symbol's sessions and its daily range.",
+    "operationId": "info_api_replay_info_get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 25
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/replay/random": {
+   "get": {
+    "tags": [
+     "replay"
+    ],
+    "summary": "Random",
+    "description": "A random stock and day (blind mode: the page hides both until the end).",
+    "operationId": "random_api_replay_random_get",
+    "parameters": [
+     {
+      "name": "tf",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "5m",
+        "15m",
+        "1d"
+       ],
+       "type": "string",
+       "default": "5m",
+       "title": "Tf"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/replay/bars/{symbol}": {
+   "get": {
+    "tags": [
+     "replay"
+    ],
+    "summary": "Bars",
+    "description": "Context bars, then the bars to replay (the page reveals them one at a time).",
+    "operationId": "bars_api_replay_bars__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 25,
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "tf",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "5m",
+        "15m",
+        "1d"
+       ],
+       "type": "string",
+       "default": "5m",
+       "title": "Tf"
+      }
+     },
+     {
+      "name": "date",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Date"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/replay/results": {
+   "get": {
+    "tags": [
+     "replay"
+    ],
+    "summary": "Results",
+    "description": "Your practice record: sessions, win rate, expectancy, exits by reason.",
+    "operationId": "results_api_replay_results_get",
+    "parameters": [
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 200,
+       "minimum": 1,
+       "default": 30,
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "replay"
+    ],
+    "summary": "Save",
+    "description": "Save a finished replay; the P&L is recomputed from the bars and the cost model.",
+    "operationId": "save_api_replay_results_post",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReplayResult"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/coach": {
+   "get": {
+    "tags": [
+     "coach"
+    ],
+    "summary": "Coach",
+    "description": "Your numbers (practice, real fills, holdings now) and the last written review.",
+    "operationId": "coach_api_coach_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/coach/review": {
+   "post": {
+    "tags": [
+     "coach"
+    ],
+    "summary": "Review",
+    "description": "Ask Claude to review your numbers (one call; costs a few rupees).",
+    "operationId": "review_api_coach_review_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -19497,6 +19789,139 @@
      "reason"
     ],
     "title": "RejectedRow"
+   },
+   "ReplayResult": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "maxLength": 25,
+      "title": "Symbol"
+     },
+     "tf": {
+      "type": "string",
+      "enum": [
+       "5m",
+       "15m",
+       "1d"
+      ],
+      "title": "Tf"
+     },
+     "date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "title": "Date"
+     },
+     "blind": {
+      "type": "boolean",
+      "title": "Blind",
+      "default": false
+     },
+     "last_i": {
+      "type": "integer",
+      "minimum": 0.0,
+      "title": "Last I",
+      "default": 0
+     },
+     "trades": {
+      "items": {
+       "$ref": "#/components/schemas/ReplayTrade"
+      },
+      "type": "array",
+      "maxItems": 500,
+      "title": "Trades"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "tf",
+     "date"
+    ],
+    "title": "ReplayResult"
+   },
+   "ReplayTrade": {
+    "properties": {
+     "side": {
+      "type": "string",
+      "enum": [
+       "LONG",
+       "SHORT"
+      ],
+      "title": "Side"
+     },
+     "qty": {
+      "type": "integer",
+      "maximum": 10000000.0,
+      "minimum": 1.0,
+      "title": "Qty"
+     },
+     "entry_i": {
+      "type": "integer",
+      "minimum": 0.0,
+      "title": "Entry I"
+     },
+     "exit_i": {
+      "type": "integer",
+      "minimum": 0.0,
+      "title": "Exit I"
+     },
+     "entry": {
+      "type": "number",
+      "exclusiveMinimum": 0.0,
+      "title": "Entry"
+     },
+     "exit": {
+      "type": "number",
+      "exclusiveMinimum": 0.0,
+      "title": "Exit"
+     },
+     "stop": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop"
+     },
+     "target": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target"
+     },
+     "reason": {
+      "type": "string",
+      "enum": [
+       "manual",
+       "stop",
+       "target",
+       "square_off",
+       "end"
+      ],
+      "title": "Reason",
+      "default": "manual"
+     }
+    },
+    "type": "object",
+    "required": [
+     "side",
+     "qty",
+     "entry_i",
+     "exit_i",
+     "entry",
+     "exit"
+    ],
+    "title": "ReplayTrade"
    },
    "ResultsCalendarHealth": {
     "properties": {

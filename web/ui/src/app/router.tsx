@@ -11,6 +11,8 @@ const Watchlist = lazy(() => import('@/pages/Watchlist'))
 const Scans = lazy(() => import('@/pages/Scans'))
 const Benchmarks = lazy(() => import('@/pages/Benchmarks'))
 const Orders = lazy(() => import('@/pages/Orders'))
+const Replay = lazy(() => import('@/pages/Replay'))
+const Coach = lazy(() => import('@/pages/Coach'))
 const Signals = lazy(() => import('@/pages/Signals'))
 const SignalTrack = lazy(() => import('@/pages/SignalTrack'))
 const Strategies = lazy(() => import('@/pages/Strategies'))
@@ -73,6 +75,8 @@ export const router = createBrowserRouter([
       { path: 'chart/:symbol', element: g(<Chart />) },
       { path: 'portfolio', element: g(<Portfolio />) },
       { path: 'orders', element: g(<Orders />) },
+      { path: 'replay', element: g(<Replay />) },
+      { path: 'coach', element: g(<Coach />) },
       { path: 'paper', element: g(<Paper />) },
       { path: 'paper/:key', element: g(<Paper />) },
       { path: 'market', element: <Navigate to="/market/movers" replace /> },

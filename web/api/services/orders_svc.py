@@ -29,7 +29,9 @@ import time
 import uuid
 from datetime import datetime
 
+from scanner import fills
 from scanner.costs import CostModel
+from scanner.intraday import order_feed
 from scanner.providers import FyersProvider, load_token, token_expired
 
 from . import clock, data, quotes_svc
@@ -463,7 +465,8 @@ def view() -> dict:
     st, lim = state(), limits()
     out = {"enabled": st["enabled"], "kill": st["kill"], "kill_at": st.get("kill_at"), "kill_reason": st.get("kill_reason"),
            "today_count": st["count"], "limits": lim, "logged_in": False, "orders": [], "positions": [], "pnl_today": None,
-           "gtt": [], "errors": [], "audit": audit_tail(40), "reconciliation": [], "note": __doc__.split("\n\n")[1]}
+           "gtt": [], "errors": [], "audit": audit_tail(40), "reconciliation": [], "note": __doc__.split("\n\n")[1],
+           "feed": order_feed.status(P.intraday_live)}
     try:
         b = broker()
     except ApiException as e:
@@ -486,5 +489,24 @@ def view() -> dict:
         out["gtt"] = [{"id": str(g.get("id")), "symbol": str(g.get("symbol", "")).removeprefix("NSE:").removesuffix("-EQ"),
                        "status": g.get("gttOrderStatus") or g.get("status"), "info": g.get("orderInfo")}
                       for g in (gtt.get("orderBook") or gtt.get("data") or [])]
-    out["reconciliation"] = reconcile(out["orders"], audit_tail(500))
+    trail = audit_tail(500)
+    out["reconciliation"] = reconcile(out["orders"], trail)
+    try:
+        fills.record(fills_from(out["orders"], trail), P.data)   # FYERS' order book is today only: keep your fills
+    except Exception:
+        log.exception("Recording fills failed")
+    return out
+
+
+def fills_from(orders: list[dict], trail: list[dict]) -> list[dict]:
+    """Filled orders as fills.jsonl rows, with the signal they came from when the order was placed here."""
+    ref = {str(a.get("order_id")): a.get("ticket") or {} for a in trail if a.get("event") == "placed" and a.get("order_id")}
+    out = []
+    for o in orders:
+        if o["status"] != "filled" or not o.get("avg_price") or not o.get("filled"):
+            continue
+        t = ref.get(o["id"], {})
+        out.append({"id": o["id"], "symbol": o["symbol"], "side": o["side"], "qty": o["filled"], "price": o["avg_price"],
+                    "time": o.get("time"), "product": o.get("product") or "CNC", "strategy_key": t.get("strategy_key"),
+                    "ref_price": t.get("ref_price"), "stop": t.get("stop"), "source": "here" if t else "fyers"})
     return out
