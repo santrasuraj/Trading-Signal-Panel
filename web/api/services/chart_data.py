@@ -21,7 +21,10 @@ INDICATORS = ("sma20", "sma50", "sma200", "ema21", "bb_upper", "bb_mid", "bb_low
               # overlays on the price pane
               "ema9", "ema50", "ema200", "sma100", "supertrend", "dc_upper", "dc_lower", "kc_upper", "kc_mid", "kc_lower",
               # oscillator panes
-              "stoch_k", "stoch_d", "adx14", "plus_di", "minus_di", "atr14", "obv", "cci20", "mfi14", "willr14", "roc12")
+              "stoch_k", "stoch_d", "adx14", "plus_di", "minus_di", "atr14", "obv", "cci20", "mfi14", "willr14", "roc12",
+              # Ichimoku (9, 26, 52; the cloud drawn where it applies: 26 bars after it is computed), Parabolic SAR,
+              # Aroon 25
+              "ichi_tenkan", "ichi_kijun", "ichi_span_a", "ichi_span_b", "psar", "aroon_up", "aroon_down")
 DEFAULT_INDICATORS = ("sma20", "sma50", "sma200", "rsi14")
 
 
@@ -38,6 +41,42 @@ def bars_frame(symbol: str) -> pd.DataFrame:
     for f in ("open", "high", "low"):
         df[f] = df[f].fillna(df["close"])
     return df
+
+
+def psar(df: pd.DataFrame, step: float = 0.02, max_af: float = 0.2) -> pd.Series:
+    """Wilder's Parabolic SAR (0.02 / 0.2)."""
+    h, lo = df["high"].to_numpy(dtype=float), df["low"].to_numpy(dtype=float)
+    n = len(h)
+    out = np.full(n, np.nan)
+    if n < 3:
+        return pd.Series(out, index=df.index)
+    up = h[1] >= h[0]
+    sar, ep, af = (lo[0], h[1], step) if up else (h[0], lo[1], step)
+    for i in range(1, n):
+        sar = sar + af * (ep - sar)
+        if up:
+            sar = min(sar, lo[i - 1], lo[i - 2] if i > 1 else lo[i - 1])
+            if lo[i] < sar:
+                up, sar, ep, af = False, ep, lo[i], step
+            elif h[i] > ep:
+                ep, af = h[i], min(af + step, max_af)
+        else:
+            sar = max(sar, h[i - 1], h[i - 2] if i > 1 else h[i - 1])
+            if h[i] > sar:
+                up, sar, ep, af = True, ep, h[i], step
+            elif lo[i] < ep:
+                ep, af = lo[i], min(af + step, max_af)
+        out[i] = sar
+    return pd.Series(out, index=df.index)
+
+
+def monthly(df: pd.DataFrame) -> pd.DataFrame:
+    g = df.groupby(df.index.to_period("M"))
+    m = pd.DataFrame({"open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
+                      "close": g["close"].last(), "volume": g["volume"].sum()})
+    last_day = pd.Series(df.index, index=df.index).groupby(df.index.to_period("M")).last()
+    m.index = pd.DatetimeIndex(last_day.reindex(m.index).values, name="date")
+    return m
 
 
 def weekly(df: pd.DataFrame) -> pd.DataFrame:
@@ -130,6 +169,14 @@ def extra_indicators(df: pd.DataFrame, out: pd.DataFrame) -> pd.DataFrame:
     neg = mf.where(tp < tp.shift(1), 0.0).rolling(14, min_periods=14).sum()
     out["mfi14"] = 100 - 100 / (1 + pos / neg.replace(0, np.nan))
     out["roc12"] = (c / c.shift(12) - 1) * 100
+    mid = lambda n: (h.rolling(n, min_periods=n).max() + lo.rolling(n, min_periods=n).min()) / 2  # noqa: E731
+    out["ichi_tenkan"], out["ichi_kijun"] = mid(9), mid(26)
+    out["ichi_span_a"] = ((out["ichi_tenkan"] + out["ichi_kijun"]) / 2).shift(26)
+    out["ichi_span_b"] = mid(52).shift(26)
+    out["psar"] = psar(df)
+    since_hi = h.rolling(26, min_periods=26).apply(lambda x: 25 - int(np.argmax(x)), raw=True)
+    since_lo = lo.rolling(26, min_periods=26).apply(lambda x: 25 - int(np.argmin(x)), raw=True)
+    out["aroon_up"], out["aroon_down"] = 100 * (25 - since_hi) / 25, 100 * (25 - since_lo) / 25
     return out
 
 
@@ -139,6 +186,8 @@ def build(symbol: str, tf: str, rng: str, indicators: list[str]) -> dict:
     source_date = df.index[-1].date().isoformat()
     if tf == "1w":
         df = weekly(df)
+    elif tf == "1mo":
+        df = monthly(df)
     full = with_indicators(df)
     days = RANGE_DAYS[rng]
     view = full if days is None else full[full.index >= full.index[-1] - pd.Timedelta(days=days)]
@@ -160,7 +209,7 @@ def build(symbol: str, tf: str, rng: str, indicators: list[str]) -> dict:
     for d in past:
         markers.append({"t": _snap(d, t), "position": "belowBar", "shape": "circle", "kind": "results", "tone": "neutral",
                         "text": "R", "detail": f"Results {d}", "strategy_key": None})
-    year = full.iloc[-252 if tf == "1d" else -52:]
+    year = full.iloc[-252 if tf == "1d" else -52 if tf == "1w" else -12:]
     lines.append({"price": num(year["high"].max(), 2), "label": "52w high", "strategy_key": None, "kind": "high_52w"})
     lines.append({"price": num(year["low"].min(), 2), "label": "52w low", "strategy_key": None, "kind": "low_52w"})
     markers = [m for m in markers if m["t"] is not None]

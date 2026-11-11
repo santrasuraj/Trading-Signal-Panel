@@ -8,6 +8,7 @@ universe - builds 5-minute bars from the ticks, and every few seconds writes:
   data/intraday/live/prints_YYYYMMDD.parquet, book.json   large trades and order-book totals (footprints.py)
   data/intraday/live/orders_feed.json   your FYERS order updates from the order socket (order_feed.py, read-only)
   data/intraday/live/1m_YYYYMMDD.parquet, forming_1m.json   the same ticks as 1-minute bars (1-minute charts)
+  data/intraday/live/orderflow_YYYYMMDD.parquet   buyer- / seller-initiated volume per minute and price (orderflow.py)
 At the end of the session the completed bars are merged into the intraday store, so they are kept
 even though FYERS' REST history only covers a rolling year. The intraday scanner reads these files
 for today's setups instead of Yahoo's ~15-minute delayed data, as long as ticks keep arriving.
@@ -30,7 +31,7 @@ from .. import watch
 from ..providers import load_token
 from ..settings import IST, LOG_DIR, ist_now
 from . import data as idata
-from . import order_feed, quote_hub
+from . import order_feed, orderflow, quote_hub
 from .fyers_sync import is_trading_day
 
 MAX_SYMBOLS = 100               # FYERS Standard plan WebSocket limit (all connections together)
@@ -208,6 +209,11 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     book = quote_hub.QuoteBook()              # every tick's latest price: the screen's live quotes
     builder = idata.TickBarBuilder(interval)
     builder1 = idata.TickBarBuilder("1m")      # the same ticks as 1-minute bars (1-minute charts, archived at the close)
+    flowb = orderflow.OrderFlowBuilder()        # estimated buy / sell volume per minute and price (order flow)
+    try:
+        orderflow.cleanup(live_dir(root))
+    except Exception:
+        pass
     from ..footprints import FootprintRecorder
     recorder = FootprintRecorder()            # large trades + order-book totals for Big money live (footprints.py)
     from ..fno_live import FnoRecorder
@@ -238,6 +244,10 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
             with lock:
                 builder.on_tick(msg)
                 builder1.on_tick(msg)
+                try:
+                    flowb.on_tick(msg)
+                except Exception:              # an order-flow glitch must never stop the bars
+                    pass
                 try:
                     recorder.on_tick(msg)
                 except Exception:              # a footprint glitch must never stop the bars
@@ -344,6 +354,18 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
                 write_fails += 1
                 if write_fails == 1 or write_fails % 60 == 0:
                     log(f"Live: writing bars failed ({type(e).__name__}: {e}) - retrying")
+            try:
+                with lock:
+                    flow_df_due = flowb.dirty
+                if flow_df_due:
+                    with lock:
+                        frame = flowb.frame()
+                        flowb.dirty = False
+                    p = live_dir(root) / orderflow.file_name(ist_now().date())
+                    frame.to_parquet(p.with_suffix(".oftmp"), index=False)
+                    idata._replace(p.with_suffix(".oftmp"), p)
+            except Exception as e:
+                log(f"Live: writing order flow failed ({type(e).__name__}: {e})")
             try:                                             # large trades / book (footprints): separate from the bars
                 with lock:
                     recorder.flush(ist_now().date())

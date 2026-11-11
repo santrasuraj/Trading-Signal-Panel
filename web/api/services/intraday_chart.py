@@ -25,8 +25,8 @@ from ..errors import ApiException
 from ..paths import P
 from ..util import today_ist
 
-TFS = {"1m": "1min", "5m": "5min", "15m": "15min"}
-MAX_DAYS = {"1m": 5, "5m": 20, "15m": 20}
+TFS = {"1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min", "1h": "60min"}
+MAX_DAYS = {"1m": 5, "5m": 20, "15m": 20, "30m": 20, "1h": 20}
 NOTE = ("Intraday candles from the FYERS feed and history (Yahoo fills older days, about 15 minutes late while it "
         "was live). The last candle may still be forming. VWAP restarts each session.")
 
@@ -78,7 +78,8 @@ def bars(symbol: str, days: int, one_minute: bool = False) -> pd.DataFrame:
 def resample(df: pd.DataFrame, tf: str) -> pd.DataFrame:
     if tf in ("1m", "5m") or df.empty:
         return df
-    g = df.set_index("ts").groupby(pd.Grouper(freq=TFS[tf]))
+    # 30-minute and hourly bars start at 09:15 like NSE's (09:15, 09:45 ... / 09:15, 10:15 ...)
+    g = df.set_index("ts").groupby(pd.Grouper(freq=TFS[tf], offset="15min" if tf in ("30m", "1h") else None))
     out = pd.DataFrame({"open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
                         "close": g["close"].last(), "volume": g["volume"].sum(),
                         "flags": g["flags"].max()}).dropna(subset=["open"])
@@ -98,7 +99,7 @@ def vwap(df: pd.DataFrame) -> list[float | None]:
 
 def build(symbol: str, tf: str = "5m", days: int = 3) -> dict:
     if tf not in TFS:
-        raise ApiException("VALIDATION", "tf must be 1m, 5m or 15m.")
+        raise ApiException("VALIDATION", "tf must be 1m, 5m, 15m, 30m or 1h.")
     days = max(1, min(int(days), MAX_DAYS[tf]))
     raw = bars(symbol, days, one_minute=tf == "1m")
     if raw.empty and tf == "1m":

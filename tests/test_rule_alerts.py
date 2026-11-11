@@ -85,3 +85,29 @@ def test_scan_on_live_prices_only_counts_quoted_stocks():
               "B": {"price": 110.1, "source": "live"}, "C": {"price": 130, "source": "close"}}
     r = scans.run_live(scan, frames, quotes, ["A", "B", "C"], day=date(2026, 3, 30))
     assert [x["symbol"] for x in r["rows"]] == ["A"] and r["quoted"] == 2 and r["live"]
+
+
+def test_smart_watchlist_follows_its_scan(wdir):
+    watch.save_watchlists([{"name": "Main", "symbols": ["TCS"]}, {"name": "Breakouts", "symbols": [], "scan_id": "abc"}])
+    assert watch.smart_scan_ids() == ["abc"]
+    assert watch.refresh_smart({"abc": ["INFY", "WIPRO"]}) == 1
+    lists = {x["name"]: x for x in watch.watchlists()["lists"]}
+    assert lists["Breakouts"]["symbols"] == ["INFY", "WIPRO"] and lists["Main"]["symbols"] == ["TCS"]
+    assert watch.refresh_smart({"abc": ["INFY", "WIPRO"]}) == 0                      # unchanged: no rewrite
+
+
+def test_new_indicators_and_bar_sizes():
+    from web.api.services import chart_data, intraday_chart
+    idx = pd.bdate_range("2024-01-01", periods=120)
+    up = pd.DataFrame({"open": np.linspace(100, 160, 120), "close": np.linspace(101, 161, 120)}, index=idx)
+    up["high"], up["low"], up["volume"] = up["close"] + 1, up["open"] - 1, 1e5
+    out = chart_data.extra_indicators(up, pd.DataFrame(index=idx))
+    assert (out["psar"].iloc[-20:] < up["low"].iloc[-20:]).all()                 # an uptrend: SAR under the price
+    assert out["aroon_up"].iloc[-1] == 100 and out["aroon_down"].iloc[-1] < 10
+    assert out["ichi_span_a"].iloc[:26].isna().all()                               # the cloud starts 26 bars later
+    assert len(chart_data.monthly(up)) == 6
+    ts = pd.date_range("2026-11-10 09:15", "2026-11-10 15:25", freq="5min")
+    bars = pd.DataFrame({"ts": ts, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0, "flags": 0})
+    r30 = intraday_chart.resample(bars, "30m")
+    assert r30["ts"].dt.strftime("%H:%M").iloc[:3].tolist() == ["09:15", "09:45", "10:15"]
+    assert intraday_chart.resample(bars, "1h")["ts"].dt.strftime("%H:%M").iloc[1] == "10:15"

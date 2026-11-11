@@ -19,12 +19,15 @@ export function liveSlot(nowMs: number, stepMin: number): number | null {
   return day + (555 + Math.floor((minute - 555) / stepMin) * stepMin) * 60
 }
 
-export function IntradayChart({ data, live, height }: { data: IntradayChartData; live?: LiveQuote; height: number }) {
+/** Order flow under the candles (api orderflow): per-bar delta (buy - sell volume) and the session's cumulative delta. */
+export interface FlowBars { t: number[]; delta: number[]; cum_delta: number[] }
+
+export function IntradayChart({ data, live, height, flow }: { data: IntradayChartData; live?: LiveQuote; height: number; flow?: FlowBars | null }) {
   const { ref, chart, version } = useLwChart({ timeScale: { timeVisible: true, secondsVisible: false } })
   const pal = useMemo(() => palette(), [version]) // eslint-disable-line react-hooks/exhaustive-deps
   const candles = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const last = useRef<{ time: number; open: number; high: number; low: number; close: number } | null>(null)
-  const step = data.tf === '15m' ? 15 : data.tf === '1m' ? 1 : 5
+  const step = ({ '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60 } as Record<string, number>)[data.tf] ?? 5
 
   useEffect(() => {
     if (!chart) return
@@ -64,6 +67,19 @@ export function IntradayChart({ data, live, height }: { data: IntradayChartData;
       for (const s of [c, vol, ...vws]) { try { chart.removeSeries(s) } catch { /* chart already gone */ } }
     }
   }, [chart, data, pal])
+
+  // order flow: delta bars and cumulative delta in a pane under the candles
+  useEffect(() => {
+    if (!chart || !flow || !flow.t.length) return
+    const d = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' }, title: 'Delta' }, 1)
+    d.setData(flow.t.map((t, i) => ({ time: t as UTCTimestamp, value: flow.delta[i], color: flow.delta[i] >= 0 ? pal.upVol : pal.downVol })))
+    const c = chart.addSeries(LineSeries, { color: pal.info, lineWidth: 2, priceLineVisible: false, priceScaleId: 'left', title: 'Cum. delta', priceFormat: { type: 'volume' } }, 1)
+    c.setData(flow.t.map((t, i) => ({ time: t as UTCTimestamp, value: flow.cum_delta[i] })))
+    chart.priceScale('left', 1).applyOptions({ visible: true })
+    const panes = chart.panes()
+    if (panes[1]) panes[1].setHeight(Math.round(height * 0.28))
+    return () => { for (const x of [d, c]) { try { chart.removeSeries(x) } catch { /* chart gone */ } } }
+  }, [chart, flow, pal, height])
 
   // the live price moves the last candle, or opens the next one
   useEffect(() => {

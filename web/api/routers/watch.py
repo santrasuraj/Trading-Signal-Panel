@@ -25,7 +25,19 @@ def get_watchlists():
 @router.put("/watchlists", response_model=WatchlistsResponse)
 def put_watchlists(body: WatchlistsBody):
     try:
-        return watch.save_watchlists([x.model_dump() for x in body.lists])
+        out = watch.save_watchlists([x.model_dump() for x in body.lists])
+        sids = {lst["scan_id"] for lst in out["lists"] if lst.get("scan_id")}
+        if sids:                                          # fill a new smart list now, not only after the next scan
+            from scanner import scans
+            from ..services import data
+            saved = {s["id"]: s for s in scans.saved()}
+            etfs = set(data.etfs())
+            syms = [s for s in data.universe()["symbol"] if s not in etfs]
+            hits = {sid: [r["symbol"] for r in scans.run_today(saved[sid], data.store(), syms, limit=200)["rows"]]
+                    for sid in sids if sid in saved}
+            if watch.refresh_smart(hits):
+                out = watch.watchlists()
+        return out
     except ValueError as e:
         raise ApiException("VALIDATION", str(e))
 

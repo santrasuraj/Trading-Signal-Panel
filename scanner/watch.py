@@ -101,7 +101,8 @@ def clean_symbols(symbols) -> list[str]:
 
 def watchlists() -> dict:
     v = _read(data_dir() / WATCH_FILE_NAME, DEFAULT)
-    lists = [{"name": str(x.get("name") or "List")[:40], "symbols": clean_symbols(x.get("symbols"))[:MAX_PER_LIST]}
+    lists = [{"name": str(x.get("name") or "List")[:40], "symbols": clean_symbols(x.get("symbols"))[:MAX_PER_LIST],
+              **({"scan_id": str(x["scan_id"])[:40]} if x.get("scan_id") else {})}     # only a smart list has one
              for x in (v.get("lists") or []) if isinstance(x, dict)][:MAX_LISTS]
     return {"lists": lists or [dict(DEFAULT["lists"][0])]}
 
@@ -113,11 +114,34 @@ def save_watchlists(lists: list[dict]) -> dict:
         if name.lower() in names:
             raise ValueError(f"Two lists are called {name!r}.")
         names.add(name.lower())
-        clean.append({"name": name, "symbols": clean_symbols(x.get("symbols"))[:MAX_PER_LIST]})
+        clean.append({"name": name, "symbols": clean_symbols(x.get("symbols"))[:MAX_PER_LIST],
+                      **({"scan_id": str(x["scan_id"])[:40]} if x.get("scan_id") else {})})
     out = {"lists": clean or [dict(DEFAULT["lists"][0])]}
     with _lock("watchlists"):
         _write(data_dir() / WATCH_FILE_NAME, out)
     return out
+
+
+def smart_scan_ids() -> list[str]:
+    """Saved scans that fill a smart watchlist."""
+    return sorted({lst["scan_id"] for lst in watchlists()["lists"] if lst.get("scan_id")})
+
+
+def refresh_smart(hits: dict[str, list[str]]) -> int:
+    """Fill each smart watchlist with what its saved scan matches now (`hits`: scan id -> symbols). Returns how many
+    lists changed. Called after each scan and when a smart list is saved."""
+    with _lock("watchlists"):
+        cur = watchlists()
+        changed = 0
+        for lst in cur["lists"]:
+            sid = lst.get("scan_id")
+            if sid and sid in hits:
+                new = clean_symbols(hits[sid])[:MAX_PER_LIST]
+                if new != lst["symbols"]:
+                    lst["symbols"], changed = new, changed + 1
+        if changed:
+            _write(data_dir() / WATCH_FILE_NAME, cur)
+    return changed
 
 
 # ---- alerts -------------------------------------------------------------------------------------------------------

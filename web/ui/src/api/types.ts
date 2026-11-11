@@ -377,7 +377,8 @@ export interface SparklinesResponse { source_date: ISODate; days: number; series
 export type IndicatorId = 'sma20' | 'sma50' | 'sma200' | 'ema21' | 'bb_upper' | 'bb_mid' | 'bb_lower'
   | 'rsi14' | 'macd' | 'macd_signal' | 'macd_hist' | 'vol_avg20'
   | 'ema9' | 'ema50' | 'ema200' | 'sma100' | 'supertrend' | 'dc_upper' | 'dc_lower' | 'kc_upper' | 'kc_mid' | 'kc_lower'
-  | 'stoch_k' | 'stoch_d' | 'adx14' | 'plus_di' | 'minus_di' | 'atr14' | 'obv' | 'cci20' | 'mfi14' | 'willr14' | 'roc12';
+  | 'stoch_k' | 'stoch_d' | 'adx14' | 'plus_di' | 'minus_di' | 'atr14' | 'obv' | 'cci20' | 'mfi14' | 'willr14' | 'roc12'
+  | 'ichi_tenkan' | 'ichi_kijun' | 'ichi_span_a' | 'ichi_span_b' | 'psar' | 'aroon_up' | 'aroon_down';
 // GET /api/chart/{symbol}?tf=1d|1w&range=3m|6m|1y|2y|5y|max&indicators=sma20,sma50,sma200,rsi14   (daily store only; intraday has its own endpoint later)
 export interface ChartResponse {
   symbol: string; company: string | null; industry: string | null; kind: 'stock' | 'etf' | 'index';
@@ -621,6 +622,6 @@ export interface FyersLoginCompleteResponse { ok: boolean; user_name: string | n
 export interface ConfigResponse { values: ConfigView; file_mtime: ISODateTime; needs_rescan: boolean }
 export interface CostPreviewResponse { value: number; buy: CostBreakdown; sell: CostBreakdown; round_trip_pct: number }
 export type CurveRange = '1y' | '3y' | 'all';
-export type ChartTf = '1d' | '1w';
+export type ChartTf = '1d' | '1w' | '1mo';
 export type ChartRange = '3m' | '6m' | '1y' | '2y' | '5y' | 'max';
 export type ScreenerPreset = 'momentum' | 'rs' | 'near_high' | 'low_vol' | 'volume' | 'uptrend' | 'all';

@@ -204,6 +204,7 @@ export default function Watchlist() {
   const cur = lists[Math.min(sel, Math.max(lists.length - 1, 0))]
   const put = (next: WL[]) => save.mutate(next, { onError: (e) => toast({ tone: 'bad', title: 'Watchlist not saved', detail: errText(e) }) })
   const update = (fn: (l: WL) => WL) => put(lists.map((l) => (l === cur ? fn(l) : l)))
+  const smart = useSavedScans()
   return (
     <div>
       <PageHeader title="Watchlist" subtitle="Your own lists: live prices, each stock's one tested answer, and price alerts. Watchlist and alert symbols are streamed by the live feed from its next start." />
@@ -218,10 +219,16 @@ export default function Watchlist() {
                   const name = window.prompt('Name of the new list')?.trim()
                   if (name) { put([...lists, { name, symbols: [] }]); setSel(lists.length) }
                 }}>New list</Button>
+                <select aria-label="Smart list from a saved scan" value="" className="input h-8 px-2 text-[13px]" title="A list that fills itself with a saved scan's stocks after each scan"
+                  onChange={(e) => { const s = smart.data?.scans.find((x) => x.id === e.target.value); if (s) { put([...lists, { name: s.name.slice(0, 40), symbols: [], scan_id: s.id }]); setSel(lists.length) } }}>
+                  <option value="">Smart list from a scan…</option>
+                  {(smart.data?.scans ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
                 {lists.length > 1 && <Button size="sm" variant="ghost" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => {
                   if (window.confirm(`Delete the list "${cur.name}"? Its stocks are only removed from this list.`)) { put(lists.filter((l) => l !== cur)); setSel(0) }
                 }}>Delete list</Button>}
-                <div className="ml-auto"><AddSymbol onAdd={(s) => update((l) => (l.symbols.includes(s) ? l : { ...l, symbols: [...l.symbols, s] }))} /></div>
+                {cur.scan_id ? <span className="ml-auto text-2xs text-muted">Smart list: filled by the scan "{smart.data?.scans.find((x) => x.id === cur.scan_id)?.name ?? cur.scan_id}" after each scan</span>
+                  : <div className="ml-auto"><AddSymbol onAdd={(s) => update((l) => (l.symbols.includes(s) ? l : { ...l, symbols: [...l.symbols, s] }))} /></div>}
               </div>
               <ListTable list={cur} onRemove={(s) => update((l) => ({ ...l, symbols: l.symbols.filter((x) => x !== s) }))} />
             </>

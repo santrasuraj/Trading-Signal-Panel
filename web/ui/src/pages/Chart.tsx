@@ -37,17 +37,21 @@ import { useDrawings, useIntradayChart, type IntradayTf } from '@/api/watch'
 import { DrawTools } from '@/components/DrawTools'
 import { DepthLadder } from '@/components/DepthLadder'
 import { SeasonalityCard } from '@/components/SeasonalityCard'
+import { VolumeProfile, type Profile } from '@/components/VolumeProfile'
+import type { FlowBars } from '@/components/charts/IntradayChart'
+import { useQuery } from '@tanstack/react-query'
+import { fetchJson, isFailure } from '@/api/client'
 import { OrderTicket } from '@/components/OrderTicket'
 import type { Ticket } from '@/api/orders'
 import { levelOverlays, lineDrawings } from '@/lib/userDrawings'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
-type Ind = IndicatorId | 'volume' | 'donchian' | 'keltner' | 'stoch' | 'adx' | 'atr' | 'obv' | 'cci' | 'mfi' | 'willr' | 'roc'
+type Ind = IndicatorId | 'volume' | 'donchian' | 'keltner' | 'stoch' | 'adx' | 'atr' | 'obv' | 'cci' | 'mfi' | 'willr' | 'roc' | 'ichimoku' | 'aroon'
 const IND_MENU: { id: Ind; label: string }[] = [
   { id: 'sma20', label: 'SMA 20' }, { id: 'sma50', label: 'SMA 50' }, { id: 'sma100', label: 'SMA 100' }, { id: 'sma200', label: 'SMA 200' },
   { id: 'ema9', label: 'EMA 9' }, { id: 'ema21', label: 'EMA 21' }, { id: 'ema50', label: 'EMA 50' }, { id: 'ema200', label: 'EMA 200' },
   { id: 'bb_mid', label: 'Bollinger 20, 2' }, { id: 'keltner', label: 'Keltner 20, 2 ATR' }, { id: 'donchian', label: 'Donchian 20' },
-  { id: 'supertrend', label: 'Supertrend 10, 3' }, { id: 'volume', label: 'Volume' },
+  { id: 'supertrend', label: 'Supertrend 10, 3' }, { id: 'ichimoku', label: 'Ichimoku 9, 26, 52' }, { id: 'psar', label: 'Parabolic SAR' }, { id: 'volume', label: 'Volume' },
 ]
 const PANE_MENU: { id: Ind; label: string }[] = [
   { id: 'rsi14', label: 'RSI 14' }, { id: 'macd', label: 'MACD 12, 26, 9' },
@@ -56,7 +60,7 @@ const PANE_MENU: { id: Ind; label: string }[] = [
 const PANE_IDS = new Set<string>(PANE_MENU.map((m) => m.id))
 const GROUPS: Partial<Record<Ind, IndicatorId[]>> = {
   bb_mid: ['bb_upper', 'bb_mid', 'bb_lower'], macd: ['macd', 'macd_signal', 'macd_hist'], donchian: ['dc_upper', 'dc_lower'],
-  keltner: ['kc_upper', 'kc_mid', 'kc_lower'], ...Object.fromEntries(OSCILLATORS.map((o) => [o.id, o.series.map(([k]) => k)])),
+  keltner: ['kc_upper', 'kc_mid', 'kc_lower'], ichimoku: ['ichi_tenkan', 'ichi_kijun', 'ichi_span_a', 'ichi_span_b'], ...Object.fromEntries(OSCILLATORS.map((o) => [o.id, o.series.map(([k]) => k)])),
 }
 
 type LevelId = 'sr' | 'pivots' | 'intraday' | 'options' | 'range' | 'chart_patterns' | 'candles'
@@ -196,7 +200,7 @@ export default function ChartPage() {
   const symbol = raw.toUpperCase()
   const [sp, setSp] = useSearchParams()
   const tfRaw = (sp.get('tf') as ChartTf | IntradayTf | null) ?? '1d'
-  const intraTf: IntradayTf | null = tfRaw === '1m' || tfRaw === '5m' || tfRaw === '15m' ? tfRaw : null
+  const intraTf: IntradayTf | null = (['1m', '5m', '15m', '30m', '1h'] as string[]).includes(tfRaw) ? (tfRaw as IntradayTf) : null
   const tf: ChartTf = intraTf ? '1d' : (tfRaw as ChartTf)        // the daily chart query keeps running underneath
   const range = (sp.get('range') as ChartRange | null) ?? '1y'
   const days = Math.min(20, Math.max(1, Number(sp.get('days')) || 3))
@@ -221,6 +225,13 @@ export default function ChartPage() {
   const liveQ = useLiveQuotes([symbol])
   const quote = liveQ.quotes[symbol]
   const liveTick = useMemo<LiveTick | null>(() => (quote ? { date: todayIST(), price: quote.price } : null), [quote])
+  // order flow (intraday): delta under the candles and the session's volume profile, refreshed every minute
+  const [flowOn, setFlowOn] = useLocalStorage('qd.chart.flow', false)
+  const fq = useQuery({
+    queryKey: ['orderflow', symbol, intraTf], enabled: flowOn && !!intraTf, retry: false, refetchInterval: 60_000, staleTime: 30_000,
+    queryFn: () => fetchJson<{ symbol: string; bars: FlowBars; profile: Profile[]; poc: number | null; value_area: [number, number] | null; totals: { buy: number; sell: number }; note: string }>(`/api/orderflow/${encodeURIComponent(symbol)}?tf=${intraTf}`),
+  })
+  const flow = flowOn && fq.data?.symbol === symbol ? fq.data : null
   // trade on the chart: a click opens an order ticket (practice unless real orders are on) with a limit at that price
   const [tradeOn, setTradeOn] = useState(false)
   const [ticket, setTicket] = useState<Ticket | null>(null)
@@ -387,7 +398,7 @@ export default function ChartPage() {
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 max-md:contents">
           <span className="flex-1 md:hidden" aria-hidden />
           <div className="scroll-x no-scrollbar flex min-w-0 items-center gap-2 max-md:order-[50] max-md:w-full">
-            <Segmented<ChartTf | IntradayTf> ariaLabel="Timeframe" value={intraTf ?? tf} onChange={(v) => set('tf', v === '1d' ? null : v)} items={[{ id: '1m', label: '1m', title: '1-minute candles with VWAP (from the live FYERS feed: the symbols it streams)' }, { id: '5m', label: '5m', title: '5-minute candles with VWAP (FYERS feed and history)' }, { id: '15m', label: '15m' }, { id: '1d', label: '1D' }, { id: '1w', label: '1W' }]} />
+            <Segmented<ChartTf | IntradayTf> ariaLabel="Timeframe" value={intraTf ?? tf} onChange={(v) => set('tf', v === '1d' ? null : v)} items={[{ id: '1m', label: '1m', title: '1-minute candles with VWAP (from the live FYERS feed: the symbols it streams)' }, { id: '5m', label: '5m', title: '5-minute candles with VWAP (FYERS feed and history)' }, { id: '15m', label: '15m' }, { id: '30m', label: '30m' }, { id: '1h', label: '1H' }, { id: '1d', label: '1D' }, { id: '1w', label: '1W' }, { id: '1mo', label: '1M', title: 'Monthly candles' }]} />
             {intraTf
               ? <Segmented<string> ariaLabel="Sessions" value={String(days)} onChange={(v) => set('days', v === '3' ? null : v)} items={['1', '3', '5', '10'].map((n) => ({ id: n, label: `${n}D`, title: `Last ${n} session${n === '1' ? '' : 's'}` }))} />
               : <Segmented<ChartRange> ariaLabel="Range" value={range} onChange={(v) => set('range', v === '1y' ? null : v)} items={RANGES.map((r) => ({ id: r, label: r.toUpperCase() === 'MAX' ? 'Max' : r.toUpperCase() }))} />}
@@ -414,6 +425,10 @@ export default function ChartPage() {
             </div>
           </Popover>
           <DrawTools symbol={symbol} chartRef={ref} price={quote?.price ?? null} enabled={!intraTf && !!d} />
+          {intraTf && (
+            <Button onClick={() => setFlowOn((x) => !x)} className={cn('max-sm:px-2.5', flowOn && 'border-accent text-accent')}
+              title="Estimated buy / sell volume: delta per bar, cumulative delta and today's volume profile (from the FYERS feed)">Order flow</Button>
+          )}
           <Button icon={<Crosshair className="h-3.5 w-3.5" />} onClick={() => setTradeOn((x) => !x)} disabled={!!intraTf || !d}
             title="Click the chart to open an order ticket at that price (practice unless real orders are switched on)" className={cn('max-sm:px-2.5', tradeOn && 'border-accent text-accent')}>
             <span className="max-sm:hidden">{tradeOn ? 'Trading: click a price' : 'Trade on chart'}</span>
@@ -462,7 +477,7 @@ export default function ChartPage() {
       <div className={cn('grid gap-3', panel && 'xl:grid-cols-[minmax(0,1fr)_320px]')}>
         <Card flush className="min-w-0 self-start overflow-hidden">
           {intraTf ? (
-            iq.data && iq.data.symbol === symbol ? <IntradayChart data={iq.data} live={quote} height={height} />
+            iq.data && iq.data.symbol === symbol ? <IntradayChart data={iq.data} live={quote} height={height} flow={flow?.bars} />
               : iq.error ? <div className="p-4"><ErrorState error={iq.error} compact /></div> : <SkeletonChart height={height} />
           ) : q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : ctype === 'renko' || ctype === 'linebreak' ? (
             <div>
@@ -490,6 +505,8 @@ export default function ChartPage() {
           <div className="min-w-0 space-y-3 self-start">
             <Card flush><SidePanel symbol={symbol} /></Card>
             <DepthLadder symbol={symbol} onPick={openTicket} />
+            {flowOn && intraTf && (flow ? <VolumeProfile profile={flow.profile} poc={flow.poc} va={flow.value_area} totals={flow.totals} note={flow.note} />
+              : fq.error ? <Card title="Order flow today"><p className="text-xs text-muted">{isFailure(fq.error) ? `${fq.error.message} ${fq.error.hint ?? ''}` : 'Unavailable.'}</p></Card> : null)}
             <SeasonalityCard symbol={symbol} />
           </div>
         )}

@@ -207,6 +207,31 @@ survivorship-free top 500, costs, slippage, tax, the "working" test, plus the fi
 years before it only, shown next to the hindsight best and a deflated Sharpe ratio, so the optimism of tuning is
 visible. A spec is data, never code (`scanner/custom.py`); saved in `data/custom_strategies.json`.
 
+### Your strategies in every scan, basket orders
+- Strategy builder > **Re-test in every scan**: a saved strategy joins the daily scan like the built-in ones (re-tested
+  on the survivorship-free universe, a "working" status); its BUY / SELL appear on Today only while it is working.
+- Today > **Review all**: the day's BUYs / SELLs in one basket, practice or real. Real orders are reviewed with every
+  check (nothing sent), then sent one at a time at least a second apart, each once; one that fails doesn't stop the rest.
+
+### Seasonality, market heatmap
+- **Seasonality** (chart side panel): each calendar month's average return over the years in the store (8-9 here),
+  up years, and a t-statistic; only months with |t| >= 2 over 8+ years count as a pattern, the rest is noise.
+- **Market heatmap** (`g v`): today's universe by industry, sized by 20-day traded value (NSE's day files carry no
+  market cap), coloured by today's live move or the 1W / 1M / 3M / 12M return; click a stock for its chart.
+
+### Order flow (intraday chart > Order flow)
+Without FYERS Prime: the live service splits each tick's new volume into bought (at or above the ask) and sold (at or
+below the bid; in between by the price move) per minute and price level (`scanner/intraday/orderflow.py`,
+`data/intraday/live/orderflow_YYYYMMDD.parquet`, 10 days kept). The chart shows delta per bar and cumulative delta under
+the candles, and the side panel today's volume profile (point of control, 70% value area). An estimate (a tick can
+bundle several trades); exact tick-by-tick order flow needs Prime.
+
+### More timeframes and indicators, smart watchlists
+- Charts: 1m, 5m, 15m, **30m, 1H** (starting 09:15 like NSE's), 1D, 1W and **monthly**; indicators now include
+  **Ichimoku** (9, 26, 52), **Parabolic SAR** and **Aroon 25** (26 indicators in all).
+- **Smart watchlists**: Watchlist > "Smart list from a scan" fills a list with a saved scan's stocks, refreshed after
+  each scan (and right away when created); its stocks stream live and can carry alerts like any list.
+
 ### Dated charges and 1-minute history
 - Backtests charge the SEBI fee, stamp duty and NSE transaction charge **as they were on each trade date** (documented
   changes of Jun 2020, Jul 2020, Oct 2024 and Mar 2026; everything else at today's rates).

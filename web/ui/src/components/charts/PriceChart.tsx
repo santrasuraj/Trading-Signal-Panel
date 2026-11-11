@@ -49,6 +49,7 @@ const LINE_COLOR: Partial<Record<IndicatorId, 'warn' | 'accent' | 'violet' | 'in
   sma20: 'warn', sma50: 'accent', sma200: 'violet', ema21: 'info', bb_upper: 'muted', bb_mid: 'muted', bb_lower: 'muted',
   ema9: 'info', ema50: 'accent', ema200: 'violet', sma100: 'muted', supertrend: 'warn', dc_upper: 'profit', dc_lower: 'loss',
   kc_upper: 'info', kc_mid: 'info', kc_lower: 'info',
+  ichi_tenkan: 'info', ichi_kijun: 'loss', ichi_span_a: 'profit', ichi_span_b: 'loss', psar: 'fg',
 }
 const LABEL: Partial<Record<IndicatorId, string>> = {
   sma20: 'SMA 20', sma50: 'SMA 50', sma200: 'SMA 200', ema21: 'EMA 21', bb_upper: 'BB up', bb_mid: 'BB mid', bb_lower: 'BB low',
@@ -59,6 +60,7 @@ const OVERLAYS: [IndicatorId, string][] = [
   ['sma20', 'sma20'], ['sma50', 'sma50'], ['sma100', 'sma100'], ['sma200', 'sma200'], ['ema9', 'ema9'], ['ema21', 'ema21'],
   ['ema50', 'ema50'], ['ema200', 'ema200'], ['bb_upper', 'bb_mid'], ['bb_mid', 'bb_mid'], ['bb_lower', 'bb_mid'],
   ['supertrend', 'supertrend'], ['dc_upper', 'donchian'], ['dc_lower', 'donchian'], ['kc_upper', 'keltner'], ['kc_mid', 'keltner'], ['kc_lower', 'keltner'],
+  ['ichi_tenkan', 'ichimoku'], ['ichi_kijun', 'ichimoku'], ['ichi_span_a', 'ichimoku'], ['ichi_span_b', 'ichimoku'], ['psar', 'psar'],
 ]
 type Tone = 'accent' | 'warn' | 'profit' | 'loss' | 'fg' | 'info'
 /** Oscillator panes below the price, in this order: the series, their colours, reference lines and a fixed range. */
@@ -71,6 +73,7 @@ export const OSCILLATORS: { id: string; label: string; series: [IndicatorId, Ton
   { id: 'mfi', label: 'Money flow 14', series: [['mfi14', 'accent']], lines: [20, 80], range: [0, 100] },
   { id: 'willr', label: 'Williams %R 14', series: [['willr14', 'accent']], lines: [-80, -20], range: [-100, 0] },
   { id: 'roc', label: 'Rate of change 12', series: [['roc12', 'accent']], lines: [0] },
+  { id: 'aroon', label: 'Aroon 25', series: [['aroon_up', 'profit'], ['aroon_down', 'loss']], lines: [30, 70], range: [0, 100] },
 ]
 
 export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function PriceChart({ data, indicators, markerStrategies, showLines, log, height, compactLegend, overlays, extraMarkers, drawings, live }, handle) {
@@ -115,10 +118,11 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
       const v = data.indicators[id]
       if (!on || !v) continue
       const color = pal[LINE_COLOR[id] ?? 'muted']
-      const dashed = id.startsWith('bb_') || id.startsWith('kc_') || id.startsWith('dc_')
+      const dashed = id.startsWith('bb_') || id.startsWith('kc_') || id.startsWith('dc_') || id === 'ichi_span_b'
       const s = chart.addSeries(LineSeries, {
         color, lineWidth: id === 'supertrend' ? 2 : 1, lineStyle: dashed ? LineStyle.Dashed : id === 'supertrend' ? LineStyle.Dotted : LineStyle.Solid, priceLineVisible: false,
         lastValueVisible: false, crosshairMarkerVisible: false,
+        ...(id === 'psar' ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 1.5 } : {}),
       }, 0)
       s.setData(toLine(t, v))
       created.push(s)

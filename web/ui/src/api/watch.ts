@@ -5,7 +5,7 @@ import { fetchJson } from './client'
 import type { ActionCardData } from './action'
 import type { UserDrawing } from '@/lib/userDrawings'
 
-export interface Watchlist { name: string; symbols: string[] }
+export interface Watchlist { name: string; symbols: string[]; scan_id?: string | null }
 export type AlertKind = 'above' | 'below' | 'change_above' | 'change_below' | 'line_above' | 'line_below' | 'rsi_above' | 'rsi_below' | 'sma_above' | 'sma_below' | 'scan_hit' | 'pattern'
 export interface PriceAlert {
   id: string; symbol: string; kind: AlertKind; value: number; note: string; created: string; active: boolean
@@ -77,7 +77,7 @@ export const useActions = (symbols: string[]) => {
   })
 }
 
-export type IntradayTf = '1m' | '5m' | '15m'
+export type IntradayTf = '1m' | '5m' | '15m' | '30m' | '1h'
 export interface IntradayChartData {
   symbol: string; tf: IntradayTf; days: number; sessions: string[]
   bars: { t: number[]; o: number[]; h: number[]; l: number[]; c: number[]; v: number[] }

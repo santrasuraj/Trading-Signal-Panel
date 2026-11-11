@@ -106,8 +106,11 @@ def check_patterns(frames: dict[str, pd.DataFrame], study: dict | None = None) -
     return watch.fire(chk)
 
 
-def scan_refs() -> list[str]:
-    return sorted({a.get("ref") for a in watch.alerts() if a.get("active") and a.get("kind") == "scan_hit" and a.get("ref")})
+def scan_refs(with_smart: bool = False) -> list[str]:
+    refs = {a.get("ref") for a in watch.alerts() if a.get("active") and a.get("kind") == "scan_hit" and a.get("ref")}
+    if with_smart:
+        refs |= set(watch.smart_scan_ids())             # scans that fill a smart watchlist
+    return sorted(refs)
 
 
 def check_scans(hits: dict[str, list[str]], source: str = "scan") -> list[dict]:
@@ -125,7 +128,7 @@ def scan_hits(frames: dict[str, pd.DataFrame], symbols: list[str], quotes: dict 
     """The stocks each saved scan with an active alert matches now: on the completed day, or with live quotes on
     today's row (only stocks with a live quote count then)."""
     from . import scans
-    refs = scan_refs()
+    refs = scan_refs(with_smart=quotes is None)
     if not refs:
         return {}
     saved = {s["id"]: s for s in scans.saved()}
@@ -156,11 +159,18 @@ def run_job(frames: dict[str, pd.DataFrame], symbols: list[str], quotes: dict, l
 def end_of_day(frames: dict[str, pd.DataFrame], symbols: list[str], log=print) -> list[dict]:
     """After a scan: candle-pattern alerts and scan alerts on the completed day; Telegram for any."""
     fired = []
-    for step in (lambda: check_patterns(frames), lambda: check_scans(scan_hits(frames, symbols))):
-        try:
-            fired += step()
-        except Exception as e:
-            log(f"Rule alerts: {type(e).__name__}: {e}")
+    try:
+        fired += check_patterns(frames)
+    except Exception as e:
+        log(f"Rule alerts: {type(e).__name__}: {e}")
+    try:
+        hits = scan_hits(frames, symbols)
+        fired += check_scans(hits)
+        n = watch.refresh_smart(hits)                    # smart watchlists follow their scans
+        if n:
+            log(f"Smart watchlists refreshed: {n}")
+    except Exception as e:
+        log(f"Scan alerts / smart watchlists: {type(e).__name__}: {e}")
     if fired:
         watch.notify(fired)
         log("Alerts: " + "; ".join(watch.message(a) for a in fired))

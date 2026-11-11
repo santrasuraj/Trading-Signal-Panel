@@ -20,6 +20,7 @@ class LinePoint(Model):
 class Watchlist(Model):
     name: str = Field(..., max_length=40)
     symbols: list[str] = Field(..., max_length=200)
+    scan_id: str | None = Field(None, max_length=40)     # a smart list: filled by this saved scan after each scan
 
 
 class WatchlistsBody(Model):
