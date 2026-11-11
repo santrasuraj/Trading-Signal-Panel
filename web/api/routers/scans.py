@@ -89,6 +89,24 @@ def run(body: ScanBody):
     return scans.run_today(scan, data.store(), syms, data.symbol_meta())
 
 
+@router.post("/run-live", response_model=None, response_class=SafeJSONResponse)
+def run_live(body: ScanBody):
+    """The scan on today's live prices (FYERS when logged in, else Yahoo ~15 min late): only stocks with a live
+    quote can match. Quotes are cached and shared, so refreshing every minute costs a few calls."""
+    from ..services import quotes_svc
+    scan = _scan(body)
+    etfs = set(data.etfs())
+    syms = [s for s in data.universe()["symbol"] if s not in etfs]
+    if not syms:
+        raise ApiException("FEATURE_UNAVAILABLE", "No universe list yet.", "Run a scan first.", {"feature": "scans"})
+    q = quotes_svc.quotes(syms, allow_network=True)
+    by = {x["symbol"]: x for x in q["quotes"] if x.get("source") != "close"}
+    out = scans.run_live(scan, data.store(), by, syms, data.symbol_meta())
+    return {**out, "session": q.get("session"), "as_of": q.get("as_of"),
+            "note": "Today's live prices as the last bar (indicators include today); only stocks with a live quote can "
+                    "match. Delayed when the prices are Yahoo's."}
+
+
 @router.post("/backtest", response_model=None, response_class=SafeJSONResponse)
 def backtest(body: ScanBody):
     """The scan's event study on 8 years of the survivorship-free top 500 (a few seconds; the first one loads the data)."""

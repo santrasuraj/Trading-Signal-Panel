@@ -6,15 +6,31 @@ import type { ActionCardData } from './action'
 import type { UserDrawing } from '@/lib/userDrawings'
 
 export interface Watchlist { name: string; symbols: string[] }
-export type AlertKind = 'above' | 'below' | 'change_above' | 'change_below'
+export type AlertKind = 'above' | 'below' | 'change_above' | 'change_below' | 'line_above' | 'line_below' | 'rsi_above' | 'rsi_below' | 'sma_above' | 'sma_below' | 'scan_hit' | 'pattern'
 export interface PriceAlert {
   id: string; symbol: string; kind: AlertKind; value: number; note: string; created: string; active: boolean
   fired_at: string | null; fired_price: number | null; source: string | null
+  a?: { t: string; v: number } | null; b?: { t: string; v: number } | null; ref?: string | null; detail?: string | null
 }
 export interface FiredAlert extends PriceAlert { text: string }
 
 export const ALERT_KIND_LABEL: Record<AlertKind, string> = {
   above: 'Price at or above', below: 'Price at or below', change_above: 'Day change % at or above', change_below: 'Day change % at or below',
+  line_above: 'Price above trendline', line_below: 'Price below trendline',
+  rsi_above: 'RSI(14) at or above', rsi_below: 'RSI(14) at or below',
+  sma_above: 'Price above its N-day average', sma_below: 'Price below its N-day average',
+  scan_hit: 'Saved scan gets a new stock', pattern: 'Candle pattern with a tested edge',
+}
+/** Kinds the alert form offers (trendline alerts are set from a drawn line on the chart). */
+export const FORM_KINDS: AlertKind[] = ['above', 'below', 'change_above', 'change_below', 'rsi_above', 'rsi_below', 'sma_above', 'sma_below', 'pattern', 'scan_hit']
+/** The alert's value as text: "1,234.50", "+2.00%", "RSI 70", "200-day", or "" when it has none. */
+export function alertValueText(a: Pick<PriceAlert, 'kind' | 'value'>): string {
+  const n = (x: number, dp = 2) => x.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp })
+  if (a.kind.startsWith('change')) return `${a.value >= 0 ? '+' : ''}${n(a.value)}%`
+  if (a.kind.startsWith('rsi')) return `${a.value}`
+  if (a.kind.startsWith('sma')) return `${a.value}-day`
+  if (a.kind === 'scan_hit' || a.kind === 'pattern') return ''
+  return n(a.value)
 }
 
 export const useWatchlists = () =>
@@ -36,7 +52,7 @@ export function useAlertMutations() {
   const done = () => { void qc.invalidateQueries({ queryKey: ['alerts'] }) }
   return {
     create: useMutation({
-      mutationFn: (a: { symbol: string; kind: AlertKind; value: number; note?: string }) =>
+      mutationFn: (a: { symbol: string; kind: AlertKind; value?: number; note?: string; a?: { t: string; v: number }; b?: { t: string; v: number }; ref?: string }) =>
         fetchJson<PriceAlert>('/api/alerts', { method: 'POST', body: JSON.stringify({ note: '', ...a }) }),
       onSuccess: done,
     }),

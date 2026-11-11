@@ -187,6 +187,17 @@ def _run(args) -> int:
 
     if args.signals:
         run_intraday_signals(cfg, frames=frames, log=lambda m: print(m, flush=True))
+        try:   # RSI / moving-average / live scan alerts on the live service's quotes (scanner/rule_alerts.py)
+            from scanner import rule_alerts
+            from scanner.intraday import quote_hub
+            from scanner.intraday.live import live_dir
+            from scanner.settings import DATA_DIR
+            info = quote_hub.read_quotes(live_dir(DATA_DIR / "intraday"))
+            if info and info.get("quotes") and frames:
+                rule_alerts.run_job(frames, list(frames["close"].columns), info["quotes"],
+                                    log=lambda m: print(m, flush=True))
+        except Exception as e:
+            print(f"Rule alerts: {type(e).__name__}: {e}", flush=True)
     if args.footprints:
         from scanner import footprints
         footprints.scan(cfg, log=lambda m: print(m, flush=True), frames=frames)

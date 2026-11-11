@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fibPrices, levelOverlays, lineDrawings, timeToISO } from './userDrawings'
+import { fibPrices, levelOverlays, lineDrawings, timeToISO, lineLevel } from './userDrawings'
 
 describe('user drawings', () => {
   it('reads every chart time format as a date', () => {
@@ -28,5 +28,25 @@ describe('user drawings', () => {
     expect(lines[0].lines[0].points[0].t).toBe('2026-01-01')                 // ordered by date
     expect(lines[1].lines).toHaveLength(7)
     expect(lines[1].lines[0].points[1].t).toBe('2026-11-10')                 // Fibonacci levels run to the last bar
+  })
+})
+
+describe('zones, notes, anchored VWAP and trendline levels', () => {
+  it('draws a zone as its top, bottom and middle', () => {
+    const d = lineDrawings([{ id: 'z', kind: 'rect', a: { t: '2026-01-02', v: 110 }, b: { t: '2026-02-02', v: 100 } }], null)
+    expect(d[0].lines.map((l) => l.points[0].v)).toEqual([110, 100, 105])
+  })
+  it('puts a note as a label at its point', () => {
+    const d = lineDrawings([{ id: 'n', kind: 'text', a: { t: '2026-01-02', v: 100 }, note: 'results' }], null)
+    expect(d[0].lines[0].labels[0].text).toBe('results')
+  })
+  it('draws an anchored VWAP only with the chart bars', () => {
+    const bars = { t: ['2026-01-01', '2026-01-02', '2026-01-03'], o: [10, 20, 30], h: [10, 20, 30], l: [10, 20, 30], c: [10, 20, 30], v: [1, 1, 1] }
+    const ds = [{ id: 'v', kind: 'avwap' as const, a: { t: '2026-01-02', v: 20 } }]
+    expect(lineDrawings(ds, null)).toEqual([])
+    expect(lineDrawings(ds, null, bars)[0].lines[0].points.map((p) => p.v)).toEqual([20, 25])
+  })
+  it('extends a trendline by calendar days', () => {
+    expect(lineLevel({ t: '2026-10-01', v: 100 }, { t: '2026-11-01', v: 131 }, '2026-11-11')).toBeCloseTo(141)
   })
 })

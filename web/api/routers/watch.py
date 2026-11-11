@@ -38,7 +38,19 @@ def get_alerts():
 @router.post("/alerts", response_model=PriceAlert)
 def post_alert(body: AlertBody):
     try:
-        return watch.add_alert(body.symbol, body.kind, body.value, body.note)
+        seen = None
+        if body.kind == "scan_hit":           # what the scan matches now: only stocks added later fire it
+            from scanner import scans
+            from ..services import data
+            sc = next((s for s in scans.saved() if s["id"] == body.ref), None)
+            if sc is None:
+                raise ValueError("That saved scan no longer exists.")
+            etfs = set(data.etfs())
+            syms = [s for s in data.universe()["symbol"] if s not in etfs]
+            seen = [r["symbol"] for r in scans.run_today(sc, data.store(), syms, limit=10_000)["rows"]]
+        return watch.add_alert(body.symbol, body.kind, body.value, body.note,
+                               a=body.a.model_dump() if body.a else None, b=body.b.model_dump() if body.b else None,
+                               ref=body.ref, seen=seen)
     except ValueError as e:
         raise ApiException("VALIDATION", str(e))
 

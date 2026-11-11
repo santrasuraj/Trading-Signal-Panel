@@ -59,7 +59,7 @@ function AlertWatcher() {
   // active alerts' symbols ride the app's price stream on every page, so they are checked even when no page shows
   // them (the live service checks them on FYERS ticks too, with or without the app open)
   const alerts = useAlerts()
-  useLiveQuotes(alerts.data?.alerts.filter((a) => a.active).map((a) => a.symbol) ?? [])
+  useLiveQuotes(alerts.data?.alerts.filter((a) => a.active && a.symbol !== 'ALL').map((a) => a.symbol) ?? [])
   useEffect(() => quoteStream.onAlert((a) => {
     toast({ tone: 'info', title: a.text, detail: 'Price alert fired (Watchlist › Alerts to re-arm it).' })
     void qc.invalidateQueries({ queryKey: ['alerts'] })
@@ -180,7 +180,7 @@ const HELP: [string, string][] = [
   ['g c / g p / g m / g b', 'Go to Chart / Portfolio / Market / Smart money'],
   ['g r / g a / g i / g ,', 'Go to Screener / Paper / Intraday / Settings'],
   ['g d / g w / g x / g e', 'Go to Today / Watchlist / Scans / Orders'],
-  ['g y / g h / g k', 'Go to Replay / Coach / Benchmarks'],
+  ['g y / g h / g k / g l', 'Go to Replay / Coach / Benchmarks / Multi-chart'],
   ['/', "Focus the current table's filter"],
   ['j / k, Enter', 'Move the table selection; open it'],
   ['[ / ]', 'Previous / next strategy (detail) or symbol (chart)'],

@@ -615,6 +615,12 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     trades_df = pd.DataFrame(trade_rows, columns=_TRADE_COLS)
     _save(result, curves, bf.p, bew, bn500, started, trades=trades_df, screener=screener, n50=bench50)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
+    if not info.get("live_day"):   # a completed day: candle-pattern alerts and scan alerts on its final prices
+        try:
+            from . import rule_alerts
+            rule_alerts.end_of_day(frames, [s for s in symbols if s in frames["close"].columns], log=log)
+        except Exception as e:
+            log(f"Rule alerts not checked ({type(e).__name__}: {e})")
     try:   # the chart's Outlook base rates: re-measured once the point-in-time universe has a new day (~1 minute)
         outlook.refresh_if_stale(log=log)
     except Exception as e:   # never let it break a scan: the chart keeps the last study

@@ -4,8 +4,9 @@
 import type { Time } from 'lightweight-charts'
 import type { ChartOverlay } from '@/components/charts/PriceChart'
 import type { DrawLine, PatternDrawing } from '@/lib/patternDrawing'
+import { anchoredVwap, type Ohlcv } from '@/lib/chartTypes'
 
-export type DrawKind = 'hline' | 'trend' | 'fib'
+export type DrawKind = 'hline' | 'trend' | 'fib' | 'rect' | 'text' | 'avwap'
 export interface DrawPt { t: string; v: number }
 export interface UserDrawing { id: string; kind: DrawKind; note?: string; price?: number; a?: DrawPt; b?: DrawPt }
 
@@ -31,10 +32,27 @@ export function levelOverlays(ds: UserDrawing[]): ChartOverlay[] {
   }))
 }
 
-/** Trendlines and Fibonacci sets as line drawings; Fibonacci levels run from A to the last bar of the chart. */
-export function lineDrawings(ds: UserDrawing[], lastT: string | null): PatternDrawing[] {
+/** Trendlines, Fibonacci sets, zones, notes and anchored VWAPs as line drawings; Fibonacci levels run from A to the
+ *  last bar of the chart, an anchored VWAP from its anchor to the last bar (needs the chart's `bars`). */
+export function lineDrawings(ds: UserDrawing[], lastT: string | null, bars?: Ohlcv | null): PatternDrawing[] {
   const out: PatternDrawing[] = []
   for (const d of ds) {
+    if (d.kind === 'text' && d.a) {
+      out.push({ key: `u:${d.id}`, name: 'Note', tone: 'info', status: 'confirmed', lines: [{
+        id: `u:${d.id}`, role: 'line', points: [d.a], tone: 'info', style: 'solid', width: 1,
+        labels: [{ t: d.a.t, price: d.a.v, text: d.note || 'note', position: 'atPriceTop' }],
+      }] })
+      continue
+    }
+    if (d.kind === 'avwap' && d.a && bars) {
+      const pts = anchoredVwap(bars, d.a.t)
+      if (pts.length > 1) {
+        out.push({ key: `u:${d.id}`, name: 'Anchored VWAP', tone: 'warn', status: 'confirmed', lines: [{
+          id: `u:${d.id}`, role: 'line', points: pts, tone: 'warn', style: 'solid', width: 2, labels: [], axisLabel: 'AVWAP',
+        }] })
+      }
+      continue
+    }
     if (!d.a || !d.b) continue
     const [a, b] = d.a.t <= d.b.t ? [d.a, d.b] : [d.b, d.a]
     if (d.kind === 'trend') {
@@ -51,9 +69,26 @@ export function lineDrawings(ds: UserDrawing[], lastT: string | null): PatternDr
         labels: [], axisLabel: `${(level * 100).toFixed(1).replace('.0', '')}%`,
       }))
       out.push({ key: `u:${d.id}`, name: 'Fibonacci', tone: 'info', status: 'confirmed', lines })
+    } else if (d.kind === 'rect') {
+      if (a.t === b.t) continue
+      const hi = Math.max(d.a.v, d.b.v), lo = Math.min(d.a.v, d.b.v)
+      out.push({ key: `u:${d.id}`, name: 'Zone', tone: 'warn', status: 'confirmed', lines: [
+        { id: `u:${d.id}:hi`, role: 'line', points: [{ t: a.t, v: hi }, { t: b.t, v: hi }], tone: 'warn', style: 'solid', width: 1,
+          labels: [{ t: a.t, price: hi, text: d.note || 'zone', position: 'atPriceTop' }] },
+        { id: `u:${d.id}:lo`, role: 'line', points: [{ t: a.t, v: lo }, { t: b.t, v: lo }], tone: 'warn', style: 'solid', width: 1, labels: [] },
+        { id: `u:${d.id}:mid`, role: 'line', points: [{ t: a.t, v: (hi + lo) / 2 }, { t: b.t, v: (hi + lo) / 2 }], tone: 'warn', style: 'dotted', width: 1, labels: [] },
+      ] })
     }
   }
   return out
+}
+
+/** A trendline's price on `day` (straight line through its two points by calendar days, extended): the level a
+ *  trendline alert compares the live price with (same rule as scanner/watch.py line_level). */
+export function lineLevel(a: DrawPt, b: DrawPt, day: string): number {
+  const d = (x: string) => Date.parse(`${x}T00:00:00Z`) / 86_400_000
+  const span = d(b.t) - d(a.t)
+  return span === 0 ? a.v : a.v + ((b.v - a.v) * (d(day) - d(a.t))) / span
 }
 
 export function newId(): string {

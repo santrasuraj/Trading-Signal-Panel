@@ -267,6 +267,44 @@ def run_today(scan: dict, frames: dict[str, pd.DataFrame], symbols: list[str], m
             "rules_text": [describe_rule(r) for r in scan["rules"]], "elapsed_s": round(time.monotonic() - t0, 2)}
 
 
+LIVE_SOURCES = ("live", "fyers", "yahoo")
+
+
+def live_frames(frames: dict[str, pd.DataFrame], quotes: dict[str, dict], day, lookback: int = 400) -> dict[str, pd.DataFrame]:
+    """The last `lookback` days with today's row from live quotes (open, high, low, price as the close, volume),
+    replacing a provisional row for today. Stocks without a live quote have no row today (they can't match)."""
+    ts = pd.Timestamp(day)
+    cut = {k: v.iloc[-lookback:].copy() for k, v in frames.items() if isinstance(v, pd.DataFrame)}
+    if cut["close"].index[-1] < ts:
+        for k, v in cut.items():
+            cut[k] = pd.concat([v, pd.DataFrame(np.nan, index=[ts], columns=v.columns)])
+    else:
+        for k in cut:
+            cut[k].loc[ts] = np.nan
+    for field, key in (("open", "open"), ("high", "high"), ("low", "low"), ("close", "price"), ("volume", "volume")):
+        if field not in cut:
+            continue
+        col = cut[field]
+        for sym, q in quotes.items():
+            v = q.get(key) if (q.get("source") or "live") in LIVE_SOURCES else None
+            if v is None and field in ("open", "high", "low"):
+                v = q.get("price") if (q.get("source") or "live") in LIVE_SOURCES else None
+            if v is not None and sym in col.columns:
+                col.at[ts, sym] = float(v)
+    return cut
+
+
+def run_live(scan: dict, frames: dict[str, pd.DataFrame], quotes: dict[str, dict], symbols: list[str],
+             meta: dict[str, dict] | None = None, day=None, limit: int = 300) -> dict:
+    """run_today on today's live prices: only stocks with a live quote can match ("quoted" says how many had one)."""
+    from .settings import ist_now
+    day = day or ist_now().date()
+    live = {s for s, q in quotes.items() if q.get("price") is not None and (q.get("source") or "live") in LIVE_SOURCES}
+    out = run_today(scan, live_frames(frames, quotes, day), symbols, meta, limit=10_000)
+    rows = [r for r in out["rows"] if r["symbol"] in live]
+    return {**out, "rows": rows[:limit], "count": len(rows), "live": True, "quoted": len(live & set(symbols))}
+
+
 # ---- backtest ----------------------------------------------------------------------------------------------------
 
 _pit_lock = threading.Lock()

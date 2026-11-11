@@ -7,7 +7,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { BellRing, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { isFailure } from '@/api/client'
 import { useLiveQuotes, useSymbols } from '@/api/hooks'
-import { ALERT_KIND_LABEL, useActions, useAlertMutations, useAlerts, useSaveWatchlists, useWatchlists, type AlertKind, type Watchlist as WL } from '@/api/watch'
+import { useSavedScans } from '@/api/scans'
+import { ALERT_KIND_LABEL, FORM_KINDS, alertValueText, useActions, useAlertMutations, useAlerts, useSaveWatchlists, useWatchlists, type AlertKind, type Watchlist as WL } from '@/api/watch'
 import { ActionBadge } from '@/components/ActionCard'
 import { PriceStamp } from '@/components/LivePrice'
 import { PageHeader } from '@/components/domain'
@@ -86,26 +87,42 @@ export function AlertForm({ symbol: initial = '', price, onDone }: { symbol?: st
   const [kind, setKind] = useState<AlertKind>('above')
   const [value, setValue] = useState(price ? String(Math.round(price * 1.02 * 20) / 20) : '')
   const [note, setNote] = useState('')
+  const [sma, setSma] = useState('50')
+  const [ref, setRef] = useState('')
+  const saved = useSavedScans()
   const m = useAlertMutations()
   const toast = useToast()
   const v = Number(value)
-  const ok = !!symbol.trim() && value.trim() !== '' && Number.isFinite(v) && (kind.startsWith('change') || v > 0)
+  const isScan = kind === 'scan_hit', isPattern = kind === 'pattern', isSma = kind.startsWith('sma'), isRsi = kind.startsWith('rsi')
+  const ok = isScan ? !!ref : !!symbol.trim() && (isPattern || isSma || (value.trim() !== '' && Number.isFinite(v) && (kind.startsWith('change') || (isRsi ? v > 0 && v < 100 : v > 0))))
+  const pick = (k: AlertKind) => { setKind(k); if (k.startsWith('rsi')) setValue(k === 'rsi_above' ? '70' : '30') }
   return (
     <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => {
       e.preventDefault()
       if (!ok) return
-      m.create.mutate({ symbol: symbol.trim().toUpperCase(), kind, value: v, note }, {
-        onSuccess: (a) => { toast({ tone: 'good', title: `Alert set: ${a.symbol}`, detail: `${ALERT_KIND_LABEL[a.kind]} ${num(a.value, 2)}${a.kind.startsWith('change') ? '%' : ''}` }); setNote(''); onDone?.() },
+      const body = isScan ? { symbol: 'ALL', kind, ref, note: saved.data?.scans.find((x) => x.id === ref)?.name ?? '' }
+        : { symbol: symbol.trim().toUpperCase(), kind, value: isPattern ? 0 : isSma ? Number(sma) : v, note }
+      m.create.mutate(body, {
+        onSuccess: (a) => { toast({ tone: 'good', title: `Alert set${a.symbol !== 'ALL' ? `: ${a.symbol}` : ''}`, detail: `${ALERT_KIND_LABEL[a.kind]} ${alertValueText(a)}` }); setNote(''); onDone?.() },
         onError: (err) => toast({ tone: 'bad', title: 'Alert not saved', detail: errText(err) }),
       })
     }}>
-      {!initial && <label className="text-2xs text-muted">Symbol<input aria-label="Alert symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} className="input mt-0.5 block h-8 w-36 px-2 text-[13px] uppercase" /></label>}
+      {!initial && !isScan && <label className="text-2xs text-muted">Symbol<input aria-label="Alert symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} className="input mt-0.5 block h-8 w-36 px-2 text-[13px] uppercase" /></label>}
       <label className="text-2xs text-muted">When
-        <select aria-label="Alert condition" value={kind} onChange={(e) => setKind(e.target.value as AlertKind)} className="input mt-0.5 block h-8 px-2 text-[13px]">
-          {(Object.keys(ALERT_KIND_LABEL) as AlertKind[]).map((k) => <option key={k} value={k}>{ALERT_KIND_LABEL[k]}</option>)}
+        <select aria-label="Alert condition" value={kind} onChange={(e) => pick(e.target.value as AlertKind)} className="input mt-0.5 block h-8 px-2 text-[13px]">
+          {FORM_KINDS.map((k) => <option key={k} value={k}>{ALERT_KIND_LABEL[k]}</option>)}
         </select>
       </label>
-      <label className="text-2xs text-muted">{kind.startsWith('change') ? 'Change %' : 'Price ₹'}<input aria-label="Alert level" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} className="input num mt-0.5 block h-8 w-28 px-2 text-right text-[13px]" /></label>
+      {isSma ? (
+        <label className="text-2xs text-muted">Average<select aria-label="Average period" value={sma} onChange={(e) => setSma(e.target.value)} className="input mt-0.5 block h-8 px-2 text-[13px]">{['10', '20', '50', '100', '200'].map((n) => <option key={n} value={n}>{n}-day</option>)}</select></label>
+      ) : isScan ? (
+        <label className="text-2xs text-muted">Saved scan<select aria-label="Saved scan" value={ref} onChange={(e) => setRef(e.target.value)} className="input mt-0.5 block h-8 w-48 px-2 text-[13px]">
+          <option value="">{saved.data?.scans.length ? 'Pick a scan' : 'No saved scans yet'}</option>
+          {(saved.data?.scans ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select></label>
+      ) : !isPattern && (
+        <label className="text-2xs text-muted">{kind.startsWith('change') ? 'Change %' : isRsi ? 'RSI' : 'Price ₹'}<input aria-label="Alert level" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} className="input num mt-0.5 block h-8 w-28 px-2 text-right text-[13px]" /></label>
+      )}
       <label className="text-2xs text-muted">Note (optional)<input aria-label="Alert note" value={note} maxLength={120} onChange={(e) => setNote(e.target.value)} className="input mt-0.5 block h-8 w-48 px-2 text-[13px]" /></label>
       <Button type="submit" size="sm" variant="primary" icon={<BellRing className="h-3.5 w-3.5" />} disabled={!ok} loading={m.create.isPending}>Set alert</Button>
     </form>
@@ -119,10 +136,10 @@ function Alerts() {
   const d = q.data
   const active = d?.alerts.filter((a) => a.active) ?? []
   const done = d?.alerts.filter((a) => !a.active) ?? []
-  const lq = useLiveQuotes(active.map((a) => a.symbol))
+  const lq = useLiveQuotes(active.filter((a) => a.symbol !== 'ALL').map((a) => a.symbol))
   const fail = (err: unknown) => toast({ tone: 'bad', title: 'Not changed', detail: errText(err) })
   return (
-    <Card title="Price alerts" subtitle={d?.note}>
+    <Card title="Alerts" subtitle={d?.note}>
       <AlertForm />
       {q.error && !d ? <div className="mt-3"><ErrorState error={q.error} compact /></div> : !d ? <div className="mt-3"><SkeletonRows rows={3} /></div> : (
         <div className="mt-3 space-y-3">
@@ -134,8 +151,8 @@ function Alerts() {
                 return (
                   <li key={a.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px]">
                     <BellRing className="h-3.5 w-3.5 text-accent" />
-                    <Link to={`/chart/${a.symbol}`} className="font-semibold hover:underline">{a.symbol}</Link>
-                    <span className="text-muted">{ALERT_KIND_LABEL[a.kind].toLowerCase()} <span className="num text-fg">{num(a.value, 2)}{a.kind.startsWith('change') ? '%' : ''}</span></span>
+                    {a.symbol === 'ALL' ? <span className="font-semibold">{a.note || 'Scan'}</span> : <Link to={`/chart/${a.symbol}`} className="font-semibold hover:underline">{a.symbol}</Link>}
+                    <span className="text-muted">{ALERT_KIND_LABEL[a.kind].toLowerCase()} <span className="num text-fg">{alertValueText(a)}</span></span>
                     {a.note && <span className="text-xs text-faint">· {a.note}</span>}
                     <span className="ml-auto flex items-center gap-2 text-xs text-muted">{p && <>now <span className="num text-fg">{num(a.kind.startsWith('change') ? p.change_pct : p.price, 2)}{a.kind.startsWith('change') ? '%' : ''}</span></>}
                       <IconButton label="Delete alert" onClick={() => m.remove.mutate(a.id, { onError: fail })}><Trash2 className="h-3.5 w-3.5" /></IconButton></span>
@@ -151,8 +168,8 @@ function Alerts() {
                 {done.map((a) => (
                   <li key={a.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] text-muted">
                     <span className="font-semibold text-fg">{a.symbol}</span>
-                    <span>{ALERT_KIND_LABEL[a.kind].toLowerCase()} {num(a.value, 2)}{a.kind.startsWith('change') ? '%' : ''}</span>
-                    {a.fired_at && <span className="text-xs">fired {dateTimeIST(a.fired_at)} at <span className="num">{num(a.fired_price, 2)}</span>{a.source === 'yahoo' ? ' (Yahoo, ~15 min late)' : ''}</span>}
+                    <span>{ALERT_KIND_LABEL[a.kind].toLowerCase()} {alertValueText(a)}</span>
+                    {a.fired_at && <span className="text-xs">fired {dateTimeIST(a.fired_at)}{a.fired_price != null && <> at <span className="num">{num(a.fired_price, 2)}</span></>}{a.source === 'yahoo' ? ' (Yahoo, ~15 min late)' : ''}{a.detail ? ` · ${a.detail}` : ''}</span>}
                     <span className="ml-auto flex gap-1">
                       <Button size="sm" variant="ghost" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => m.setActive.mutate({ id: a.id, active: true }, { onError: fail })}>Re-arm</Button>
                       <IconButton label="Delete alert" onClick={() => m.remove.mutate(a.id, { onError: fail })}><Trash2 className="h-3.5 w-3.5" /></IconButton>

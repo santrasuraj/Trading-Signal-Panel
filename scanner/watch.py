@@ -4,8 +4,13 @@
   data/alerts.json        {"alerts": [{id, symbol, kind, value, note, created, active, fired_at, fired_price, source}]}
   data/alerts_fired.jsonl one line per fired alert (newest last)
 
-Alert kinds: "above" (price at or above the level), "below" (at or below), "change_above" (day change % at or
-above), "change_below" (at or below). Alerts fire once: a fired alert turns inactive (re-arm it to use it again).
+Alert kinds - on every live quote: "above" / "below" (price at or above / below the level), "change_above" /
+"change_below" (day change %), "line_above" / "line_below" (price crosses a trendline drawn on the chart: its level
+today, from its two points). With the live price on the daily history (rule_alerts.py, every few minutes):
+"rsi_above" / "rsi_below" (RSI 14), "sma_above" / "sma_below" (price above / below its N-day average, value = N),
+"scan_hit" (a saved scan gets a stock it didn't have; symbol "ALL", ref = the scan's id) and "pattern" (a candle
+pattern with a tested edge appears on the stock's daily chart, checked after each scan). Alerts fire once: a fired
+alert turns inactive (re-arm it to use it again).
 
 They are checked on every live quote: by the live service on each FYERS tick batch (twice a second, even with no
 dashboard open) and by the dashboard's price stream on REST / Yahoo quotes. A file lock and the one-shot rule make
@@ -27,7 +32,11 @@ from .settings import ist_now
 WATCH_FILE_NAME = "watchlists.json"
 ALERTS_FILE_NAME = "alerts.json"
 FIRED_FILE_NAME = "alerts_fired.jsonl"
-KINDS = ("above", "below", "change_above", "change_below")
+PRICE_KINDS = ("above", "below", "change_above", "change_below", "line_above", "line_below")   # every live quote
+RULE_KINDS = ("rsi_above", "rsi_below", "sma_above", "sma_below", "scan_hit", "pattern")       # rule_alerts.py
+KINDS = PRICE_KINDS + RULE_KINDS
+SMA_PERIODS = (10, 20, 50, 100, 200)
+ALL = "ALL"                                    # the "symbol" of a scan alert (any stock)
 LIVE_SOURCES = ("live", "fyers", "yahoo")      # a stored close never fires an alert
 MAX_LISTS, MAX_PER_LIST, MAX_ALERTS = 20, 200, 500
 SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9&_.-]{0,24}$")
@@ -117,18 +126,42 @@ def alerts() -> list[dict]:
     return list((_read(data_dir() / ALERTS_FILE_NAME, {"alerts": []}).get("alerts")) or [])
 
 
-def add_alert(symbol: str, kind: str, value: float, note: str = "") -> dict:
-    sym = (clean_symbols([symbol]) or [None])[0]
-    if not sym:
-        raise ValueError("Not an NSE symbol.")
+def line_level(a: dict, b: dict, day) -> float:
+    """A trendline's price on `day` (straight line through its two points, by calendar days, extended both ways)."""
+    from datetime import date as _d
+    ta, tb, td = (_d.fromisoformat(str(x)[:10]) for x in (a["t"], b["t"], day))
+    span = (tb - ta).days
+    return float(a["v"]) if span == 0 else float(a["v"]) + (float(b["v"]) - float(a["v"])) * (td - ta).days / span
+
+
+def add_alert(symbol: str, kind: str, value: float = 0.0, note: str = "", a: dict | None = None, b: dict | None = None,
+              ref: str | None = None, seen: list[str] | None = None) -> dict:
     if kind not in KINDS:
         raise ValueError(f"Kind must be one of {', '.join(KINDS)}.")
-    value = float(value)
+    sym = ALL if kind == "scan_hit" else (clean_symbols([symbol]) or [None])[0]
+    if not sym:
+        raise ValueError("Not an NSE symbol.")
+    value = float(value or 0)
+    extra: dict = {}
     if not value == value or (kind in ("above", "below") and value <= 0):
         raise ValueError("Give a positive price level.")
+    if kind in ("line_above", "line_below"):
+        pa, pb = _point(a), _point(b)
+        if pa["t"] == pb["t"]:
+            raise ValueError("A trendline needs two different dates.")
+        extra = {"a": pa, "b": pb}
+        value = line_level(pa, pb, ist_now().date())
+    elif kind in ("rsi_above", "rsi_below") and not 0 < value < 100:
+        raise ValueError("RSI is between 0 and 100.")
+    elif kind in ("sma_above", "sma_below") and int(value) not in SMA_PERIODS:
+        raise ValueError(f"Moving average of {', '.join(map(str, SMA_PERIODS))} days.")
+    elif kind == "scan_hit":
+        if not ref:
+            raise ValueError("Pick a saved scan.")
+        extra = {"ref": str(ref)[:40], "seen": clean_symbols(seen or [])}
     a = {"id": uuid.uuid4().hex[:12], "symbol": sym, "kind": kind, "value": round(value, 2), "note": str(note or "")[:120],
          "created": ist_now().isoformat(timespec="seconds"), "active": True, "fired_at": None, "fired_price": None,
-         "source": None}
+         "source": None, **extra}
     with _lock("alerts"):
         cur = alerts()
         if sum(1 for x in cur if x.get("active")) >= MAX_ALERTS:
@@ -158,10 +191,16 @@ def update_alert(alert_id: str, active: bool | None = None, delete: bool = False
 
 
 def triggered(a: dict, q: dict) -> bool:
+    """A price alert's condition on a quote (rule kinds are checked by rule_alerts.py, never here)."""
     price, chg = q.get("price"), q.get("change_pct")
     v = a.get("value")
-    if v is None:
+    if v is None or a.get("kind") not in PRICE_KINDS:
         return False
+    if a["kind"] in ("line_above", "line_below"):
+        if price is None or not a.get("a") or not a.get("b"):
+            return False
+        lvl = line_level(a["a"], a["b"], ist_now().date())
+        return price >= lvl if a["kind"] == "line_above" else price <= lvl
     if a["kind"] == "above":
         return price is not None and price >= v
     if a["kind"] == "below":
@@ -174,10 +213,43 @@ def triggered(a: dict, q: dict) -> bool:
 
 
 def describe(a: dict) -> str:
-    v = a["value"]
-    return {"above": f"{a['symbol']} at or above {v:,.2f}", "below": f"{a['symbol']} at or below {v:,.2f}",
-            "change_above": f"{a['symbol']} up {v:+.2f}% or more today",
-            "change_below": f"{a['symbol']} {v:+.2f}% or worse today"}[a["kind"]]
+    v, s, k = a["value"], a["symbol"], a["kind"]
+    if k in ("line_above", "line_below"):
+        lvl = line_level(a["a"], a["b"], ist_now().date()) if a.get("a") and a.get("b") else v
+        return f"{s} {'above' if k == 'line_above' else 'below'} its trendline (today {lvl:,.2f})"
+    return {"above": f"{s} at or above {v:,.2f}", "below": f"{s} at or below {v:,.2f}",
+            "change_above": f"{s} up {v:+.2f}% or more today", "change_below": f"{s} {v:+.2f}% or worse today",
+            "rsi_above": f"{s} RSI(14) at or above {v:g}", "rsi_below": f"{s} RSI(14) at or below {v:g}",
+            "sma_above": f"{s} above its {int(v)}-day average", "sma_below": f"{s} below its {int(v)}-day average",
+            "scan_hit": f"scan '{a.get('note') or a.get('ref')}' has a new stock",
+            "pattern": f"{s}: a candle pattern with a tested edge"}.get(k, f"{s} {k} {v}")
+
+
+def fire(check) -> list[dict]:
+    """Fire every active alert for which `check(alert)` returns {"price": .., "source": .., "detail": ..} (None = not
+    met). One-shot under the file lock, as evaluate(); used by rule_alerts.py for the rule kinds."""
+    if not any(a.get("active") and check(a) for a in alerts()):
+        return []
+    fired = []
+    with _lock("alerts"):
+        cur = alerts()
+        for a in cur:
+            if not a.get("active"):
+                continue
+            hit = check(a)
+            if not hit:
+                continue
+            a.update(active=False, fired_at=ist_now().isoformat(timespec="seconds"), fired_price=hit.get("price"),
+                     source=hit.get("source") or "rule")
+            if hit.get("detail"):
+                a["detail"] = str(hit["detail"])[:200]
+            fired.append(dict(a))
+        if fired:
+            _write(data_dir() / ALERTS_FILE_NAME, {"alerts": cur})
+            with open(data_dir() / FIRED_FILE_NAME, "a", encoding="utf-8") as f:
+                for a in fired:
+                    f.write(json.dumps({**a, "text": message(a)}) + "\n")
+    return fired
 
 
 def evaluate(quotes: dict[str, dict]) -> list[dict]:
@@ -211,7 +283,9 @@ def evaluate(quotes: dict[str, dict]) -> list[dict]:
 
 def message(a: dict) -> str:
     late = " (Yahoo price, ~15 min late)" if a.get("source") == "yahoo" else ""
-    note = f" - {a['note']}" if a.get("note") else ""
+    note = f" - {a['note']}" if a.get("note") and a.get("kind") != "scan_hit" else ""
+    if a.get("detail"):
+        note += f": {a['detail']}"
     px = a.get("fired_price")
     return f"Alert: {describe(a)}: now {px:,.2f}{late}{note}" if isinstance(px, (int, float)) else f"Alert: {describe(a)}{note}"
 
@@ -269,7 +343,7 @@ def notify(fired: list[dict]) -> None:
 
 def feed_symbols() -> list[str]:
     """What the live service should stream for the user beyond the screen: active alerts first, then watchlists."""
-    out = clean_symbols([a.get("symbol") for a in alerts() if a.get("active")])
+    out = clean_symbols([a.get("symbol") for a in alerts() if a.get("active") and a.get("symbol") != ALL])
     for lst in watchlists()["lists"]:
         for s in lst["symbols"]:
             if s not in out:
@@ -280,7 +354,7 @@ def feed_symbols() -> list[str]:
 # ---- chart drawings (per symbol) ----------------------------------------------------------------------------------
 
 DRAWINGS_FILE_NAME = "drawings.json"
-DRAW_KINDS = ("hline", "trend", "fib")
+DRAW_KINDS = ("hline", "trend", "fib", "rect", "text", "avwap")
 MAX_DRAWINGS = 50
 
 
@@ -312,6 +386,10 @@ def save_drawings(symbol: str, items: list[dict]) -> list[dict]:
             if not v == v or v <= 0:
                 raise ValueError("A level needs a positive price.")
             x["price"] = round(v, 2)
+        elif kind in ("text", "avwap"):              # one point: a note on the chart / the anchor of a VWAP
+            x["a"] = _point(d.get("a"))
+            if kind == "text" and not x["note"].strip():
+                raise ValueError("A text note needs some text.")
         else:
             x["a"], x["b"] = _point(d.get("a")), _point(d.get("b"))
         out.append(x)

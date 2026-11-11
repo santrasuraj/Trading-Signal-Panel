@@ -1,8 +1,9 @@
-// Chart drawing tools (daily chart): a level (1 click), a trendline or a Fibonacci retracement (2 clicks), saved per
-// symbol on this PC (data/drawings.json). A level can become a price alert in one click.
+// Chart drawing tools (daily chart): a level, a text note or an anchored VWAP (1 click); a trendline, a Fibonacci
+// retracement or a zone (2 clicks), saved per symbol on this PC (data/drawings.json). A level or a trendline can become
+// an alert in one click (a trendline alert follows the line as it rises or falls).
 
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { BellPlus, Minus, PenLine, Spline, Trash2, TrendingUp } from 'lucide-react'
+import { Anchor, BellPlus, Minus, PenLine, RectangleHorizontal, Spline, Trash2, TrendingUp, Type } from 'lucide-react'
 import type { MouseEventParams } from 'lightweight-charts'
 import { isFailure } from '@/api/client'
 import { useAlertMutations, useDrawings, useSaveDrawings } from '@/api/watch'
@@ -10,14 +11,18 @@ import type { PriceChartHandle } from '@/components/charts/PriceChart'
 import { useToast } from '@/components/toast'
 import { Button, IconButton, Popover } from '@/components/ui'
 import { cn } from '@/lib/csv'
-import { date, num } from '@/lib/format'
-import { newId, timeToISO, type DrawKind, type DrawPt, type UserDrawing } from '@/lib/userDrawings'
+import { date, num, todayIST } from '@/lib/format'
+import { lineLevel, newId, timeToISO, type DrawKind, type DrawPt, type UserDrawing } from '@/lib/userDrawings'
 
 const TOOLS: { kind: DrawKind; label: string; icon: typeof Minus; clicks: number }[] = [
   { kind: 'hline', label: 'Level', icon: Minus, clicks: 1 },
   { kind: 'trend', label: 'Trendline', icon: TrendingUp, clicks: 2 },
   { kind: 'fib', label: 'Fibonacci', icon: Spline, clicks: 2 },
+  { kind: 'rect', label: 'Zone', icon: RectangleHorizontal, clicks: 2 },
+  { kind: 'text', label: 'Text', icon: Type, clicks: 1 },
+  { kind: 'avwap', label: 'Anchored VWAP', icon: Anchor, clicks: 1 },
 ]
+const NAME: Record<DrawKind, string> = { hline: 'Level', trend: 'Trendline', fib: 'Fibonacci', rect: 'Zone', text: 'Note', avwap: 'Anchored VWAP' }
 
 export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string; chartRef: RefObject<PriceChartHandle | null>; price: number | null; enabled: boolean }) {
   const q = useDrawings(symbol)
@@ -45,6 +50,13 @@ export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string
       if (mode === 'hline') {
         put([...items, { id: newId(), kind: 'hline', price: pt.v }])
         setMode(null)
+      } else if (mode === 'text') {
+        const text = window.prompt('Note on the chart (up to 60 characters)')?.trim().slice(0, 60)
+        if (text) put([...items, { id: newId(), kind: 'text', a: pt, note: text }])
+        setMode(null)
+      } else if (mode === 'avwap') {
+        put([...items, { id: newId(), kind: 'avwap', a: pt }])
+        setMode(null)
       } else if (!firstRef.current) {
         pick(pt)
       } else {
@@ -66,19 +78,29 @@ export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string
       onError: (e) => toast({ tone: 'bad', title: 'Alert not saved', detail: isFailure(e) ? e.message : undefined }),
     })
   }
-  const hint = mode && (mode === 'hline' ? 'Click the chart at the level' : first ? 'Click the second point' : 'Click the first point')
+  const lineAlert = (d: UserDrawing) => {
+    if (!d.a || !d.b) return
+    const lvl = lineLevel(d.a, d.b, todayIST())
+    const kind = price != null && price > lvl ? 'line_below' : 'line_above'
+    alerts.create.mutate({ symbol, kind, a: d.a, b: d.b, note: 'chart trendline' }, {
+      onSuccess: () => toast({ tone: 'good', title: `Alert set: ${symbol} ${kind === 'line_below' ? 'below' : 'above'} the trendline (today ${num(lvl, 2)})` }),
+      onError: (e) => toast({ tone: 'bad', title: 'Alert not saved', detail: isFailure(e) ? e.message : undefined }),
+    })
+  }
+  const one = mode === 'hline' || mode === 'text' || mode === 'avwap'
+  const hint = mode && (one ? (mode === 'avwap' ? 'Click the bar to anchor the VWAP' : mode === 'text' ? 'Click where the note goes' : 'Click the chart at the level') : first ? 'Click the second point' : 'Click the first point')
 
   return (
     <>
       <Popover align="right" width={300} trigger={({ toggle, open }) => (
         <Button icon={<PenLine className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} disabled={!enabled}
-          title={enabled ? 'Draw levels, trendlines and Fibonacci retracements' : 'Drawing works on the 1D / 1W chart'} className={cn('max-sm:px-2.5', mode && 'border-accent text-accent')}>
+          title={enabled ? 'Draw levels, trendlines, Fibonacci, zones, notes and anchored VWAPs' : 'Drawing works on the 1D / 1W chart'} className={cn('max-sm:px-2.5', mode && 'border-accent text-accent')}>
           <span className="max-sm:hidden">Draw</span>{items.length ? ` · ${items.length}` : ''}
         </Button>
       )}>
         {(close) => (
           <div className="space-y-2 p-2.5">
-            <div className="flex gap-1.5">{TOOLS.map((t) => (
+            <div className="flex flex-wrap gap-1.5">{TOOLS.map((t) => (
               <Button key={t.kind} size="sm" variant={mode === t.kind ? 'primary' : 'secondary'} icon={<t.icon className="h-3.5 w-3.5" />}
                 onClick={() => { setMode(t.kind); pick(null); close() }}>{t.label}</Button>
             ))}</div>
@@ -87,9 +109,12 @@ export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string
                 <li key={d.id} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs hover:bg-raised">
                   <span className="min-w-0 flex-1 truncate">
                     {d.kind === 'hline' ? <>Level <span className="num">{num(d.price, 2)}</span></>
-                      : <>{d.kind === 'trend' ? 'Trendline' : 'Fibonacci'} <span className="text-muted">{date(d.a?.t, { year: false })} <span className="num">{num(d.a?.v, 2)}</span> → {date(d.b?.t, { year: false })} <span className="num">{num(d.b?.v, 2)}</span></span></>}
+                      : d.kind === 'text' ? <>Note <span className="text-muted">"{d.note}" · {date(d.a?.t, { year: false })}</span></>
+                      : d.kind === 'avwap' ? <>Anchored VWAP <span className="text-muted">from {date(d.a?.t, { year: false })}</span></>
+                      : <>{NAME[d.kind]} <span className="text-muted">{date(d.a?.t, { year: false })} <span className="num">{num(d.a?.v, 2)}</span> → {date(d.b?.t, { year: false })} <span className="num">{num(d.b?.v, 2)}</span></span></>}
                   </span>
                   {d.kind === 'hline' && d.price != null && <IconButton label="Alert at this level" onClick={() => alertOn(d.price!)}><BellPlus className="h-3.5 w-3.5" /></IconButton>}
+                  {d.kind === 'trend' && <IconButton label="Alert when the price crosses this trendline" onClick={() => lineAlert(d)}><BellPlus className="h-3.5 w-3.5" /></IconButton>}
                   <IconButton label="Delete drawing" onClick={() => put(items.filter((x) => x.id !== d.id))}><Trash2 className="h-3.5 w-3.5" /></IconButton>
                 </li>
               ))}</ul>

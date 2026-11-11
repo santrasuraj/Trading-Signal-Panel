@@ -30,6 +30,8 @@ import { EvidenceBadge, PriceAction } from '@/components/PriceAction'
 import { PriceStamp } from '@/components/LivePrice'
 import { ActionPanel } from '@/components/ActionCard'
 import { IntradayChart } from '@/components/charts/IntradayChart'
+import { BrickChart } from '@/components/charts/BrickChart'
+import { heikinAshi, lineBreak, renko, type ChartType } from '@/lib/chartTypes'
 import { WatchButton, AlertButton } from '@/components/WatchButtons'
 import { useDrawings, useIntradayChart, type IntradayTf } from '@/api/watch'
 import { DrawTools } from '@/components/DrawTools'
@@ -328,7 +330,12 @@ export default function ChartPage() {
   // your own drawings (DrawTools): levels as price lines, trendlines / Fibonacci as line drawings
   const dq = useDrawings(symbol)
   const allOverlays = useMemo(() => [...overlays, ...levelOverlays(dq.data?.drawings ?? [])], [overlays, dq.data])
-  const allDrawings = useMemo(() => [...drawings, ...lineDrawings(dq.data?.drawings ?? [], d ? d.bars.t[d.bars.t.length - 1] : null)], [drawings, dq.data, d])
+  const allDrawings = useMemo(() => [...drawings, ...lineDrawings(dq.data?.drawings ?? [], d ? d.bars.t[d.bars.t.length - 1] : null, d?.bars)], [drawings, dq.data, d])
+  // chart type: Heikin Ashi keeps the dates (indicators, markers, drawings still line up); Renko / line break don't
+  const [ctype, setCtype] = useLocalStorage<ChartType>('qd.chart.type', 'candles')
+  const [box, setBox] = useLocalStorage('qd.chart.renkoBox', 2)
+  const shown = useMemo(() => (d && ctype === 'heikin' ? { ...d, bars: heikinAshi(d.bars) } : d), [d, ctype])
+  const bricks = useMemo(() => (!d ? [] : ctype === 'renko' ? renko(d.bars, box).bricks : ctype === 'linebreak' ? lineBreak(d.bars) : []), [d, ctype, box])
 
   return (
     <div className="flex flex-col gap-3">
@@ -360,6 +367,16 @@ export default function ChartPage() {
               ? <Segmented<string> ariaLabel="Sessions" value={String(days)} onChange={(v) => set('days', v === '3' ? null : v)} items={['1', '3', '5', '10'].map((n) => ({ id: n, label: `${n}D`, title: `Last ${n} session${n === '1' ? '' : 's'}` }))} />
               : <Segmented<ChartRange> ariaLabel="Range" value={range} onChange={(v) => set('range', v === '1y' ? null : v)} items={RANGES.map((r) => ({ id: r, label: r.toUpperCase() === 'MAX' ? 'Max' : r.toUpperCase() }))} />}
           </div>
+          {!intraTf && (
+            <select aria-label="Chart type" title="Chart type" value={ctype} onChange={(e) => setCtype(e.target.value as ChartType)} className="input h-8 px-2 text-[13px]">
+              <option value="candles">Candles</option><option value="heikin">Heikin Ashi</option><option value="renko">Renko</option><option value="linebreak">Line break</option>
+            </select>
+          )}
+          {!intraTf && ctype === 'renko' && (
+            <select aria-label="Renko brick size" title="Brick size, % of the first close" value={box} onChange={(e) => setBox(Number(e.target.value))} className="input h-8 px-2 text-[13px]">
+              {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n}% bricks</option>)}
+            </select>
+          )}
           <Popover align="right" width={248} trigger={({ toggle, open }) => <Button icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Indicators" title="Indicators" className="max-sm:px-2.5"><span className="max-sm:hidden">Indicators</span></Button>}>
             <div className="py-1">
               {IND_MENU.map((m) => <MenuCheck key={m.id} checked={ind.includes(m.id)} onChange={(on) => setInd(on ? [...ind, m.id] : ind.filter((x) => x !== m.id))}>{m.label}</MenuCheck>)}
@@ -418,9 +435,15 @@ export default function ChartPage() {
           {intraTf ? (
             iq.data && iq.data.symbol === symbol ? <IntradayChart data={iq.data} live={quote} height={height} />
               : iq.error ? <div className="p-4"><ErrorState error={iq.error} compact /></div> : <SkeletonChart height={height} />
-          ) : q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : (
+          ) : q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : ctype === 'renko' || ctype === 'linebreak' ? (
+            <div>
+              <BrickChart bricks={bricks} height={height} />
+              <p className="border-t border-line px-3 py-1.5 text-2xs text-faint">{ctype === 'renko' ? `Renko: a ${box}% brick each time the close moves a full brick (two to reverse).` : 'Three-line break: a new line when the close breaks the last line; a reversal must break the last three.'} Time is left out: no indicators, markers or drawings on this view. {bricks.length} {ctype === 'renko' ? 'bricks' : 'lines'}.</p>
+            </div>
+          ) : (
             <div className="relative">
-              <PriceChart ref={ref} data={d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile}
+              {ctype === 'heikin' && <span className="absolute right-16 top-2 z-10 rounded bg-raised/90 px-1.5 py-0.5 text-2xs text-muted">Heikin Ashi candles (smoothed; not the traded prices)</span>}
+              <PriceChart ref={ref} data={shown ?? d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile}
                 overlays={allOverlays} extraMarkers={patternMarkers} drawings={allDrawings} live={liveTick} />
               {lvOn.has('chart_patterns') && lv?.daily && <PatternLegend patterns={chartPatterns} drawn={d.tf === '1d'} compact={mobile} />}
               {ol?.derivatives.verdict && (

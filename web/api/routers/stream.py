@@ -17,12 +17,12 @@ import time
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from scanner import watch
+from scanner import rule_alerts, watch
 from scanner.intraday import order_feed
 
 from .. import errors
 from ..paths import P
-from ..services import clock, live_subs, quotes_svc
+from ..services import clock, data, live_subs, quotes_svc
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
 
@@ -48,11 +48,16 @@ def _feed_mtime() -> float | None:
         return None
 
 
-def _check_alerts(quotes: list[dict]) -> None:
+def _check_alerts(quotes: list[dict], rules: bool = False) -> None:
     """Price alerts on the quotes this stream just got (REST / Yahoo ones too: the live service only sees the FYERS
-    feed). One-shot under a file lock, so the live service and several tabs never fire one twice."""
+    feed), and with `rules` the RSI / moving-average alerts on the daily history (rule_alerts.py). One-shot under a
+    file lock, so the live service and several tabs never fire one twice."""
     try:
-        watch.notify(watch.evaluate({q["symbol"]: q for q in quotes}))
+        by = {q["symbol"]: q for q in quotes}
+        fired = watch.evaluate(by)
+        if rules and any(a.get("active") and a.get("kind") in rule_alerts.LIVE_KINDS for a in watch.alerts()):
+            fired += rule_alerts.check_live(data.store()["close"], by)
+        watch.notify(fired)
     except Exception:
         errors.log.exception("Checking price alerts failed")
 
@@ -112,7 +117,7 @@ async def quote_events(request: Request, syms: list[str]):
             changed = [q for q in snap["quotes"] if sent.get(q["symbol"]) != _key(q)]
             if changed or rest_due:
                 # every changed quote, and everything once per refresh: a new alert already met fires without a move
-                await asyncio.to_thread(_check_alerts, snap["quotes"] if rest_due else changed)
+                await asyncio.to_thread(_check_alerts, snap["quotes"] if rest_due else changed, rest_due)
             if changed:
                 for q in changed:
                     sent[q["symbol"]] = _key(q)
