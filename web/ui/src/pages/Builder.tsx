@@ -33,7 +33,7 @@ interface OptResult {
   deflated_sharpe: { deflated_pct?: number; sharpe_ann?: number; trials?: number } | null; curve: [string, number][]; note: string
 }
 interface Job { id: string; state: 'running' | 'done' | 'error'; done: number; total: number; error: string | null; result?: OptResult | null }
-interface SavedSpec extends Spec { id: string; saved: string; last_test: { status: string; status_reason: string } | null }
+interface SavedSpec extends Spec { id: string; saved: string; in_scan?: boolean; last_test: { status: string; status_reason: string } | null }
 
 const BLANK: Spec = { name: 'My strategy', entry: { match: 'all', rules: [{ left: 'close', op: '>', right: { field: 'high_52w_prev', mult: 1 } }] },
   exit: { stop_pct: 8, target_pct: null, trail_pct: 15, max_days: null, match: 'any', rules: [] }, max_positions: 10, priority: 'rs_rating' }
@@ -53,6 +53,7 @@ export default function Builder() {
   const toast = useToast()
   const [spec, setSpec] = useState<Spec>(BLANK)
   const [sid, setSid] = useState<string | undefined>()
+  const [inScan, setInScan] = useState(false)
   const [text, setText] = useState('')
   const [jobId, setJobId] = useState<string | null>(null)
   const fail = (title: string) => (e: unknown) => toast({ tone: 'bad', title, detail: isFailure(e) ? `${e.message}${e.hint ? ` ${e.hint}` : ''}` : undefined })
@@ -62,7 +63,7 @@ export default function Builder() {
   const job = useQuery({ queryKey: ['builder-job', jobId], queryFn: () => fetchJson<Job>(`/api/builder/optimise/${jobId}`), enabled: !!jobId,
     refetchInterval: (q) => (q.state.data?.state === 'running' ? 2_000 : false) })
   const saved = useQuery({ queryKey: ['builder-saved'], queryFn: () => fetchJson<{ strategies: SavedSpec[] }>('/api/builder/saved') })
-  const saveM = useMutation({ mutationFn: (v: { spec: Spec; id?: string; result?: TestResult }) => post<SavedSpec>('/api/builder/saved', { spec: v.spec, id: v.id, result: v.result }),
+  const saveM = useMutation({ mutationFn: (v: { spec: Spec; id?: string; result?: TestResult; in_scan: boolean }) => post<SavedSpec>('/api/builder/saved', { spec: v.spec, id: v.id, result: v.result, in_scan: v.in_scan }),
     onSuccess: (s) => { setSid(s.id); void qc.invalidateQueries({ queryKey: ['builder-saved'] }); toast({ tone: 'good', title: `Saved: ${s.name}` }) } })
   const delM = useMutation({ mutationFn: (id: string) => fetchJson(`/api/builder/saved/${id}`, { method: 'DELETE' }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['builder-saved'] }) })
   useEffect(() => { setJobId(null); testM.reset() }, [spec]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -127,7 +128,8 @@ export default function Builder() {
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" variant="primary" icon={<FlaskConical className="h-3.5 w-3.5" />} disabled={!spec.entry.rules.length} loading={testM.isPending} onClick={() => testM.mutate(spec, { onError: fail('Test failed') })}>Test 8 years</Button>
               <Button size="sm" disabled={!spec.entry.rules.length} loading={optM.isPending || job.data?.state === 'running'} onClick={() => optM.mutate(spec, { onError: fail('Not started') })}>Optimise exits (walk-forward)</Button>
-              <Button size="sm" icon={<Save className="h-3.5 w-3.5" />} disabled={!spec.entry.rules.length} loading={saveM.isPending} onClick={() => saveM.mutate({ spec, id: sid, result: r }, { onError: fail('Not saved') })}>{sid ? 'Save' : 'Save as new'}</Button>
+              <Button size="sm" icon={<Save className="h-3.5 w-3.5" />} disabled={!spec.entry.rules.length} loading={saveM.isPending} onClick={() => saveM.mutate({ spec, id: sid, result: r, in_scan: inScan }, { onError: fail('Not saved') })}>{sid ? 'Save' : 'Save as new'}</Button>
+              <label className="flex items-center gap-1.5 text-xs" title="Re-tested in every scan like the built-in strategies; its BUY / SELL appear on Today only while it is working"><input type="checkbox" checked={inScan} onChange={(e) => setInScan(e.target.checked)} />Re-test in every scan</label>
             </div>
             {testM.isPending && <p className="mt-2 text-2xs text-muted">Testing on 8 years: a few seconds (the first test loads the data, ~10 s more).</p>}
             {testM.error && <p className="mt-2 text-xs text-loss">{isFailure(testM.error) ? testM.error.message : 'Failed.'}</p>}
@@ -168,8 +170,8 @@ export default function Builder() {
             <ul className="space-y-1">{saved.data.strategies.map((s) => (
               <li key={s.id} className={cn('flex items-center gap-1 rounded px-1.5 py-1 text-[13px] hover:bg-raised', s.id === sid && 'bg-raised')}>
                 <button type="button" className="min-w-0 flex-1 truncate text-left" title={s.name}
-                  onClick={() => { setSpec({ name: s.name, entry: s.entry, exit: s.exit, max_positions: s.max_positions, priority: s.priority }); setSid(s.id) }}>{s.name}
-                  {s.last_test && <span className="ml-1 text-2xs text-faint">{STATUS[s.last_test.status] ?? s.last_test.status}</span>}</button>
+                  onClick={() => { setSpec({ name: s.name, entry: s.entry, exit: s.exit, max_positions: s.max_positions, priority: s.priority }); setSid(s.id); setInScan(!!s.in_scan) }}>{s.name}
+                  {s.last_test && <span className="ml-1 text-2xs text-faint">{STATUS[s.last_test.status] ?? s.last_test.status}</span>}{s.in_scan && <span className="ml-1 text-2xs text-accent">in scan</span>}</button>
                 <IconButton label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"?`)) delM.mutate(s.id) }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
               </li>
             ))}</ul>

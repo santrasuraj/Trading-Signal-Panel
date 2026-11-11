@@ -20,6 +20,7 @@ class SaveBody(Model):
     spec: dict
     id: str | None = Field(None, max_length=20)
     result: dict | None = None
+    in_scan: bool = False                 # re-test it in every scan (signals on Today while it is working)
 
 
 @router.post("/from-text", response_model=None, response_class=SafeJSONResponse)
@@ -52,7 +53,7 @@ def saved():
 
 @router.post("/saved", response_model=None, response_class=SafeJSONResponse)
 def save(body: SaveBody):
-    return builder_svc.save(body.spec, body.id, body.result)
+    return builder_svc.save(body.spec, body.id, body.result, body.in_scan)
 
 
 @router.delete("/saved/{sid}", response_model=None, response_class=SafeJSONResponse)

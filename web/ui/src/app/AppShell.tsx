@@ -178,6 +178,7 @@ const HELP: [string, string][] = [
   ['g r / g a / g i / g ,', 'Go to Screener / Paper / Intraday / Settings'],
   ['g d / g w / g x / g e', 'Go to Today / Watchlist / Scans / Orders'],
   ['g y / g h / g k / g l / g u / g j', 'Go to Replay / Coach / Benchmarks / Multi-chart / Practice / Strategy builder'],
+  ['g v', 'Go to the market heatmap'],
   ['/', "Focus the current table's filter"],
   ['j / k, Enter', 'Move the table selection; open it'],
   ['[ / ]', 'Previous / next strategy (detail) or symbol (chart)'],

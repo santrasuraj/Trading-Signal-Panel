@@ -95,9 +95,9 @@ def saved() -> list[dict]:
     return custom.saved(_file())
 
 
-def save(spec: dict, sid: str | None, result: dict | None) -> dict:
+def save(spec: dict, sid: str | None, result: dict | None, in_scan: bool = False) -> dict:
     try:
-        return custom.save(spec, sid, _file(), result)
+        return custom.save(spec, sid, _file(), result, in_scan)
     except ValueError as e:
         raise _invalid(e) from None
 

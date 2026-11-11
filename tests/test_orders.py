@@ -151,3 +151,17 @@ def test_slippage_reconciliation():
              {"event": "placed", "order_id": "B", "ticket": {"ref_price": 1000.0}}]
     r = o.reconcile(orders, trail)
     assert [(x["id"], x["slippage_pct"]) for x in r] == [("A", 1.0), ("B", 1.0)]   # both cost 1%
+
+
+def test_basket_previews_each_order_and_sends_them_one_by_one(env):
+    o.set_enabled(True, "ENABLE")
+    t2 = {**T, "symbol": "INFY", "strategy_key": None}
+    bp = o.basket_preview([T, t2])
+    assert bp["total"] == 2 and bp["ok"] == 2 and bp["buy_value"] == 20_020 and not bp["over_capital"]
+    import time as _t
+    slept = []
+    r = o.basket_place([p["preview_id"] for p in bp["previews"]], confirm=True, sleep=lambda s: (slept.append(s), _t.sleep(s)))
+    assert r["sent"] == 2 and len([c for c in env.calls if c[0] == "place"]) == 2
+    assert len(slept) == 1 and slept[0] >= 1                                   # spaced by the minimum gap (real wait)
+    again = o.basket_place([p["preview_id"] for p in bp["previews"]], confirm=True, sleep=slept.append)
+    assert again["sent"] == 0 and "expired or was already used" in again["results"][0]["message"]   # never twice

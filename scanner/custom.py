@@ -10,6 +10,10 @@ same costs, slippage and tax, judged by the same "working" test.
 
 No code is ever generated or run: a spec is data, checked field by field.
 
+A saved strategy with "in_scan" on joins every scan (scanner/daily.py, scan_strategies): re-tested on the
+survivorship-free universe like the built-in ones, with a "working" status, and its BUY / SELL orders on Today only
+while it is working.
+
 optimise() tries a small grid of exit settings and keeps itself honest with a walk-forward: each year the settings are
 chosen on the years before it only, and the result is the chain of those unseen years, next to the in-sample best and a
 deflated Sharpe ratio for the number of settings tried.
@@ -94,6 +98,46 @@ def to_strategy(spec: dict, ctx, overrides: dict | None = None):
         priority=(lambda f, m=prio: m) if prio is not None else None,
         stop_pct=ex.get("stop_pct"), target_pct=ex.get("target_pct"), trail_pct=ex.get("trail_pct"),
         max_hold=ex.get("max_days"), max_positions=spec["max_positions"], horizon="swing", evidence="EXPERIMENTAL")
+
+
+def scan_strategy(spec: dict, key: str):
+    """The engine strategy for a saved spec inside a scan: its rules are evaluated on whichever panel the scan
+    simulates (today's list for the orders, the point-in-time universe for the backtest)."""
+    from .engine import EventStrategy
+    ctxs: dict[int, object] = {}
+
+    def ctx(f):
+        k = id(f.p)
+        if k not in ctxs:
+            if len(ctxs) >= 2:
+                ctxs.pop(next(iter(ctxs)))
+            ctxs[k] = scans.Ctx(f.p)
+        return ctxs[k]
+    ex = spec["exit"]
+    entry = {"match": spec["entry"]["match"], "rules": spec["entry"]["rules"]}
+    exit_rules = {"match": ex["match"], "rules": ex["rules"]} if ex.get("rules") else None
+    s = EventStrategy(
+        key=key, name=f"{spec['name']} (yours)", description=describe(spec)["entry"],
+        entries=lambda f: scans.evaluate(entry, ctx(f)),
+        exit_signal=(lambda f: scans.evaluate(exit_rules, ctx(f))) if exit_rules else None,
+        priority=(lambda f: ctx(f).get(spec["priority"])) if spec.get("priority") else None,
+        stop_pct=ex.get("stop_pct"), target_pct=ex.get("target_pct"), trail_pct=ex.get("trail_pct"),
+        max_hold=ex.get("max_days"), max_positions=spec["max_positions"], horizon="swing", evidence="EXPERIMENTAL")
+    s.spec = spec                                     # part of the scan's cache signature (daily.py)
+    return s
+
+
+def scan_strategies(path: Path | None = None) -> list:
+    """Saved strategies switched on for the daily scan (key custom_<id>); a spec that no longer validates is skipped."""
+    out = []
+    for row in saved(path):
+        if not row.get("in_scan"):
+            continue
+        try:
+            out.append(scan_strategy(validate(row), f"custom_{row['id']}"))
+        except (ValueError, KeyError):
+            continue
+    return out
 
 
 class Setup:
@@ -220,11 +264,12 @@ def saved(path: Path | None = None) -> list[dict]:
         return []
 
 
-def save(spec: dict, sid: str | None = None, path: Path | None = None, result: dict | None = None) -> dict:
+def save(spec: dict, sid: str | None = None, path: Path | None = None, result: dict | None = None,
+         in_scan: bool = False) -> dict:
     spec = validate(spec)
     items = saved(path)
     sid = sid or uuid.uuid4().hex[:10]
-    row = {"id": sid, **spec, "saved": pd.Timestamp.now().isoformat(timespec="seconds"),
+    row = {"id": sid, **spec, "in_scan": bool(in_scan), "saved": pd.Timestamp.now().isoformat(timespec="seconds"),
            "last_test": {k: (result or {}).get(k) for k in ("status", "status_reason")} if result else None}
     items = [x for x in items if x.get("id") != sid] + [row]
     p = path or _file()

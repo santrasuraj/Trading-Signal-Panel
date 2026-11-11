@@ -36,6 +36,7 @@ import { WatchButton, AlertButton } from '@/components/WatchButtons'
 import { useDrawings, useIntradayChart, type IntradayTf } from '@/api/watch'
 import { DrawTools } from '@/components/DrawTools'
 import { DepthLadder } from '@/components/DepthLadder'
+import { SeasonalityCard } from '@/components/SeasonalityCard'
 import { OrderTicket } from '@/components/OrderTicket'
 import type { Ticket } from '@/api/orders'
 import { levelOverlays, lineDrawings } from '@/lib/userDrawings'
@@ -489,6 +490,7 @@ export default function ChartPage() {
           <div className="min-w-0 space-y-3 self-start">
             <Card flush><SidePanel symbol={symbol} /></Card>
             <DepthLadder symbol={symbol} onPick={openTicket} />
+            <SeasonalityCard symbol={symbol} />
           </div>
         )}
         {ticket && <OrderTicket open={!!ticket} onClose={() => setTicket(null)} initial={ticket} />}

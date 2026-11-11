@@ -360,6 +360,39 @@ def place(preview_id: str, confirm: bool) -> dict:
             "next": ("Once it fills, protect it with a stop-loss and target (Orders page)." if ok and t["side"] == "BUY" and t["product"] == "CNC" else None)}
 
 
+MAX_BASKET = 20
+
+
+def basket_preview(tickets: list[dict]) -> dict:
+    """Review several orders at once (today's BUYs): one preview each, every check as for a single order, and the
+    basket's total against your capital. Nothing is sent."""
+    if not tickets or len(tickets) > MAX_BASKET:
+        raise ApiException("VALIDATION", f"A basket holds 1 to {MAX_BASKET} orders.")
+    pvs = [preview(t) for t in tickets]
+    cap = float((data.config().get("account") or {}).get("capital") or 0)
+    buys = sum(p["value"] for p in pvs if p["ticket"]["side"] == "BUY")
+    return {"previews": pvs, "ok": sum(1 for p in pvs if p["ok"]), "total": len(pvs), "buy_value": round(buys, 2),
+            "capital": cap, "over_capital": bool(cap and buys > cap),
+            "note": "Each order is sent on its own, one at a time, at least the minimum gap apart; one that fails does "
+                    "not stop the others. Previews last 60 seconds."}
+
+
+def basket_place(preview_ids: list[str], confirm: bool, sleep=time.sleep) -> dict:
+    """Send previewed orders one by one (each once, never retried), spaced by the minimum gap between orders."""
+    if not confirm:
+        raise ApiException("VALIDATION", "Confirm the basket to send it.")
+    gap = float(limits().get("min_seconds_between_orders") or 1) + 0.1
+    out = []
+    for i, pid in enumerate(preview_ids[:MAX_BASKET]):
+        if i:
+            sleep(gap)
+        try:
+            out.append({"preview_id": pid, **place(pid, True)})
+        except ApiException as e:
+            out.append({"preview_id": pid, "ok": False, "unknown": False, "order_id": None, "message": e.message})
+    return {"results": out, "sent": sum(1 for r in out if r.get("ok")), "total": len(out)}
+
+
 def cancel(order_id: str) -> dict:
     b = broker()
     r = b.cancel(order_id)

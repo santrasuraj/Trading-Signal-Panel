@@ -4236,6 +4236,86 @@
     }
    }
   },
+  "/api/orders/basket/preview": {
+   "post": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Basket Preview",
+    "description": "Review several orders at once (nothing is sent).",
+    "operationId": "basket_preview_api_orders_basket_preview_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BasketBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/orders/basket/place": {
+   "post": {
+    "tags": [
+     "orders"
+    ],
+    "summary": "Basket Place",
+    "description": "Send previewed orders one by one, spaced by the minimum gap (each once, never retried).",
+    "operationId": "basket_place_api_orders_basket_place_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BasketPlace"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/orders/place": {
    "post": {
     "tags": [
@@ -5240,6 +5320,97 @@
        "type": "string",
        "pattern": "^[0-9a-f]{10}$",
        "title": "Sid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/seasonality/{symbol}": {
+   "get": {
+    "tags": [
+     "views"
+    ],
+    "summary": "Seasonality",
+    "description": "Each calendar month's average return over the years in the store, with how often it was up and a t-statistic.",
+    "operationId": "seasonality_api_seasonality__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 25,
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/heatmap": {
+   "get": {
+    "tags": [
+     "views"
+    ],
+    "summary": "Heatmap",
+    "description": "Today's universe grouped by industry, sized by traded value, coloured by the period's move (live today).",
+    "operationId": "heatmap_api_heatmap_get",
+    "parameters": [
+     {
+      "name": "period",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "1d",
+        "1w",
+        "1m",
+        "3m",
+        "12m"
+       ],
+       "type": "string",
+       "default": "1d",
+       "title": "Period"
       }
      }
     ],
@@ -7570,6 +7741,47 @@
      "v"
     ],
     "title": "Bars"
+   },
+   "BasketBody": {
+    "properties": {
+     "tickets": {
+      "items": {
+       "$ref": "#/components/schemas/Ticket"
+      },
+      "type": "array",
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Tickets"
+     }
+    },
+    "type": "object",
+    "required": [
+     "tickets"
+    ],
+    "title": "BasketBody"
+   },
+   "BasketPlace": {
+    "properties": {
+     "preview_ids": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Preview Ids"
+     },
+     "confirm": {
+      "type": "boolean",
+      "title": "Confirm"
+     }
+    },
+    "type": "object",
+    "required": [
+     "preview_ids",
+     "confirm"
+    ],
+    "title": "BasketPlace"
    },
    "BenchmarkStrip": {
     "properties": {
@@ -21021,6 +21233,11 @@
        }
       ],
       "title": "Result"
+     },
+     "in_scan": {
+      "type": "boolean",
+      "title": "In Scan",
+      "default": false
      }
     },
     "type": "object",

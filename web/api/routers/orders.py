@@ -61,6 +61,27 @@ def preview(body: Ticket):
     return orders_svc.preview(body.model_dump())
 
 
+class BasketBody(Model):
+    tickets: list[Ticket] = Field(..., min_length=1, max_length=20)
+
+
+class BasketPlace(Model):
+    preview_ids: list[str] = Field(..., min_length=1, max_length=20)
+    confirm: bool
+
+
+@router.post("/basket/preview", response_model=None, response_class=SafeJSONResponse)
+def basket_preview(body: BasketBody):
+    """Review several orders at once (nothing is sent)."""
+    return orders_svc.basket_preview([t.model_dump() for t in body.tickets])
+
+
+@router.post("/basket/place", response_model=None, response_class=SafeJSONResponse)
+def basket_place(body: BasketPlace):
+    """Send previewed orders one by one, spaced by the minimum gap (each once, never retried)."""
+    return orders_svc.basket_place(body.preview_ids, body.confirm)
+
+
 @router.post("/place", response_model=None, response_class=SafeJSONResponse)
 def place(body: PlaceBody):
     """Sends a previewed order to FYERS (once; never retried)."""

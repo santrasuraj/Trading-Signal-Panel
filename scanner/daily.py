@@ -312,9 +312,17 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                   if ind_cov is not None and ind_cov < 99 else "")
     strat_out, rejected_out, curves, trade_rows = [], [], {}, []
     all_strats = build_strategies(cfg, include_disabled=True)
+    try:   # your own strategies switched on for the scan (Strategy builder): tested like the built-in ones
+        from . import custom
+        mine = custom.scan_strategies()
+        all_strats += mine
+        if mine:
+            log(f"Your strategies in this scan: {', '.join(s.name for s in mine)}")
+    except Exception as e:
+        log(f"Your saved strategies were skipped ({type(e).__name__}: {e})")
     for n_done, s in enumerate(all_strats, 1):
         log(f"Testing strategy {n_done}/{len(all_strats)}: {s.name}")   # run_scan.py turns this into progress
-        conf_s = (cfg.get("strategies") or {}).get(s.key)
+        conf_s = (cfg.get("strategies") or {}).get(s.key) or getattr(s, "spec", None)
         lifecycle, rejected_reason = strategy_lifecycle(cfg, s.key)
         # One signature for both caches: everything that changes the cached numbers (the resolved rules include
         # code defaults such as top_n and the raw config values; tax for the rejected entries' after-tax metrics).

@@ -73,3 +73,26 @@ def test_charges_are_dated():
     assert cm.on("2023-06-01").exchange_pct == 0.00325 and cm.on("2025-06-02").exchange_pct == 0.00297
     assert cm.on("2026-06-01") is cm                                             # today's rates
     assert CostModel(dated=0).on("2019-06-03").sebi_pct == cm.sebi_pct
+
+
+def test_saved_strategy_joins_the_scan_only_when_switched_on(tmp_path):
+    from scanner.costs import CostModel
+    from scanner.engine import simulate
+    from scanner.panel import Factors, panel_from_wide
+    p = tmp_path / "custom.json"
+    custom.save(SPEC, path=p)
+    on = custom.save({**SPEC, "name": "Above SMA 20", "entry": {"match": "all", "rules": [
+        {"left": "close", "op": ">", "right": {"field": "sma20"}}]}, "exit": {"max_days": 5}}, path=p, in_scan=True)
+    strats = custom.scan_strategies(p)
+    assert [s.key for s in strats] == [f"custom_{on['id']}"] and strats[0].name == "Above SMA 20 (yours)"
+    assert strats[0].spec["exit"]["max_days"] == 5                     # part of the scan's cache signature
+    idx = pd.bdate_range("2023-01-02", periods=320)
+    rng = np.random.default_rng(3)
+    close = pd.DataFrame({s: 100 * np.cumprod(1 + rng.normal(0.001, 0.015, len(idx))) for s in ("AAA", "BBB", "CCC")}, index=idx)
+    frames = {"open": close, "high": close * 1.01, "low": close * 0.99, "close": close, "volume": close * 0 + 1e6}
+    panel = panel_from_wide(frames, list(close.columns))
+    f = Factors(panel)
+    trad = pd.DataFrame(True, index=idx, columns=close.columns)
+    strats[0].use_regime = False
+    res = simulate(strats[0], f, CostModel(), trad, capital=300_000, warmup=60)
+    assert len(res.trades) > 0 and all(t.days <= 6 for t in res.trades)

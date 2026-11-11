@@ -56,6 +56,19 @@ function OrderLine({ o, live }: { o: ActionOrder; live?: number | null }) {
   )
 }
 
+/** The order ticket a card opens (also the basket's rows on Today): the signal's quantity and stop, a limit at the
+ *  live price. */
+export function cardTicket(a: ActionCardData, side: 'BUY' | 'SELL', price: number | null): Ticket {
+  const p = a.primary
+  return {
+    symbol: a.symbol, side, type: 'LIMIT', product: 'CNC',
+    qty: Math.max(1, side === 'SELL' ? Math.floor(a.holding?.qty ?? p?.qty ?? 1) : (p?.qty ?? 1)),
+    limit_price: price != null ? Math.round(price * 100) / 100 : null,
+    stop: side === 'BUY' ? (p?.stop ?? null) : null, target: a.holding?.target_price ?? null,
+    ref_price: p?.price ?? price, strategy_key: p?.strategy_key ?? null, source: 'action_card',
+  }
+}
+
 export function ActionCardView({ a, compact }: { a: ActionCardData; compact?: boolean }) {
   const lq = useLiveQuotes([a.symbol])
   const q = lq.quotes[a.symbol]
@@ -63,13 +76,7 @@ export function ActionCardView({ a, compact }: { a: ActionCardData; compact?: bo
   const p = a.primary
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const price = q?.price ?? p?.price ?? a.holding?.price ?? null
-  const open = (side: 'BUY' | 'SELL') => setTicket({
-    symbol: a.symbol, side, type: 'LIMIT', product: 'CNC',
-    qty: Math.max(1, side === 'SELL' ? Math.floor(a.holding?.qty ?? p?.qty ?? 1) : (p?.qty ?? 1)),
-    limit_price: price != null ? Math.round(price * 100) / 100 : null,
-    stop: side === 'BUY' ? (p?.stop ?? null) : null, target: a.holding?.target_price ?? null,
-    ref_price: p?.price ?? price, strategy_key: p?.strategy_key ?? null, source: 'action_card',
-  })
+  const open = (side: 'BUY' | 'SELL') => setTicket(cardTicket(a, side, price))
   return (
     <div className={cn('rounded-lg border p-3', s.cls)} data-testid="action-card" data-state={a.state}>
       <div className="flex flex-wrap items-center gap-2">
