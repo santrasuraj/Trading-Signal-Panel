@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Literal
 
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path as PathParam, Query
 
 from scanner.providers import INDEX_SYMBOLS
 
@@ -224,3 +224,11 @@ def live_quotes(symbols: str = Query(..., max_length=2500, description="up to 10
     """Live prices between scans: FYERS real time when logged in, else Yahoo (~15 min delayed); the last close
     while the market is shut."""
     return quotes_svc.quotes(quotes_svc.parse(symbols))
+
+
+@router.get("/chart/{symbol}/intraday", response_model=None, response_class=SafeJSONResponse)
+def chart_intraday(symbol: str = PathParam(..., pattern=r"^[A-Za-z0-9][A-Za-z0-9&_.-]{0,24}$"),
+                   tf: Literal["5m", "15m"] = "5m", days: int = Query(3, ge=1, le=20)):
+    """5- or 15-minute candles of the last `days` sessions, with each session's VWAP; the last one may be forming."""
+    from ..services import intraday_chart
+    return intraday_chart.build(symbol, tf, days)

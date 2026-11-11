@@ -16,3 +16,4 @@ from .signals import *  # noqa: F401,F403
 from .smart_money import *  # noqa: F401,F403
 from .strategies import *  # noqa: F401,F403
 from .system import *  # noqa: F401,F403
+from .watch import *  # noqa: F401,F403

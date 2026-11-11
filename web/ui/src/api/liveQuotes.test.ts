@@ -99,3 +99,20 @@ describe('liveHoldings', () => {
     expect(liveHoldings(r, {})).toBe(r)
   })
 })
+
+describe('alert events', () => {
+  it('notifies once per firing, and again when a re-armed alert fires later', () => {
+    vi.useFakeTimers()
+    FakeES.all = []
+    const s = new QuoteStream((u) => new FakeES(u) as unknown as EventSource)
+    const got: string[] = []
+    s.onAlert((a) => got.push(a.text))
+    s.want(['TCS'])
+    vi.advanceTimersByTime(200)
+    const es = FakeES.all[0]
+    const fire = (at: string) => es.handlers.alert?.({ data: JSON.stringify({ alert: { id: 'a1', symbol: 'TCS', fired_at: at }, text: `fired ${at}` }) })
+    fire('10:00'); fire('10:00'); fire('10:05')
+    expect(got).toEqual(['fired 10:00', 'fired 10:05'])
+    vi.useRealTimers()
+  })
+})

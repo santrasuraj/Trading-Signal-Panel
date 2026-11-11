@@ -24,6 +24,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from .. import watch
 from ..providers import load_token
 from ..settings import IST, LOG_DIR, ist_now
 from . import data as idata
@@ -101,6 +102,19 @@ def _write(root, done: pd.DataFrame, forming: dict, last_tick: str | None = None
     tmp.write_text(json.dumps({"updated": ist_now().isoformat(timespec="seconds"), "last_tick": last_tick,
                                "bars": forming}, default=str), encoding="utf-8")
     idata._replace(tmp, f)
+
+
+def _wanted(root) -> list[str]:
+    """The user's symbols, in stream priority: the open screens (subscriptions.json), then active price alerts and
+    watchlists (scanner/watch.py) - those stay streamed with no dashboard open, so alerts fire on real-time ticks."""
+    out = quote_hub.read_subscriptions(live_dir(root))
+    try:
+        for s in watch.feed_symbols():
+            if s not in out:
+                out.append(s)
+    except Exception:
+        pass
+    return out
 
 
 def _token_ok(tok: dict | None) -> bool:
@@ -183,7 +197,7 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     fno_tickers = [i["ticker"] for i in fno]
     base = [s if ":" in s else f"NSE:{s}-EQ" for s in symbols]
     # The screen's symbols (quote_hub.subscriptions.json) come first, then F&O, then the liquid stocks.
-    tickers = quote_hub.plan_tickers(quote_hub.read_subscriptions(live_dir(root)), base, fno_tickers, MAX_SYMBOLS)
+    tickers = quote_hub.plan_tickers(_wanted(root), base, fno_tickers, MAX_SYMBOLS)
     book = quote_hub.QuoteBook()              # every tick's latest price: the screen's live quotes
     builder = idata.TickBarBuilder(interval)
     from ..footprints import FootprintRecorder
@@ -243,7 +257,7 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
         """Follow the screen: subscribe to symbols a page, holding or watchlist now needs, and drop the ones
         that made room for them, staying within the symbol limit."""
         nonlocal tickers
-        want = quote_hub.plan_tickers(quote_hub.read_subscriptions(live_dir(root)), base, fno_tickers, MAX_SYMBOLS)
+        want = quote_hub.plan_tickers(_wanted(root), base, fno_tickers, MAX_SYMBOLS)
         add, drop = [t for t in want if t not in tickers], [t for t in tickers if t not in want]
         if not add and not drop:
             return
@@ -260,7 +274,12 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
         """quotes.json about twice a second while ticks arrive: the browser's live prices."""
         while not stop_quotes.wait(quote_hub.WRITE_EVERY_S):
             try:
-                book.write_if_changed(live_dir(root), idata._replace)
+                if book.write_if_changed(live_dir(root), idata._replace):
+                    _, quotes = book.snapshot()
+                    fired = watch.evaluate(quotes)            # price alerts fire on the tick, dashboard open or not
+                    if fired:
+                        watch.notify(fired)
+                        log("Alerts: " + "; ".join(watch.message(a) for a in fired))
             except Exception:
                 pass                           # the next round tries again
 

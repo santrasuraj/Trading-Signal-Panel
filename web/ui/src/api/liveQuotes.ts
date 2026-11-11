@@ -39,6 +39,15 @@ export class QuoteStream {
 
   getVersion = (): number => this.version
 
+  private alertListeners = new Set<(a: { alert: { id: string; symbol: string }; text: string }) => void>()
+  private seenAlerts = new Set<string>()      // one toast per firing, however many reconnects replay it
+
+  /** Called once for every price alert that fires while the app is open (from any source). */
+  onAlert(l: (a: { alert: { id: string; symbol: string }; text: string }) => void): () => void {
+    this.alertListeners.add(l)
+    return () => { this.alertListeners.delete(l) }
+  }
+
   get(sym: string): LiveQuote | undefined { return this.quotes.get(sym) }
 
   getMeta(): StreamMeta | null { return this.meta && { ...this.meta, connected: this.connected } }
@@ -90,6 +99,15 @@ export class QuoteStream {
     if (!es) return
     es.addEventListener('quotes', (ev) => {
       try { this.apply(JSON.parse((ev as MessageEvent<string>).data)) } catch { /* a malformed event: skip it */ }
+    })
+    es.addEventListener('alert', (ev) => {
+      try {
+        const d = JSON.parse((ev as MessageEvent<string>).data) as { alert: { id: string; symbol: string; fired_at?: string | null }; text: string }
+        const key = `${d.alert.id}@${d.alert.fired_at ?? ''}`          // a re-armed alert fires again under the same id
+        if (this.seenAlerts.has(key)) return
+        this.seenAlerts.add(key)
+        for (const l of this.alertListeners) l(d)
+      } catch { /* skip */ }
     })
     es.onopen = () => { this.connected = true; this.bump() }
     es.onerror = () => { this.connected = false; this.bump() }          // EventSource retries by itself

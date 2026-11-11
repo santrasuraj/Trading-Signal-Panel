@@ -1,5 +1,5 @@
 import {
-  Briefcase, CandlestickChart, Crosshair, Globe2, Landmark, Layers, LayoutDashboard, ListChecks, ListFilter, NotebookPen, Scale, Settings2, Timer, Trophy, type LucideIcon,
+  Briefcase, CandlestickChart, Crosshair, Globe2, Landmark, Layers, LayoutDashboard, ListChecks, ListFilter, NotebookPen, Scale, Settings2, Star, Timer, Trophy, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem { id: string; label: string; to: string; icon: LucideIcon; keys?: string; match: (p: string) => boolean; badge?: string }
@@ -7,6 +7,7 @@ export interface NavItem { id: string; label: string; to: string; icon: LucideIc
 export const NAV: NavItem[] = [
   { id: 'overview', label: 'Overview', to: '/', icon: LayoutDashboard, keys: 'g o', match: (p) => p === '/' },
   { id: 'today', label: 'Today', to: '/today', icon: ListChecks, keys: 'g d', match: (p) => p.startsWith('/today') },
+  { id: 'watchlist', label: 'Watchlist', to: '/watchlist', icon: Star, keys: 'g w', match: (p) => p.startsWith('/watchlist') },
   { id: 'signals', label: 'Signals', to: '/signals', icon: Crosshair, keys: 'g s', match: (p) => p.startsWith('/signals') },
   { id: 'strategies', label: 'Strategies', to: '/strategies', icon: Trophy, keys: 'g t', match: (p) => p.startsWith('/strategies') },
   { id: 'screener', label: 'Screener', to: '/screener', icon: ListFilter, keys: 'g r', match: (p) => p.startsWith('/screener') },
@@ -21,4 +22,4 @@ export const NAV: NavItem[] = [
 ]
 export const SETTINGS_NAV: NavItem = { id: 'settings', label: 'Data & Settings', to: '/settings', icon: Settings2, keys: 'g ,', match: (p) => p.startsWith('/settings') }
 
-export const G_KEYS: Record<string, string> = { o: '/', d: '/today', s: '/signals', t: '/strategies', c: '/chart', p: '/portfolio', m: '/market', b: '/smart-money', ',': '/settings', r: '/screener', i: '/intraday', a: '/paper', n: '/options', f: '/fno' }
+export const G_KEYS: Record<string, string> = { o: '/', d: '/today', w: '/watchlist', s: '/signals', t: '/strategies', c: '/chart', p: '/portfolio', m: '/market', b: '/smart-money', ',': '/settings', r: '/screener', i: '/intraday', a: '/paper', n: '/options', f: '/fno' }

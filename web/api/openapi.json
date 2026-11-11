@@ -868,6 +868,74 @@
     }
    }
   },
+  "/api/chart/{symbol}/intraday": {
+   "get": {
+    "tags": [
+     "lookup"
+    ],
+    "summary": "Chart Intraday",
+    "description": "5- or 15-minute candles of the last `days` sessions, with each session's VWAP; the last one may be forming.",
+    "operationId": "chart_intraday_api_chart__symbol__intraday_get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9&_.-]{0,24}$",
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "tf",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "5m",
+        "15m"
+       ],
+       "type": "string",
+       "default": "5m",
+       "title": "Tf"
+      }
+     },
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 20,
+       "minimum": 1,
+       "default": 3,
+       "title": "Days"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/holdings": {
    "get": {
     "tags": [
@@ -3305,6 +3373,264 @@
      }
     }
    }
+  },
+  "/api/watchlists": {
+   "get": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Get Watchlists",
+    "operationId": "get_watchlists_api_watchlists_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WatchlistsResponse"
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Put Watchlists",
+    "operationId": "put_watchlists_api_watchlists_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/WatchlistsBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WatchlistsResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/alerts": {
+   "get": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Get Alerts",
+    "operationId": "get_alerts_api_alerts_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AlertsResponse"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Post Alert",
+    "operationId": "post_alert_api_alerts_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AlertBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PriceAlert"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/alerts/{alert_id}": {
+   "patch": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Patch Alert",
+    "operationId": "patch_alert_api_alerts__alert_id__patch",
+    "parameters": [
+     {
+      "name": "alert_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{12}$",
+       "title": "Alert Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AlertPatch"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PriceAlert"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Delete Alert",
+    "operationId": "delete_alert_api_alerts__alert_id__delete",
+    "parameters": [
+     {
+      "name": "alert_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{12}$",
+       "title": "Alert Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/actions": {
+   "get": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Actions",
+    "description": "The one tested answer (BUY / SELL / HOLD / NO EDGE) for each symbol, from one read of the scan.",
+    "operationId": "actions_api_actions_get",
+    "parameters": [
+     {
+      "name": "symbols",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 2500,
+       "description": "up to 100 NSE symbols, comma separated",
+       "title": "Symbols"
+      },
+      "description": "up to 100 NSE symbols, comma separated"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActionsResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -3855,6 +4181,22 @@
      "text"
     ],
     "title": "ActionRisk"
+   },
+   "ActionsResponse": {
+    "properties": {
+     "cards": {
+      "items": {
+       "$ref": "#/components/schemas/ActionCard"
+      },
+      "type": "array",
+      "title": "Cards"
+     }
+    },
+    "type": "object",
+    "required": [
+     "cards"
+    ],
+    "title": "ActionsResponse"
    },
    "AiAnalysis": {
     "properties": {
@@ -4983,6 +5325,84 @@
      "href"
     ],
     "title": "Alert"
+   },
+   "AlertBody": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "maxLength": 25,
+      "title": "Symbol"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "above",
+       "below",
+       "change_above",
+       "change_below"
+      ],
+      "title": "Kind"
+     },
+     "value": {
+      "type": "number",
+      "title": "Value"
+     },
+     "note": {
+      "type": "string",
+      "maxLength": 120,
+      "title": "Note",
+      "default": ""
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "kind",
+     "value"
+    ],
+    "title": "AlertBody"
+   },
+   "AlertPatch": {
+    "properties": {
+     "active": {
+      "type": "boolean",
+      "title": "Active"
+     }
+    },
+    "type": "object",
+    "required": [
+     "active"
+    ],
+    "title": "AlertPatch"
+   },
+   "AlertsResponse": {
+    "properties": {
+     "alerts": {
+      "items": {
+       "$ref": "#/components/schemas/PriceAlert"
+      },
+      "type": "array",
+      "title": "Alerts"
+     },
+     "fired": {
+      "items": {
+       "$ref": "#/components/schemas/FiredAlert"
+      },
+      "type": "array",
+      "title": "Fired"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "alerts",
+     "fired",
+     "note"
+    ],
+    "title": "AlertsResponse"
    },
    "Allocation": {
     "properties": {
@@ -7325,6 +7745,96 @@
      "min_turnover_cr"
     ],
     "title": "FiltersConfig"
+   },
+   "FiredAlert": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "above",
+       "below",
+       "change_above",
+       "change_below"
+      ],
+      "title": "Kind"
+     },
+     "value": {
+      "type": "number",
+      "title": "Value"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     },
+     "created": {
+      "type": "string",
+      "title": "Created"
+     },
+     "active": {
+      "type": "boolean",
+      "title": "Active"
+     },
+     "fired_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fired At"
+     },
+     "fired_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fired Price"
+     },
+     "source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Source"
+     },
+     "text": {
+      "type": "string",
+      "title": "Text"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "symbol",
+     "kind",
+     "value",
+     "note",
+     "created",
+     "active",
+     "fired_at",
+     "fired_price",
+     "source",
+     "text"
+    ],
+    "title": "FiredAlert"
    },
    "FnoClientSeries": {
     "properties": {
@@ -17542,6 +18052,91 @@
     ],
     "title": "PitHealth"
    },
+   "PriceAlert": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "above",
+       "below",
+       "change_above",
+       "change_below"
+      ],
+      "title": "Kind"
+     },
+     "value": {
+      "type": "number",
+      "title": "Value"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     },
+     "created": {
+      "type": "string",
+      "title": "Created"
+     },
+     "active": {
+      "type": "boolean",
+      "title": "Active"
+     },
+     "fired_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fired At"
+     },
+     "fired_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fired Price"
+     },
+     "source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Source"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "symbol",
+     "kind",
+     "value",
+     "note",
+     "created",
+     "active",
+     "fired_at",
+     "fired_price",
+     "source"
+    ],
+    "title": "PriceAlert"
+   },
    "PriceLine": {
     "properties": {
      "price": {
@@ -24184,6 +24779,62 @@
      "type"
     ],
     "title": "ValidationError"
+   },
+   "Watchlist": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 40,
+      "title": "Name"
+     },
+     "symbols": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "maxItems": 200,
+      "title": "Symbols"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name",
+     "symbols"
+    ],
+    "title": "Watchlist"
+   },
+   "WatchlistsBody": {
+    "properties": {
+     "lists": {
+      "items": {
+       "$ref": "#/components/schemas/Watchlist"
+      },
+      "type": "array",
+      "maxItems": 20,
+      "title": "Lists"
+     }
+    },
+    "type": "object",
+    "required": [
+     "lists"
+    ],
+    "title": "WatchlistsBody"
+   },
+   "WatchlistsResponse": {
+    "properties": {
+     "lists": {
+      "items": {
+       "$ref": "#/components/schemas/Watchlist"
+      },
+      "type": "array",
+      "title": "Lists"
+     }
+    },
+    "type": "object",
+    "required": [
+     "lists"
+    ],
+    "title": "WatchlistsResponse"
    },
    "WindowMetrics": {
     "properties": {

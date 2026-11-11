@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { WifiOff } from 'lucide-react'
-import { useAutomation, useAutomationSetup, useStatus } from '@/api/hooks'
+import { useAutomation, useAutomationSetup, useLiveQuotes, useStatus } from '@/api/hooks'
 import { isFailure } from '@/api/client'
 import { Banner, Skeleton } from '@/components/feedback'
 import { FyersLoginDialog } from '@/components/FyersLogin'
@@ -19,6 +19,8 @@ import { duration } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
 import { readLocal, useLocalStorage, writeLocal } from '@/lib/useLocalStorage'
 import { typingTarget, useMedia } from '@/lib/useMedia'
+import { quoteStream } from '@/api/liveQuotes'
+import { useAlerts } from '@/api/watch'
 import { G_KEYS } from './nav'
 import { useUi } from './uiState'
 
@@ -46,6 +48,25 @@ function ScanWatcher() {
     }
     lastState.current = st
   }, [data, qc, toast])
+  return null
+}
+
+/** A toast (and a sound-free browser notification when allowed) for every price alert that fires while the app is
+ *  open; the Alerts list refreshes too. */
+function AlertWatcher() {
+  const toast = useToast()
+  const qc = useQueryClient()
+  // active alerts' symbols ride the app's price stream on every page, so they are checked even when no page shows
+  // them (the live service checks them on FYERS ticks too, with or without the app open)
+  const alerts = useAlerts()
+  useLiveQuotes(alerts.data?.alerts.filter((a) => a.active).map((a) => a.symbol) ?? [])
+  useEffect(() => quoteStream.onAlert((a) => {
+    toast({ tone: 'info', title: a.text, detail: 'Price alert fired (Watchlist › Alerts to re-arm it).' })
+    void qc.invalidateQueries({ queryKey: ['alerts'] })
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('Quant Desk alert', { body: a.text })
+    } catch { /* notifications unavailable */ }
+  }), [toast, qc])
   return null
 }
 
@@ -249,6 +270,7 @@ export function AppShell() {
       <FyersLoginDialog />
       <Shortcuts />
       <ScanWatcher />
+      <AlertWatcher />
       <FirstRunNotice />
     </div>
   )

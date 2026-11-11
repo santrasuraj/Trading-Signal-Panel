@@ -87,7 +87,7 @@ P = Paths(settings.ROOT, settings.DATA_DIR)
 
 def configure(root: Path, data: Path) -> None:
     """Repoint the API and the scanner modules it calls at another root/data folder (tests)."""
-    from scanner import fno, fyers_limits, holdings, lock, options, paper, providers, store
+    from scanner import fno, fyers_limits, holdings, lock, options, paper, providers, store, watch
 
     from . import errors        # lazy: errors imports this module
 
@@ -100,6 +100,7 @@ def configure(root: Path, data: Path) -> None:
     lock.LOCK_FILE, lock.INFO_FILE = P.lock, P.lock_info
     providers.TOKEN_FILE = P.token
     fyers_limits.STATE_FILE, fyers_limits.LOCK_FILE = P.fyers_usage, P.fyers_usage_lock
+    watch.DATA_DIR = P.data
     settings.CONFIG_FILE = P.config
     settings.HOLDINGS_FILE = P.holdings
     settings.TOKEN_FILE = P.token

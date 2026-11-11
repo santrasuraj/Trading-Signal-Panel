@@ -62,6 +62,21 @@ instruments for big trades, then the most liquid stocks for the 5-minute bars. I
 symbols it doesn't stream fall back to FYERS REST quotes (cached 30 s and shared by every tab) and then Yahoo. FYERS
 Prime (₹499/month + GST) raises the stream to 5,000 symbols.
 
+### Watchlists, price alerts and intraday charts
+- **Watchlist** page (`g w`): your own lists with live prices, each stock's source stamp and its one tested answer.
+  The star on any chart adds the stock to your first list.
+- **Price alerts** (Watchlist page, or the bell on any chart): price at or above / at or below a level, or the day's
+  change at or above / below a percentage. An alert fires **once** (re-arm it to use it again): a pop-up in the app,
+  a browser notification when allowed, and a Telegram message when it is set up (section 6). The live service checks
+  alerts on every FYERS tick batch, twice a second, even with Quant Desk closed; without a FYERS login the app checks
+  them on Yahoo prices, about 15 minutes late, and the fired alert says so. Stored in `data/alerts.json` (fired:
+  `data/alerts_fired.jsonl`).
+- Alert and watchlist symbols are streamed by the live feed right after the symbols on screen (`data/watchlists.json`),
+  within the FYERS plan's symbol limit.
+- **Intraday charts** (Chart page, `5m` / `15m`, key `i`): candles of the last 1-10 sessions with each session's VWAP and
+  volume, from the FYERS feed and history (Yahoo fills older days); the last candle follows the live price. They cover
+  the ~150 most liquid F&O stocks and the symbols the live feed streams (add a stock to a watchlist to include it).
+
 ### Fyers login, step by step
 No command to run: everything happens in Quant Desk.
 1. Click the **Fyers** chip in the top bar (or **Log in** in Settings › Fyers, or the yellow banner), then **Log in with Fyers**. The Fyers login page opens in a new tab.
@@ -438,6 +453,7 @@ scanner/
   lock.py        one scan at a time across processes
   intraday/      5-minute bars (Yahoo, FYERS history and live WebSocket), MIS backtests -> intraday.json
   intraday/quote_hub.py  live quotes from the FYERS WebSocket (quotes.json) and the screen's subscriptions
+  watch.py       watchlists and one-shot price alerts (checked by the live service and the dashboard)
   options.py     NSE option chains: parsing, Black-76 IV / greeks, PCR, max pain, OI levels, unusual activity
   options_research.py  do PCR / max pain / the straddle's expected move hold up on the stored days?
   fno.py         NSE participant-wise OI and F&O bhavcopy: FII/DII/Pro/Client positions, futures build-ups
@@ -447,6 +463,7 @@ scanner/
 web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), started by 3_dashboard.bat
   api/routers/stream.py        live prices as Server-Sent Events (one stream per tab)
   api/services/action_svc.py   one answer per stock: BUY / SELL (exit) / HOLD / NO EDGE (Today, Chart)
+  api/services/intraday_chart.py  5 / 15-minute candles with VWAP for the Chart page
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 intraday_sync.py intraday jobs: backfill, 15:45 archive, live feed, re-test

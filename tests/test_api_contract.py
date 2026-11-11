@@ -1411,3 +1411,33 @@ def test_action_card_never_answers_from_an_unproven_strategy(client):
                 assert all(x["strategy_key"] != g["strategy"]["key"] for x in c["others"] + c["unproven"] + c["exits"])
     unknown = get_ok(client, "/api/action/NOSUCHSTOCK", M.ActionCard)
     assert unknown["state"] == "NO_EDGE" and unknown["primary"] is None
+
+
+# ------------------------------------------------------------------ watchlists, alerts, intraday candles
+def test_watchlists_and_alerts_round_trip(client):
+    H = {"X-Quant-Desk": "1"}
+    d = get_ok(client, "/api/watchlists", M.WatchlistsResponse)
+    assert d["lists"][0]["name"]
+    r = client.put("/api/watchlists", json={"lists": [{"name": "Main", "symbols": ["igil", "NIFTY50"]}]}, headers=H)
+    assert r.status_code == 200 and r.json()["lists"][0]["symbols"] == ["IGIL", "NIFTY50"]
+    assert client.put("/api/watchlists", json={"lists": []}).status_code == 403          # CSRF header required
+    r = client.post("/api/alerts", json={"symbol": "IGIL", "kind": "above", "value": 1}, headers=H)
+    assert r.status_code == 200, r.text
+    a = r.json()
+    assert a["active"] and a["symbol"] == "IGIL"
+    bad = client.post("/api/alerts", json={"symbol": "IGIL", "kind": "above", "value": -5}, headers=H)
+    assert bad.status_code == 422 or bad.json()["error"]["code"] == "VALIDATION"
+    lst = get_ok(client, "/api/alerts", M.AlertsResponse)
+    assert [x["id"] for x in lst["alerts"]] == [a["id"]]
+    assert client.patch(f"/api/alerts/{a['id']}", json={"active": False}, headers=H).json()["active"] is False
+    assert client.delete(f"/api/alerts/{a['id']}", headers=H).json() == {"deleted": True}
+    assert get_ok(client, "/api/alerts", M.AlertsResponse)["alerts"] == []
+    cards = get_ok(client, "/api/actions?symbols=IGIL,NIFTY50", M.ActionsResponse)["cards"]
+    assert [c["symbol"] for c in cards] == ["IGIL", "NIFTY50"]
+    client.put("/api/watchlists", json={"lists": [{"name": "Main", "symbols": []}]}, headers=H)
+
+
+def test_intraday_chart_says_when_a_symbol_has_no_bars(client):
+    r = client.get("/api/chart/NOSUCHSTOCK/intraday?tf=5m&days=3")
+    assert r.status_code in (404, 501) and r.json()["error"]["code"] in ("FEATURE_UNAVAILABLE", "NOT_FOUND")
+    assert client.get("/api/chart/IGIL/intraday?tf=7m").status_code == 422

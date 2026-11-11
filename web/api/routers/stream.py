@@ -16,6 +16,9 @@ import time
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
+from scanner import watch
+
+from .. import errors
 from ..services import clock, live_subs, quotes_svc
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
@@ -30,15 +33,25 @@ def _key(q: dict) -> tuple:
     return (q.get("price"), q.get("source"), q.get("change_pct"), q.get("volume"))
 
 
-def _event(payload: dict) -> str:
-    return f"event: quotes\ndata: {json.dumps(payload, default=str, separators=(',', ':'))}\n\n"
+def _event(payload: dict, kind: str = "quotes") -> str:
+    return f"event: {kind}\ndata: {json.dumps(payload, default=str, separators=(',', ':'))}\n\n"
+
+
+def _check_alerts(quotes: list[dict]) -> None:
+    """Price alerts on the quotes this stream just got (REST / Yahoo ones too: the live service only sees the FYERS
+    feed). One-shot under a file lock, so the live service and several tabs never fire one twice."""
+    try:
+        watch.notify(watch.evaluate({q["symbol"]: q for q in quotes}))
+    except Exception:
+        errors.log.exception("Checking price alerts failed")
 
 
 async def quote_events(request: Request, syms: list[str]):
     sid = live_subs.open_stream(syms)
     sent: dict[str, tuple] = {}
-    last_rest = last_beat = last_clock = 0.0
+    last_rest = last_beat = last_clock = last_alert = 0.0
     session = None
+    alerts_after = time.time()
     try:
         # first what is at hand without a network call (live feed, today's cached quotes): instant on screen, even
         # for 100 symbols; then the full snapshot, which may wait seconds on Yahoo / FYERS for the rest
@@ -48,6 +61,7 @@ async def quote_events(request: Request, syms: list[str]):
             sent = {q["symbol"]: _key(q) for q in at_hand}
             yield _event({**fast, "quotes": at_hand, "full": False})
         snap = await asyncio.to_thread(quotes_svc.quotes, syms, True)
+        await asyncio.to_thread(_check_alerts, snap["quotes"])
         last_rest = last_beat = time.monotonic()
         sent.update({q["symbol"]: _key(q) for q in snap["quotes"]})
         yield _event({**snap, "full": True})
@@ -58,6 +72,12 @@ async def quote_events(request: Request, syms: list[str]):
             now = time.monotonic()
             if now - last_clock >= CLOCK_EVERY_S:
                 session, last_clock = clock.market_clock()["session"], now
+            if now - last_alert >= CLOCK_EVERY_S:            # alerts fired by anyone (live service, other tabs)
+                last_alert = now
+                alerts_after, fired = await asyncio.to_thread(watch.fired_since, alerts_after)
+                for a in fired:
+                    last_beat = now
+                    yield _event({"alert": a, "text": a.get("text") or watch.message(a)}, "alert")
             every = REST_EVERY_S.get(session)
             if every is None:                         # market shut: prices don't change, only keep the line open
                 if now - last_beat >= HEARTBEAT_S:
@@ -69,6 +89,9 @@ async def quote_events(request: Request, syms: list[str]):
             if rest_due:
                 last_rest = now
             changed = [q for q in snap["quotes"] if sent.get(q["symbol"]) != _key(q)]
+            if changed or rest_due:
+                # every changed quote, and everything once per refresh: a new alert already met fires without a move
+                await asyncio.to_thread(_check_alerts, snap["quotes"] if rest_due else changed)
             if changed:
                 for q in changed:
                     sent[q["symbol"]] = _key(q)

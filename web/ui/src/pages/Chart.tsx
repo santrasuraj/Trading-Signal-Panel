@@ -29,6 +29,9 @@ import { typingTarget, useIsMobile } from '@/lib/useMedia'
 import { EvidenceBadge, PriceAction } from '@/components/PriceAction'
 import { PriceStamp } from '@/components/LivePrice'
 import { ActionPanel } from '@/components/ActionCard'
+import { IntradayChart } from '@/components/charts/IntradayChart'
+import { WatchButton, AlertButton } from '@/components/WatchButtons'
+import { useIntradayChart, type IntradayTf } from '@/api/watch'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
 type Ind = IndicatorId | 'volume'
@@ -173,8 +176,11 @@ export default function ChartPage() {
   const { symbol: raw = 'NIFTY50' } = useParams()
   const symbol = raw.toUpperCase()
   const [sp, setSp] = useSearchParams()
-  const tf = (sp.get('tf') as ChartTf | null) ?? '1d'
+  const tfRaw = (sp.get('tf') as ChartTf | IntradayTf | null) ?? '1d'
+  const intraTf: IntradayTf | null = tfRaw === '5m' || tfRaw === '15m' ? tfRaw : null
+  const tf: ChartTf = intraTf ? '1d' : (tfRaw as ChartTf)        // the daily chart query keeps running underneath
   const range = (sp.get('range') as ChartRange | null) ?? '1y'
+  const days = Math.min(20, Math.max(1, Number(sp.get('days')) || 3))
   const strategyParam = sp.get('s')
   const set = (k: string, v: string | null) => setSp((p) => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); return n }, { replace: true })
   const mobile = useIsMobile()
@@ -197,6 +203,7 @@ export default function ChartPage() {
   const quote = liveQ.quotes[symbol]
   const liveTick = useMemo<LiveTick | null>(() => (quote ? { date: todayIST(), price: quote.price } : null), [quote])
   const olq = useOutlook(symbol, liveQ.live)
+  const iq = useIntradayChart(symbol, intraTf ?? '5m', days, !!intraTf)
   const ol = olq.data?.symbol === symbol ? olq.data : undefined
 
   const available = q.data?.strategies_available ?? []
@@ -217,6 +224,7 @@ export default function ChartPage() {
       if (n >= 1 && n <= 6) { set('range', RANGES[n - 1] === '1y' ? null : RANGES[n - 1]); return }
       if (e.key === 'd') set('tf', null)
       if (e.key === 'w') set('tf', '1w')
+      if (e.key === 'i') set('tf', '5m')
       if (e.key === '[' && idx > 0) nav(`/chart/${list[idx - 1]}?${sp.toString()}`)
       if (e.key === ']' && idx >= 0 && idx < list.length - 1) nav(`/chart/${list[idx + 1]}?${sp.toString()}`)
     }
@@ -330,8 +338,10 @@ export default function ChartPage() {
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 max-md:contents">
           <span className="flex-1 md:hidden" aria-hidden />
           <div className="scroll-x no-scrollbar flex min-w-0 items-center gap-2 max-md:order-[50] max-md:w-full">
-            <Segmented<ChartTf | '5m'> ariaLabel="Timeframe" value={tf} onChange={(v) => v !== '5m' && set('tf', v === '1d' ? null : v)} items={[{ id: '1d', label: '1D' }, { id: '1w', label: '1W' }, { id: '5m', label: '5m', disabled: true, title: 'Intraday chart comes with the intraday store' }]} />
-            <Segmented<ChartRange> ariaLabel="Range" value={range} onChange={(v) => set('range', v === '1y' ? null : v)} items={RANGES.map((r) => ({ id: r, label: r.toUpperCase() === 'MAX' ? 'Max' : r.toUpperCase() }))} />
+            <Segmented<ChartTf | IntradayTf> ariaLabel="Timeframe" value={intraTf ?? tf} onChange={(v) => set('tf', v === '1d' ? null : v)} items={[{ id: '5m', label: '5m', title: '5-minute candles with VWAP (FYERS feed and history)' }, { id: '15m', label: '15m' }, { id: '1d', label: '1D' }, { id: '1w', label: '1W' }]} />
+            {intraTf
+              ? <Segmented<string> ariaLabel="Sessions" value={String(days)} onChange={(v) => set('days', v === '3' ? null : v)} items={['1', '3', '5', '10'].map((n) => ({ id: n, label: `${n}D`, title: `Last ${n} session${n === '1' ? '' : 's'}` }))} />
+              : <Segmented<ChartRange> ariaLabel="Range" value={range} onChange={(v) => set('range', v === '1y' ? null : v)} items={RANGES.map((r) => ({ id: r, label: r.toUpperCase() === 'MAX' ? 'Max' : r.toUpperCase() }))} />}
           </div>
           <Popover align="right" width={248} trigger={({ toggle, open }) => <Button icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Indicators" title="Indicators" className="max-sm:px-2.5"><span className="max-sm:hidden">Indicators</span></Button>}>
             <div className="py-1">
@@ -372,6 +382,8 @@ export default function ChartPage() {
               <PriceStamp q={quote} session={liveQ.data.session} /><span className="num text-fg">{num(quote.price, 2)}</span> <Pct v={quote.change_pct} dp={2} />
             </span>
           )}
+          <WatchButton symbol={symbol} />
+          <AlertButton symbol={symbol} price={quote?.price ?? null} />
           <IconButton label="Save chart as PNG" onClick={screenshot} className="max-sm:hidden"><Camera className="h-4 w-4" /></IconButton>
           <IconButton label={panel ? 'Hide side panel' : 'Show side panel'} onClick={() => setPanel(!panel)} className="max-md:hidden">{panel ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}</IconButton>
         </div>
@@ -382,7 +394,10 @@ export default function ChartPage() {
           full width (at 800 px it was squeezed to ~370 px). self-start: the chart card hugs the chart. */}
       <div className={cn('grid gap-3', panel && 'xl:grid-cols-[minmax(0,1fr)_320px]')}>
         <Card flush className="min-w-0 self-start overflow-hidden">
-          {q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : (
+          {intraTf ? (
+            iq.data && iq.data.symbol === symbol ? <IntradayChart data={iq.data} live={quote} height={height} />
+              : iq.error ? <div className="p-4"><ErrorState error={iq.error} compact /></div> : <SkeletonChart height={height} />
+          ) : q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : (
             <div className="relative">
               <PriceChart ref={ref} data={d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile}
                 overlays={overlays} extraMarkers={patternMarkers} drawings={drawings} live={liveTick} />
@@ -405,7 +420,7 @@ export default function ChartPage() {
       {ol && <ChartOptions d={ol.derivatives} live={liveQ.live} lastDay={ol.date} />}
       {ol && <BigMoneyCard symbol={symbol} b={ol.big_money} kind={ol.kind} />}
       <PriceAction symbol={symbol} />
-      <p className="text-2xs text-faint">Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data; while the market is open the last candle follows the live price. Chart patterns (Levels menu, 1D): the pattern's shape through its swing points, its lines (dashed while forming, solid once a close broke through), the textbook target and the level that voids it; ▲▼ Breakout marks the confirming bar. Markers: ▲ model buy / bullish candle pattern, ▼ model sell / bearish candle pattern, ● open model position, ■ corporate action, small ● results day. Lines (Levels menu): red resistance / call wall, green support / put wall, blue VWAP, violet expected range. Keys: 1-6 range, d/w timeframe, [ ] symbol.</p>
+      <p className="text-2xs text-faint">Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data; while the market is open the last candle follows the live price. Chart patterns (Levels menu, 1D): the pattern's shape through its swing points, its lines (dashed while forming, solid once a close broke through), the textbook target and the level that voids it; ▲▼ Breakout marks the confirming bar. Markers: ▲ model buy / bullish candle pattern, ▼ model sell / bearish candle pattern, ● open model position, ■ corporate action, small ● results day. Lines (Levels menu): red resistance / call wall, green support / put wall, blue VWAP, violet expected range. Intraday (5m / 15m): FYERS 5-minute candles of the ~150 most liquid F&O stocks and of the symbols the live feed streams (add a stock to a watchlist), each session's VWAP in blue; the last candle follows the live price. Keys: 1-6 range, d/w/i timeframe, [ ] symbol.</p>
     </div>
   )
 }
