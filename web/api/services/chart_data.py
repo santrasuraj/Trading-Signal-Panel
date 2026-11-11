@@ -6,6 +6,7 @@ are dropped (never forward-filled). Weekly bars are stamped with the LAST TRADIN
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from scanner.indicators import add_indicators
@@ -16,7 +17,11 @@ from ..util import num, ser_list
 
 RANGE_DAYS = {"3m": 92, "6m": 183, "1y": 366, "2y": 731, "5y": 1827, "max": None}
 INDICATORS = ("sma20", "sma50", "sma200", "ema21", "bb_upper", "bb_mid", "bb_lower", "rsi14", "macd",
-              "macd_signal", "macd_hist", "vol_avg20")
+              "macd_signal", "macd_hist", "vol_avg20",
+              # overlays on the price pane
+              "ema9", "ema50", "ema200", "sma100", "supertrend", "dc_upper", "dc_lower", "kc_upper", "kc_mid", "kc_lower",
+              # oscillator panes
+              "stoch_k", "stoch_d", "adx14", "plus_di", "minus_di", "atr14", "obv", "cci20", "mfi14", "willr14", "roc12")
 DEFAULT_INDICATORS = ("sma20", "sma50", "sma200", "rsi14")
 
 
@@ -52,6 +57,79 @@ def with_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["bb_upper"] = out["sma20"] + 2 * std
     out["bb_lower"] = out["sma20"] - 2 * std
     out["macd_hist"] = out["macd"] - out["macd_signal"]
+    return extra_indicators(df, out)
+
+
+def _wilder(x: pd.Series, n: int) -> pd.Series:
+    return x.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+
+
+def supertrend(df: pd.DataFrame, n: int = 10, mult: float = 3.0) -> pd.Series:
+    """Supertrend (10, 3): the trailing band the close has to cross to flip the trend."""
+    h, lo, c = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
+    prev = np.roll(c, 1)
+    prev[0] = c[0]
+    tr = np.maximum(h - lo, np.maximum(np.abs(h - prev), np.abs(lo - prev)))
+    atr = pd.Series(tr).ewm(alpha=1 / n, adjust=False, min_periods=n).mean().to_numpy()
+    mid = (h + lo) / 2
+    up, dn = mid + mult * atr, mid - mult * atr
+    st = np.full(len(c), np.nan)
+    fu, fd, trend = np.nan, np.nan, 1
+    for i in range(len(c)):
+        if np.isnan(atr[i]):
+            continue
+        fu = up[i] if np.isnan(fu) or up[i] < fu or c[i - 1] > fu else fu
+        fd = dn[i] if np.isnan(fd) or dn[i] > fd or c[i - 1] < fd else fd
+        if trend == 1 and c[i] < fd:
+            trend = -1
+        elif trend == -1 and c[i] > fu:
+            trend = 1
+        st[i] = fd if trend == 1 else fu
+    return pd.Series(st, index=df.index)
+
+
+def extra_indicators(df: pd.DataFrame, out: pd.DataFrame) -> pd.DataFrame:
+    """The chart's other indicators (textbook parameters, no tuning)."""
+    h, lo, c, v = df["high"], df["low"], df["close"], df["volume"].fillna(0.0)
+    out["ema9"] = c.ewm(span=9, adjust=False, min_periods=9).mean()
+    out["ema50"] = c.ewm(span=50, adjust=False, min_periods=50).mean()
+    out["ema200"] = c.ewm(span=200, adjust=False, min_periods=200).mean()
+    out["sma100"] = c.rolling(100, min_periods=100).mean()
+    out["supertrend"] = supertrend(df)
+    out["dc_upper"] = h.rolling(20, min_periods=20).max()
+    out["dc_lower"] = lo.rolling(20, min_periods=20).min()
+    prev = c.shift(1)
+    tr = pd.concat([h - lo, (h - prev).abs(), (lo - prev).abs()], axis=1).max(axis=1)
+    atr10 = _wilder(tr, 10)
+    out["kc_mid"] = c.ewm(span=20, adjust=False, min_periods=20).mean()
+    out["kc_upper"] = out["kc_mid"] + 2 * atr10
+    out["kc_lower"] = out["kc_mid"] - 2 * atr10
+    ll, hh = lo.rolling(14, min_periods=14).min(), h.rolling(14, min_periods=14).max()
+    rng = (hh - ll).replace(0, np.nan)
+    k = ((c - ll) / rng * 100).rolling(3, min_periods=3).mean()      # slow %K (14, 3)
+    out["stoch_k"], out["stoch_d"] = k, k.rolling(3, min_periods=3).mean()
+    out["willr14"] = (hh - c) / rng * -100
+    up_move, down_move = h.diff(), -lo.diff()
+    pdm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    mdm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+    atr14 = _wilder(tr, 14)
+    out["atr14"] = atr14
+    out["plus_di"] = 100 * _wilder(pdm, 14) / atr14.replace(0, np.nan)
+    out["minus_di"] = 100 * _wilder(mdm, 14) / atr14.replace(0, np.nan)
+    dx = 100 * (out["plus_di"] - out["minus_di"]).abs() / (out["plus_di"] + out["minus_di"]).replace(0, np.nan)
+    out["adx14"] = _wilder(dx, 14)
+    out["obv"] = (np.sign(c.diff()).fillna(0) * v).cumsum()
+    tp = (h + lo + c) / 3
+    md = pd.Series(np.nan, index=tp.index)
+    if len(tp) >= 20:                                      # mean absolute deviation over 20 bars, vectorised
+        w = np.lib.stride_tricks.sliding_window_view(tp.to_numpy(dtype=float), 20)
+        md.iloc[19:] = np.abs(w - w.mean(axis=1, keepdims=True)).mean(axis=1)
+    out["cci20"] = (tp - tp.rolling(20, min_periods=20).mean()) / (0.015 * md.replace(0, np.nan))
+    mf = tp * v
+    pos = mf.where(tp > tp.shift(1), 0.0).rolling(14, min_periods=14).sum()
+    neg = mf.where(tp < tp.shift(1), 0.0).rolling(14, min_periods=14).sum()
+    out["mfi14"] = 100 - 100 / (1 + pos / neg.replace(0, np.nan))
+    out["roc12"] = (c / c.shift(12) - 1) * 100
     return out
 
 

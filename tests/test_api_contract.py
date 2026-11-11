@@ -1441,3 +1441,43 @@ def test_intraday_chart_says_when_a_symbol_has_no_bars(client):
     r = client.get("/api/chart/NOSUCHSTOCK/intraday?tf=5m&days=3")
     assert r.status_code in (404, 501) and r.json()["error"]["code"] in ("FEATURE_UNAVAILABLE", "NOT_FOUND")
     assert client.get("/api/chart/IGIL/intraday?tf=7m").status_code == 422
+
+
+# ------------------------------------------------------------------ scans, robustness, drawings
+def test_scans_catalog_run_and_validation(client):
+    H = {"X-Quant-Desk": "1"}
+    cat = client.get("/api/scans/catalog").json()
+    assert len(cat["fields"]) >= 30 and cat["presets"]
+    r = client.post("/api/scans/run", json=cat["presets"][1], headers=H)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["count"] == len(d["rows"]) or d["count"] > len(d["rows"])
+    assert all(isinstance(x["new_today"], bool) for x in d["rows"])
+    bad = client.post("/api/scans/run", json={"rules": [{"left": "nope", "op": ">", "right": {"value": 1}}]}, headers=H)
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "VALIDATION"
+    assert client.post("/api/scans/run", json=cat["presets"][0]).status_code == 403     # CSRF header required
+    s = client.post("/api/scans", json=cat["presets"][0], headers=H).json()
+    assert [x["id"] for x in client.get("/api/scans").json()["scans"]] == [s["id"]]
+    assert client.delete(f"/api/scans/{s['id']}", headers=H).json() == {"deleted": True}
+
+
+def test_strategy_robustness_report(client):
+    key = client.get("/api/strategies").json()["strategies"][0]["key"]
+    r = client.get(f"/api/strategies/{key}/robustness")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["verdict"] in ("likely_real", "maybe_luck", "likely_luck")
+    mc = d["monte_carlo"]
+    if mc:
+        assert mc["paths"] == 10_000 and mc["cagr_pct"]["p5"] <= mc["cagr_pct"]["p50"] <= mc["cagr_pct"]["p95"]
+    assert client.get("/api/strategies/nope_nope/robustness").status_code == 404
+
+
+def test_chart_drawings_round_trip(client):
+    H = {"X-Quant-Desk": "1"}
+    body = {"drawings": [{"kind": "hline", "price": 100}, {"kind": "trend", "a": {"t": "2026-01-02", "v": 90}, "b": {"t": "2026-02-02", "v": 95}}]}
+    r = client.put("/api/drawings/IGIL", json=body, headers=H)
+    assert r.status_code == 200 and [d["kind"] for d in r.json()["drawings"]] == ["hline", "trend"]
+    assert len(client.get("/api/drawings/IGIL").json()["drawings"]) == 2
+    assert client.put("/api/drawings/IGIL", json={"drawings": [{"kind": "circle"}]}, headers=H).status_code == 422
+    client.put("/api/drawings/IGIL", json={"drawings": []}, headers=H)

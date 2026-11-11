@@ -10,7 +10,7 @@ import { useOutlook } from '@/api/outlook'
 import type { ChartMarker, ChartRange, ChartTf, IndicatorId } from '@/api/types'
 import { useUi } from '@/app/uiState'
 import { LevelPill, ResultsChip, StatusDot } from '@/components/badges'
-import { PriceChart, type ChartOverlay, type LiveTick, type PriceChartHandle } from '@/components/charts/PriceChart'
+import { OSCILLATORS, PriceChart, type ChartOverlay, type LiveTick, type PriceChartHandle } from '@/components/charts/PriceChart'
 import { AiAnalyst } from '@/components/AiAnalyst'
 import { BigMoneyCard } from '@/components/BigMoney'
 import { ChartOptions } from '@/components/ChartOptions'
@@ -31,14 +31,27 @@ import { PriceStamp } from '@/components/LivePrice'
 import { ActionPanel } from '@/components/ActionCard'
 import { IntradayChart } from '@/components/charts/IntradayChart'
 import { WatchButton, AlertButton } from '@/components/WatchButtons'
-import { useIntradayChart, type IntradayTf } from '@/api/watch'
+import { useDrawings, useIntradayChart, type IntradayTf } from '@/api/watch'
+import { DrawTools } from '@/components/DrawTools'
+import { levelOverlays, lineDrawings } from '@/lib/userDrawings'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
-type Ind = IndicatorId | 'volume'
+type Ind = IndicatorId | 'volume' | 'donchian' | 'keltner' | 'stoch' | 'adx' | 'atr' | 'obv' | 'cci' | 'mfi' | 'willr' | 'roc'
 const IND_MENU: { id: Ind; label: string }[] = [
-  { id: 'sma20', label: 'SMA 20' }, { id: 'sma50', label: 'SMA 50' }, { id: 'sma200', label: 'SMA 200' }, { id: 'ema21', label: 'EMA 21' },
-  { id: 'bb_mid', label: 'Bollinger 20, 2' }, { id: 'volume', label: 'Volume' }, { id: 'rsi14', label: 'RSI 14 pane' }, { id: 'macd', label: 'MACD pane' },
+  { id: 'sma20', label: 'SMA 20' }, { id: 'sma50', label: 'SMA 50' }, { id: 'sma100', label: 'SMA 100' }, { id: 'sma200', label: 'SMA 200' },
+  { id: 'ema9', label: 'EMA 9' }, { id: 'ema21', label: 'EMA 21' }, { id: 'ema50', label: 'EMA 50' }, { id: 'ema200', label: 'EMA 200' },
+  { id: 'bb_mid', label: 'Bollinger 20, 2' }, { id: 'keltner', label: 'Keltner 20, 2 ATR' }, { id: 'donchian', label: 'Donchian 20' },
+  { id: 'supertrend', label: 'Supertrend 10, 3' }, { id: 'volume', label: 'Volume' },
 ]
+const PANE_MENU: { id: Ind; label: string }[] = [
+  { id: 'rsi14', label: 'RSI 14' }, { id: 'macd', label: 'MACD 12, 26, 9' },
+  ...OSCILLATORS.map((o) => ({ id: o.id as Ind, label: o.label })),
+]
+const PANE_IDS = new Set<string>(PANE_MENU.map((m) => m.id))
+const GROUPS: Partial<Record<Ind, IndicatorId[]>> = {
+  bb_mid: ['bb_upper', 'bb_mid', 'bb_lower'], macd: ['macd', 'macd_signal', 'macd_hist'], donchian: ['dc_upper', 'dc_lower'],
+  keltner: ['kc_upper', 'kc_mid', 'kc_lower'], ...Object.fromEntries(OSCILLATORS.map((o) => [o.id, o.series.map(([k]) => k)])),
+}
 
 type LevelId = 'sr' | 'pivots' | 'intraday' | 'options' | 'range' | 'chart_patterns' | 'candles'
 const LEVEL_MENU: { id: LevelId; label: string; hint: string }[] = [
@@ -59,7 +72,7 @@ function apiIndicators(sel: Ind[]): IndicatorId[] {
   const out = new Set<IndicatorId>(['vol_avg20'])
   for (const s of sel) {
     if (s === 'volume') continue
-    if (s === 'bb_mid') { out.add('bb_upper'); out.add('bb_mid'); out.add('bb_lower') } else if (s === 'macd') { out.add('macd'); out.add('macd_signal'); out.add('macd_hist') } else out.add(s)
+    for (const k of GROUPS[s] ?? [s as IndicatorId]) out.add(k)
   }
   return [...out].sort()
 }
@@ -188,7 +201,7 @@ export default function ChartPage() {
   const [log, setLog] = useLocalStorage('qd.chart.log', false)
   const [lines, setLines] = useLocalStorage('qd.chart.lines', true)
   const [panel, setPanel] = useLocalStorage('qd.chart.panel', true)
-  const indSet = useMemo(() => new Set<Ind>(mobile ? ind.filter((i) => i !== 'rsi14' && i !== 'macd') : ind), [ind, mobile])
+  const indSet = useMemo(() => new Set<string>(mobile ? ind.filter((i) => !PANE_IDS.has(i)) : ind), [ind, mobile])
   const params = useMemo(() => ({ tf, range, indicators: apiIndicators(ind) }), [tf, range, ind])
   const q = useChart(symbol, params)
   const symbols = useSymbols()
@@ -312,6 +325,10 @@ export default function ChartPage() {
   const chartPatterns = useMemo(() => (lvOn.has('chart_patterns') ? lv?.daily?.chart_patterns ?? [] : []), [lv, lvOn])
   // Patterns are found on daily bars: drawn on the 1D chart only (on 1W the legend says so)
   const drawings = useMemo(() => (d && d.tf === '1d' && chartPatterns.length ? patternDrawings(chartPatterns, d.bars.t) : []), [d, chartPatterns])
+  // your own drawings (DrawTools): levels as price lines, trendlines / Fibonacci as line drawings
+  const dq = useDrawings(symbol)
+  const allOverlays = useMemo(() => [...overlays, ...levelOverlays(dq.data?.drawings ?? [])], [overlays, dq.data])
+  const allDrawings = useMemo(() => [...drawings, ...lineDrawings(dq.data?.drawings ?? [], d ? d.bars.t[d.bars.t.length - 1] : null)], [drawings, dq.data, d])
 
   return (
     <div className="flex flex-col gap-3">
@@ -347,10 +364,14 @@ export default function ChartPage() {
             <div className="py-1">
               {IND_MENU.map((m) => <MenuCheck key={m.id} checked={ind.includes(m.id)} onChange={(on) => setInd(on ? [...ind, m.id] : ind.filter((x) => x !== m.id))}>{m.label}</MenuCheck>)}
               <div className="mx-2.5 my-1 border-t border-line" />
+              <div className="px-2.5 pt-1 text-2xs font-semibold uppercase tracking-[0.04em] text-faint">Panes below the chart</div>
+              {PANE_MENU.map((m) => <MenuCheck key={m.id} checked={ind.includes(m.id)} onChange={(on) => setInd(on ? [...ind, m.id] : ind.filter((x) => x !== m.id))}>{m.label}</MenuCheck>)}
+              <div className="mx-2.5 my-1 border-t border-line" />
               <div className="px-2.5 py-1.5"><Switch checked={log} onChange={setLog} label="Log scale" /></div>
               <div className="px-2.5 py-1.5"><Switch checked={lines} onChange={setLines} label="Price lines (stops, entries, 52w)" /></div>
             </div>
           </Popover>
+          <DrawTools symbol={symbol} chartRef={ref} price={quote?.price ?? null} enabled={!intraTf && !!d} />
           <Popover align="right" width={260} trigger={({ toggle, open }) => <Button icon={<Layers className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Markers" title="Strategy markers" className="max-sm:px-2.5"><span className="max-sm:hidden">Markers</span>{markerSet ? ` · ${markerSet.size}` : ''}</Button>}>
             <div className="py-1">
               {available.length === 0 ? <div className="px-2.5 py-2 text-xs text-muted">No strategy traded this symbol in the recent trades. Full history needs trades.parquet (next scan).</div> : (
@@ -400,7 +421,7 @@ export default function ChartPage() {
           ) : q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : (
             <div className="relative">
               <PriceChart ref={ref} data={d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile}
-                overlays={overlays} extraMarkers={patternMarkers} drawings={drawings} live={liveTick} />
+                overlays={allOverlays} extraMarkers={patternMarkers} drawings={allDrawings} live={liveTick} />
               {lvOn.has('chart_patterns') && lv?.daily && <PatternLegend patterns={chartPatterns} drawn={d.tf === '1d'} compact={mobile} />}
               {ol?.derivatives.verdict && (
                 <button type="button" title={ol.derivatives.verdict.headline}

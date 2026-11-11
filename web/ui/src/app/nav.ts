@@ -1,5 +1,5 @@
 import {
-  Briefcase, CandlestickChart, Crosshair, Globe2, Landmark, Layers, LayoutDashboard, ListChecks, ListFilter, NotebookPen, Scale, Settings2, Star, Timer, Trophy, type LucideIcon,
+  Briefcase, CandlestickChart, Crosshair, Globe2, Landmark, Layers, FlaskConical, LayoutDashboard, ListChecks, ListFilter, NotebookPen, Scale, Settings2, Star, Timer, Trophy, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem { id: string; label: string; to: string; icon: LucideIcon; keys?: string; match: (p: string) => boolean; badge?: string }
@@ -11,6 +11,7 @@ export const NAV: NavItem[] = [
   { id: 'signals', label: 'Signals', to: '/signals', icon: Crosshair, keys: 'g s', match: (p) => p.startsWith('/signals') },
   { id: 'strategies', label: 'Strategies', to: '/strategies', icon: Trophy, keys: 'g t', match: (p) => p.startsWith('/strategies') },
   { id: 'screener', label: 'Screener', to: '/screener', icon: ListFilter, keys: 'g r', match: (p) => p.startsWith('/screener') },
+  { id: 'scans', label: 'Scans', to: '/scans', icon: FlaskConical, keys: 'g x', match: (p) => p.startsWith('/scans') },
   { id: 'chart', label: 'Chart', to: '/chart', icon: CandlestickChart, keys: 'g c', match: (p) => p.startsWith('/chart') },
   { id: 'portfolio', label: 'Portfolio', to: '/portfolio', icon: Briefcase, keys: 'g p', match: (p) => p.startsWith('/portfolio') },
   { id: 'paper', label: 'Paper', to: '/paper', icon: NotebookPen, keys: 'g a', match: (p) => p.startsWith('/paper') },
@@ -22,4 +23,4 @@ export const NAV: NavItem[] = [
 ]
 export const SETTINGS_NAV: NavItem = { id: 'settings', label: 'Data & Settings', to: '/settings', icon: Settings2, keys: 'g ,', match: (p) => p.startsWith('/settings') }
 
-export const G_KEYS: Record<string, string> = { o: '/', d: '/today', w: '/watchlist', s: '/signals', t: '/strategies', c: '/chart', p: '/portfolio', m: '/market', b: '/smart-money', ',': '/settings', r: '/screener', i: '/intraday', a: '/paper', n: '/options', f: '/fno' }
+export const G_KEYS: Record<string, string> = { o: '/', d: '/today', w: '/watchlist', x: '/scans', s: '/signals', t: '/strategies', c: '/chart', p: '/portfolio', m: '/market', b: '/smart-money', ',': '/settings', r: '/screener', i: '/intraday', a: '/paper', n: '/options', f: '/fno' }

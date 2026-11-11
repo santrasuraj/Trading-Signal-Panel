@@ -16,7 +16,7 @@ import { date, num, ok, pct, price, qty } from '@/lib/format'
 import { useWidth } from '@/lib/useWidth'
 import { useLwChart } from './useLwChart'
 
-export interface PriceChartHandle { screenshot: () => HTMLCanvasElement | null; chart: () => IChartApi | null }
+export interface PriceChartHandle { screenshot: () => HTMLCanvasElement | null; chart: () => IChartApi | null; series: () => ISeriesApi<'Candlestick'> | null }
 
 /** A horizontal level drawn across the chart (support / resistance, pivots, option walls, expected range). */
 export interface ChartOverlay {
@@ -30,7 +30,7 @@ const LINE_STYLE = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: L
 
 export interface PriceChartProps {
   data: ChartResponse
-  indicators: Set<IndicatorId | 'volume'>
+  indicators: Set<string>
   markerStrategies: Set<string> | null
   showLines: boolean
   log: boolean
@@ -45,10 +45,33 @@ export interface PriceChartProps {
   live?: LiveTick | null
 }
 
-const LINE_COLOR: Partial<Record<IndicatorId, 'warn' | 'accent' | 'violet' | 'info' | 'muted'>> = {
+const LINE_COLOR: Partial<Record<IndicatorId, 'warn' | 'accent' | 'violet' | 'info' | 'muted' | 'profit' | 'loss' | 'fg'>> = {
   sma20: 'warn', sma50: 'accent', sma200: 'violet', ema21: 'info', bb_upper: 'muted', bb_mid: 'muted', bb_lower: 'muted',
+  ema9: 'info', ema50: 'accent', ema200: 'violet', sma100: 'muted', supertrend: 'warn', dc_upper: 'profit', dc_lower: 'loss',
+  kc_upper: 'info', kc_mid: 'info', kc_lower: 'info',
 }
-const LABEL: Partial<Record<IndicatorId, string>> = { sma20: 'SMA 20', sma50: 'SMA 50', sma200: 'SMA 200', ema21: 'EMA 21', bb_upper: 'BB up', bb_mid: 'BB mid', bb_lower: 'BB low' }
+const LABEL: Partial<Record<IndicatorId, string>> = {
+  sma20: 'SMA 20', sma50: 'SMA 50', sma200: 'SMA 200', ema21: 'EMA 21', bb_upper: 'BB up', bb_mid: 'BB mid', bb_lower: 'BB low',
+  ema9: 'EMA 9', ema50: 'EMA 50', ema200: 'EMA 200', sma100: 'SMA 100', supertrend: 'Supertrend',
+}
+/** Price-pane lines: [indicator, the menu item that switches it on] */
+const OVERLAYS: [IndicatorId, string][] = [
+  ['sma20', 'sma20'], ['sma50', 'sma50'], ['sma100', 'sma100'], ['sma200', 'sma200'], ['ema9', 'ema9'], ['ema21', 'ema21'],
+  ['ema50', 'ema50'], ['ema200', 'ema200'], ['bb_upper', 'bb_mid'], ['bb_mid', 'bb_mid'], ['bb_lower', 'bb_mid'],
+  ['supertrend', 'supertrend'], ['dc_upper', 'donchian'], ['dc_lower', 'donchian'], ['kc_upper', 'keltner'], ['kc_mid', 'keltner'], ['kc_lower', 'keltner'],
+]
+type Tone = 'accent' | 'warn' | 'profit' | 'loss' | 'fg' | 'info'
+/** Oscillator panes below the price, in this order: the series, their colours, reference lines and a fixed range. */
+export const OSCILLATORS: { id: string; label: string; series: [IndicatorId, Tone][]; lines?: number[]; range?: [number, number] }[] = [
+  { id: 'stoch', label: 'Stochastic 14, 3', series: [['stoch_k', 'accent'], ['stoch_d', 'warn']], lines: [20, 80], range: [0, 100] },
+  { id: 'adx', label: 'ADX 14 (+DI / -DI)', series: [['adx14', 'fg'], ['plus_di', 'profit'], ['minus_di', 'loss']], lines: [25] },
+  { id: 'atr', label: 'ATR 14', series: [['atr14', 'accent']] },
+  { id: 'obv', label: 'On-balance volume', series: [['obv', 'accent']] },
+  { id: 'cci', label: 'CCI 20', series: [['cci20', 'accent']], lines: [-100, 100] },
+  { id: 'mfi', label: 'Money flow 14', series: [['mfi14', 'accent']], lines: [20, 80], range: [0, 100] },
+  { id: 'willr', label: 'Williams %R 14', series: [['willr14', 'accent']], lines: [-80, -20], range: [-100, 0] },
+  { id: 'roc', label: 'Rate of change 12', series: [['roc12', 'accent']], lines: [0] },
+]
 
 export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function PriceChart({ data, indicators, markerStrategies, showLines, log, height, compactLegend, overlays, extraMarkers, drawings, live }, handle) {
   const { ref, chart, version } = useLwChart()
@@ -61,7 +84,7 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
   const [boxRef, boxW] = useWidth<HTMLDivElement>()
   const compact = compactLegend || (boxW > 0 && boxW < 700)
 
-  useImperativeHandle(handle, () => ({ screenshot: () => (chart ? chart.takeScreenshot() : null), chart: () => chart }), [chart])
+  useImperativeHandle(handle, () => ({ screenshot: () => (chart ? chart.takeScreenshot() : null), chart: () => chart, series: () => candleSeries }), [chart, candleSeries])
 
   const showRsi = indicators.has('rsi14') && !!data.indicators.rsi14
   const showMacd = indicators.has('macd') && !!data.indicators.macd
@@ -87,13 +110,14 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
       created.push(vol)
     }
 
-    for (const id of ['sma20', 'sma50', 'sma200', 'ema21', 'bb_upper', 'bb_mid', 'bb_lower'] as IndicatorId[]) {
-      const on = id.startsWith('bb_') ? indicators.has('bb_mid') : indicators.has(id)
+    for (const [id, menu] of OVERLAYS) {
+      const on = indicators.has(menu)
       const v = data.indicators[id]
       if (!on || !v) continue
       const color = pal[LINE_COLOR[id] ?? 'muted']
+      const dashed = id.startsWith('bb_') || id.startsWith('kc_') || id.startsWith('dc_')
       const s = chart.addSeries(LineSeries, {
-        color, lineWidth: 1, lineStyle: id.startsWith('bb_') ? LineStyle.Dashed : LineStyle.Solid, priceLineVisible: false,
+        color, lineWidth: id === 'supertrend' ? 2 : 1, lineStyle: dashed ? LineStyle.Dashed : id === 'supertrend' ? LineStyle.Dotted : LineStyle.Solid, priceLineVisible: false,
         lastValueVisible: false, crosshairMarkerVisible: false,
       }, 0)
       s.setData(toLine(t, v))
@@ -121,6 +145,21 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
       sg.setData(toLine(t, data.indicators.macd_signal ?? []))
       h.priceScale().applyOptions({ mode: PriceScaleMode.Normal })     // MACD is negative half the time: never log
       created.push(h, m, sg)
+      pane++
+    }
+    for (const o of OSCILLATORS) {
+      if (!indicators.has(o.id) || !o.series.every(([k]) => data.indicators[k])) continue
+      o.series.forEach(([k, tone], j) => {
+        const s = chart.addSeries(LineSeries, { color: pal[tone], lineWidth: 1, priceLineVisible: false, lastValueVisible: j === 0, crosshairMarkerVisible: false, title: j === 0 ? o.label : '' }, pane)
+        s.setData(toLine(t, data.indicators[k]!))
+        if (j === 0) {
+          for (const lv of o.lines ?? []) s.createPriceLine({ price: lv, color: pal.faint, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false, title: '' })
+          s.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: { top: 0.1, bottom: 0.1 } })
+          if (o.range) s.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: o.range![0], maxValue: o.range![1] } }) })
+        }
+        created.push(s)
+      })
+      pane++
     }
     const panes = chart.panes()
     panes[0]?.setStretchFactor(1)
@@ -255,7 +294,7 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(function
             )}
           </div>
           <div className="flex flex-wrap items-center gap-x-2.5">
-            {(['sma20', 'sma50', 'sma200', 'ema21'] as IndicatorId[]).filter((k) => indicators.has(k) && data.indicators[k]).map((k) => (
+            {(['sma20', 'sma50', 'sma100', 'sma200', 'ema9', 'ema21', 'ema50', 'ema200', 'supertrend'] as IndicatorId[]).filter((k) => indicators.has(k) && data.indicators[k]).map((k) => (
               <span key={k} className="num"><span style={{ color: pal[LINE_COLOR[k] ?? 'muted'] }}>{LABEL[k]}</span> <span className="text-fg">{price(data.indicators[k]![i])}</span></span>
             ))}
             {showRsi && <span className="num"><span className="text-accent">RSI 14</span> <span className="text-fg">{num(data.indicators.rsi14![i], 1)}</span></span>}

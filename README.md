@@ -77,6 +77,36 @@ Prime (₹499/month + GST) raises the stream to 5,000 symbols.
   volume, from the FYERS feed and history (Yahoo fills older days); the last candle follows the live price. They cover
   the ~150 most liquid F&O stocks and the symbols the live feed streams (add a stock to a watchlist to include it).
 
+### Your own scans, with an 8-year backtest in one click
+The **Scans** page (`g x`) builds a scan from up to 8 rules ("all" or "any"): 34 fields (price, SMAs / EMAs, MACD,
+returns, relative strength, RSI, 20-day and 52-week highs / lows, ATR, volatility, volume vs average, traded value,
+delivery %), compared with a number or another field (`close > 1.02 × sma50`), or *crosses above / below*.
+- **Run today**: the matching stocks of your universe on the stored prices, "new" when they started matching that day,
+  prices following the live price.
+- **Backtest 8 years**: the scan's event study on the survivorship-free top 500 since Aug 2018 (`scanner/scans.py`,
+  the same test as every pattern here): each time a stock *starts* to match, buy at the next open, hold 5 / 10 / 20 days,
+  compared with the average member over the same days, ~0.45% round-trip costs subtracted, t-statistic on monthly
+  averages, by year and the last 25 events. A few seconds (the first one loads the data, ~10 s).
+- Save scans; six popular setups are there as examples. In the 11 Nov 2026 data none of them has an edge after costs
+  (RSI(2) oversold in an uptrend beats the average stock before costs only, t 3.2), and "close above the 200-day"
+  at the moment it starts **worked in reverse** (t -4.7). Most scans show no edge; this tells you which.
+
+### Could a strategy's backtest be luck?
+Every strategy page has a **Robustness** card (`web/api/services/robustness.py`): a 10,000-path Monte Carlo of the
+backtest's own daily returns (21-day blocks: the spread of yearly returns and drops, how often it lost money or trailed
+the average stock), the **deflated Sharpe ratio** (Bailey & Lopez de Prado 2014: corrected for the ~19 strategies tried
+here, since the best of many looks good by chance), every rolling 12-month window, and the first half against the
+second. Verdict: *likely real* (deflated Sharpe 95%+ and 75%+ of the histories beat the average stock), *could be luck*
+or *likely luck*. On 11 Nov 2026: momentum leaders "could be luck" (deflated 66%), trend breakout and low volatility
+"likely luck".
+
+### Chart tools
+- **Draw** (1D / 1W chart): levels, trendlines and Fibonacci retracements, saved per stock (`data/drawings.json`);
+  a level becomes a price alert in one click.
+- **Indicators**: SMA 20 / 50 / 100 / 200, EMA 9 / 21 / 50 / 200, Bollinger, Keltner and Donchian channels, Supertrend,
+  volume, and panes for RSI, MACD, Stochastic, ADX (+DI / -DI), ATR, on-balance volume, CCI, money flow, Williams %R and
+  rate of change (textbook parameters).
+
 ### Fyers login, step by step
 No command to run: everything happens in Quant Desk.
 1. Click the **Fyers** chip in the top bar (or **Log in** in Settings › Fyers, or the yellow banner), then **Log in with Fyers**. The Fyers login page opens in a new tab.
@@ -454,6 +484,7 @@ scanner/
   intraday/      5-minute bars (Yahoo, FYERS history and live WebSocket), MIS backtests -> intraday.json
   intraday/quote_hub.py  live quotes from the FYERS WebSocket (quotes.json) and the screen's subscriptions
   watch.py       watchlists and one-shot price alerts (checked by the live service and the dashboard)
+  scans.py       your own scans: rules over whole-market factors, today's matches, 8-year point-in-time backtest
   options.py     NSE option chains: parsing, Black-76 IV / greeks, PCR, max pain, OI levels, unusual activity
   options_research.py  do PCR / max pain / the straddle's expected move hold up on the stored days?
   fno.py         NSE participant-wise OI and F&O bhavcopy: FII/DII/Pro/Client positions, futures build-ups
@@ -464,6 +495,7 @@ web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), s
   api/routers/stream.py        live prices as Server-Sent Events (one stream per tab)
   api/services/action_svc.py   one answer per stock: BUY / SELL (exit) / HOLD / NO EDGE (Today, Chart)
   api/services/intraday_chart.py  5 / 15-minute candles with VWAP for the Chart page
+  api/services/robustness.py   Monte Carlo, deflated Sharpe and consistency per strategy
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 intraday_sync.py intraday jobs: backfill, 15:45 archive, live feed, re-test

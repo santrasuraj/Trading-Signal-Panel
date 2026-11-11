@@ -3,6 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchJson } from './client'
 import type { ActionCardData } from './action'
+import type { UserDrawing } from '@/lib/userDrawings'
 
 export interface Watchlist { name: string; symbols: string[] }
 export type AlertKind = 'above' | 'below' | 'change_above' | 'change_below'
@@ -74,3 +75,16 @@ export const useIntradayChart = (symbol: string, tf: IntradayTf, days: number, e
     queryFn: () => fetchJson<IntradayChartData>(`/api/chart/${encodeURIComponent(symbol)}/intraday?tf=${tf}&days=${days}`),
     staleTime: 30_000, refetchInterval: 60_000, placeholderData: keepPreviousData,
   })
+
+
+export const useDrawings = (symbol: string) =>
+  useQuery({ queryKey: ['drawings', symbol], enabled: !!symbol, staleTime: Infinity,
+    queryFn: () => fetchJson<{ symbol: string; drawings: UserDrawing[] }>(`/api/drawings/${encodeURIComponent(symbol)}`) })
+
+export function useSaveDrawings(symbol: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (drawings: UserDrawing[]) => fetchJson<{ symbol: string; drawings: UserDrawing[] }>(`/api/drawings/${encodeURIComponent(symbol)}`, { method: 'PUT', body: JSON.stringify({ drawings }) }),
+    onSuccess: (r) => { qc.setQueryData(['drawings', symbol], r) },
+  })
+}

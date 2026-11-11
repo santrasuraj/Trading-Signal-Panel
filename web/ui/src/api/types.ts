@@ -374,7 +374,9 @@ export interface SparklinesResponse { source_date: ISODate; days: number; series
 
 // ------------------------------------------------------------------ 6. chart and stock
 export type IndicatorId = 'sma20' | 'sma50' | 'sma200' | 'ema21' | 'bb_upper' | 'bb_mid' | 'bb_lower'
-  | 'rsi14' | 'macd' | 'macd_signal' | 'macd_hist' | 'vol_avg20';
+  | 'rsi14' | 'macd' | 'macd_signal' | 'macd_hist' | 'vol_avg20'
+  | 'ema9' | 'ema50' | 'ema200' | 'sma100' | 'supertrend' | 'dc_upper' | 'dc_lower' | 'kc_upper' | 'kc_mid' | 'kc_lower'
+  | 'stoch_k' | 'stoch_d' | 'adx14' | 'plus_di' | 'minus_di' | 'atr14' | 'obv' | 'cci20' | 'mfi14' | 'willr14' | 'roc12';
 // GET /api/chart/{symbol}?tf=1d|1w&range=3m|6m|1y|2y|5y|max&indicators=sma20,sma50,sma200,rsi14   (daily store only; intraday has its own endpoint later)
 export interface ChartResponse {
   symbol: string; company: string | null; industry: string | null; kind: 'stock' | 'etf' | 'index';

@@ -275,3 +275,52 @@ def feed_symbols() -> list[str]:
             if s not in out:
                 out.append(s)
     return out
+
+
+# ---- chart drawings (per symbol) ----------------------------------------------------------------------------------
+
+DRAWINGS_FILE_NAME = "drawings.json"
+DRAW_KINDS = ("hline", "trend", "fib")
+MAX_DRAWINGS = 50
+
+
+def _point(p) -> dict:
+    t = str((p or {}).get("t") or "")[:10]
+    v = float((p or {}).get("v"))
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", t) or not v == v or v <= 0:
+        raise ValueError("A drawing point needs a date and a positive price.")
+    return {"t": t, "v": round(v, 2)}
+
+
+def drawings(symbol: str) -> list[dict]:
+    sym = (clean_symbols([symbol]) or [""])[0]
+    return list((_read(data_dir() / DRAWINGS_FILE_NAME, {"symbols": {}}).get("symbols") or {}).get(sym) or [])
+
+
+def save_drawings(symbol: str, items: list[dict]) -> list[dict]:
+    sym = (clean_symbols([symbol]) or [None])[0]
+    if not sym:
+        raise ValueError("Not an NSE symbol.")
+    out = []
+    for d in items[:MAX_DRAWINGS]:
+        kind = d.get("kind")
+        if kind not in DRAW_KINDS:
+            raise ValueError(f"Unknown drawing {kind!r}.")
+        x = {"id": str(d.get("id") or uuid.uuid4().hex[:12])[:24], "kind": kind, "note": str(d.get("note") or "")[:60]}
+        if kind == "hline":
+            v = float(d.get("price"))
+            if not v == v or v <= 0:
+                raise ValueError("A level needs a positive price.")
+            x["price"] = round(v, 2)
+        else:
+            x["a"], x["b"] = _point(d.get("a")), _point(d.get("b"))
+        out.append(x)
+    with _lock("drawings"):
+        allv = _read(data_dir() / DRAWINGS_FILE_NAME, {"symbols": {}})
+        syms = dict(allv.get("symbols") or {})
+        if out:
+            syms[sym] = out
+        else:
+            syms.pop(sym, None)
+        _write(data_dir() / DRAWINGS_FILE_NAME, {"symbols": syms})
+    return out

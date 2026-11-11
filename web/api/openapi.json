@@ -486,6 +486,48 @@
     }
    }
   },
+  "/api/strategies/{key}/robustness": {
+   "get": {
+    "tags": [
+     "strategies"
+    ],
+    "summary": "Robustness Report",
+    "description": "How much of the backtest could be luck: 10,000-path Monte Carlo, deflated Sharpe, rolling consistency.",
+    "operationId": "robustness_report_api_strategies__key__robustness_get",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9_]{1,40}$",
+       "title": "Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/screener": {
    "get": {
     "tags": [
@@ -3616,6 +3658,345 @@
         "schema": {
          "$ref": "#/components/schemas/ActionsResponse"
         }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/drawings/{symbol}": {
+   "get": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Get Drawings",
+    "description": "Your drawings on this symbol's chart: levels, trendlines, Fibonacci retracements.",
+    "operationId": "get_drawings_api_drawings__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9&_.-]{0,24}$",
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "watch"
+    ],
+    "summary": "Put Drawings",
+    "operationId": "put_drawings_api_drawings__symbol__put",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9&_.-]{0,24}$",
+       "title": "Symbol"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/scans/catalog": {
+   "get": {
+    "tags": [
+     "scans"
+    ],
+    "summary": "Catalog",
+    "description": "Every field a rule can use, the comparisons, and example scans.",
+    "operationId": "catalog_api_scans_catalog_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/scans": {
+   "get": {
+    "tags": [
+     "scans"
+    ],
+    "summary": "Saved",
+    "operationId": "saved_api_scans_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "scans"
+    ],
+    "summary": "Save",
+    "operationId": "save_api_scans_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ScanBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/scans/{scan_id}": {
+   "put": {
+    "tags": [
+     "scans"
+    ],
+    "summary": "Update",
+    "operationId": "update_api_scans__scan_id__put",
+    "parameters": [
+     {
+      "name": "scan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{12}$",
+       "title": "Scan Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ScanBody"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "scans"
+    ],
+    "summary": "Delete",
+    "operationId": "delete_api_scans__scan_id__delete",
+    "parameters": [
+     {
+      "name": "scan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{12}$",
+       "title": "Scan Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/scans/run": {
+   "post": {
+    "tags": [
+     "scans"
+    ],
+    "summary": "Run",
+    "description": "The stocks of the scan's universe matching the scan on the last stored day (no network).",
+    "operationId": "run_api_scans_run_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ScanBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/scans/backtest": {
+   "post": {
+    "tags": [
+     "scans"
+    ],
+    "summary": "Backtest",
+    "description": "The scan's event study on 8 years of the survivorship-free top 500 (a few seconds; the first one loads the data).",
+    "operationId": "backtest_api_scans_backtest_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ScanBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
        }
       }
      },
@@ -18840,6 +19221,77 @@
     ],
     "title": "ResultsResponse"
    },
+   "Rule": {
+    "properties": {
+     "left": {
+      "type": "string",
+      "maxLength": 40,
+      "title": "Left"
+     },
+     "op": {
+      "type": "string",
+      "enum": [
+       ">",
+       ">=",
+       "<",
+       "<=",
+       "crosses_above",
+       "crosses_below"
+      ],
+      "title": "Op"
+     },
+     "right": {
+      "$ref": "#/components/schemas/RuleRight"
+     }
+    },
+    "type": "object",
+    "required": [
+     "left",
+     "op",
+     "right"
+    ],
+    "title": "Rule"
+   },
+   "RuleRight": {
+    "properties": {
+     "value": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Value"
+     },
+     "field": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 40
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Field"
+     },
+     "mult": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mult"
+     }
+    },
+    "type": "object",
+    "title": "RuleRight"
+   },
    "ScanAccepted": {
     "properties": {
      "accepted": {
@@ -18856,6 +19308,48 @@
      "status"
     ],
     "title": "ScanAccepted"
+   },
+   "ScanBody": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 60,
+      "title": "Name",
+      "default": "My scan"
+     },
+     "match": {
+      "type": "string",
+      "enum": [
+       "all",
+       "any"
+      ],
+      "title": "Match",
+      "default": "all"
+     },
+     "direction": {
+      "type": "string",
+      "enum": [
+       "long",
+       "short"
+      ],
+      "title": "Direction",
+      "default": "long"
+     },
+     "rules": {
+      "items": {
+       "$ref": "#/components/schemas/Rule"
+      },
+      "type": "array",
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Rules"
+     }
+    },
+    "type": "object",
+    "required": [
+     "rules"
+    ],
+    "title": "ScanBody"
    },
    "ScanHistory": {
     "properties": {

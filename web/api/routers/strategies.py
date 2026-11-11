@@ -5,7 +5,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path as PathParam, Query
 
 from ..errors import SafeJSONResponse, ApiException
 from ..models import CurveResponse, Horizon, StrategyDetail, StrategyListResponse, TradesPage
@@ -158,3 +158,11 @@ def trades(key: str, page: int = Query(1, ge=1), page_size: int = Query(50, ge=1
                 for x in rows.itertuples(index=False)]
     return {"as_of": st.as_of(lt), "key": key, "source": source, "total": total, "page": page,
             "page_size": page_size, "rows": out_rows, "stats": stats, "histogram": hist, "reasons": reasons}
+
+
+@router.get("/{key}/robustness", response_model=None, response_class=SafeJSONResponse)
+def robustness_report(key: str = PathParam(..., pattern=r"^[A-Za-z0-9_]{1,40}$")):
+    """How much of the backtest could be luck: 10,000-path Monte Carlo, deflated Sharpe, rolling consistency."""
+    from ..services import robustness
+    st.find(st.require_latest(), key)          # NOT_FOUND for an unknown strategy
+    return robustness.report(key)

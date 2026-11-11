@@ -63,3 +63,20 @@ def actions(symbols: str = Query(..., max_length=2500, description="up to 100 NS
     syms = quotes_svc.parse(symbols)
     ctx = action_svc.Context()
     return {"cards": [action_svc.card(ctx, s) for s in syms]}
+
+
+@router.get("/drawings/{symbol}", response_model=None)
+def get_drawings(symbol: str = Path(..., pattern=r"^[A-Za-z0-9][A-Za-z0-9&_.-]{0,24}$")):
+    """Your drawings on this symbol's chart: levels, trendlines, Fibonacci retracements."""
+    return {"symbol": symbol.upper(), "drawings": watch.drawings(symbol)}
+
+
+@router.put("/drawings/{symbol}", response_model=None)
+def put_drawings(body: dict, symbol: str = Path(..., pattern=r"^[A-Za-z0-9][A-Za-z0-9&_.-]{0,24}$")):
+    items = body.get("drawings") if isinstance(body, dict) else None
+    if not isinstance(items, list):
+        raise ApiException("VALIDATION", "Send {drawings: [...]}.")
+    try:
+        return {"symbol": symbol.upper(), "drawings": watch.save_drawings(symbol, items)}
+    except (TypeError, ValueError) as e:
+        raise ApiException("VALIDATION", str(e) or "Bad drawing.")
