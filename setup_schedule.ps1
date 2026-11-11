@@ -60,6 +60,14 @@ Register-ScheduledTask -TaskName "NSE Scanner live" -Action $action -Trigger $tr
     -Description "NSE stock scanner - live scan in market hours (provisional signals)" | Out-Null
 Write-Host "Created task: NSE Scanner live (weekdays 09:45-15:15, every 30 minutes)"
 
+# 08:45 on weekdays: a reminder to log in to FYERS when today's login is missing (Telegram if configured, and
+# data\logseminders.log). Nothing on NSE holidays or once you are logged in; no FYERS call.
+$action = New-ScheduledTaskAction -Execute $pythonw -Argument "-m scanner.reminders" -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At "08:45"
+Register-ScheduledTask -TaskName "NSE Scanner login reminder" -Action $action -Trigger $trigger -Settings $settings -Force `
+    -Description "NSE stock scanner - reminder to log in to FYERS for the day" | Out-Null
+Write-Host "Created task: NSE Scanner login reminder (weekdays at 08:45)"
+
 # Intraday (FYERS first, inside the shared rate limiter):
 #   09:14  live 5-minute bars from the FYERS WebSocket until 15:31 (no REST calls; if today's login is
 #          missing it waits for it - log in with 1_login.bat - and on weekends/NSE holidays it just exits)

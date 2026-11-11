@@ -24,3 +24,12 @@ def make_frames(closes: dict[str, list[float]], start="2024-01-01", opens=None, 
 @pytest.fixture
 def frames_factory():
     return make_frames
+
+
+@pytest.fixture(autouse=True)
+def _no_corporate_action_downloads(tmp_path_factory, monkeypatch):
+    """Dividends / rights issues (scanner/dividends.py): never NSE's API, never the real cache, in a test."""
+    from scanner import dividends
+    empty = tmp_path_factory.mktemp("ca")
+    monkeypatch.setattr(dividends, "NETWORK", False)
+    monkeypatch.setattr(dividends, "_dir", lambda: empty)

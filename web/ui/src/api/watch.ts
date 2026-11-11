@@ -61,7 +61,7 @@ export const useActions = (symbols: string[]) => {
   })
 }
 
-export type IntradayTf = '5m' | '15m'
+export type IntradayTf = '1m' | '5m' | '15m'
 export interface IntradayChartData {
   symbol: string; tf: IntradayTf; days: number; sessions: string[]
   bars: { t: number[]; o: number[]; h: number[]; l: number[]; c: number[]; v: number[] }

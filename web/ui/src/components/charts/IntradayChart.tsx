@@ -24,7 +24,7 @@ export function IntradayChart({ data, live, height }: { data: IntradayChartData;
   const pal = useMemo(() => palette(), [version]) // eslint-disable-line react-hooks/exhaustive-deps
   const candles = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const last = useRef<{ time: number; open: number; high: number; low: number; close: number } | null>(null)
-  const step = data.tf === '15m' ? 15 : 5
+  const step = data.tf === '15m' ? 15 : data.tf === '1m' ? 1 : 5
 
   useEffect(() => {
     if (!chart) return

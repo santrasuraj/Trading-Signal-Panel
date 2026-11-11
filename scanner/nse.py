@@ -138,6 +138,9 @@ def _parse_indices(text: str, day: date) -> pd.DataFrame:
         "low": _num(df["Low Index Value"]), "close": _num(df["Closing Index Value"]),
         "volume": _num(df["Volume"]).fillna(0),
     })
+    for col, key in (("Div Yield", "div_yield"), ("P/E", "pe"), ("P/B", "pb")):   # NSE's own valuation figures
+        if col in df.columns:
+            out[key] = _num(df[col])
     out.index = pd.Index(df["Index Name"].values, name="index_name")
     return out[out["close"] > 0]
 
@@ -257,6 +260,55 @@ def _index_closes(day: date) -> pd.Series | None:
     if (date.today() - day).days > 2:
         _write_parquet(df, cached)
     return df["close"]
+
+
+INDEX_YIELDS = NSE_DIR / "index_yield.parquet"
+
+
+def _index_yield_day(day: date) -> pd.Series | None:
+    """Dividend yield (%) of every NSE index on `day`, from NSE's index file (older caches kept only prices: the
+    file is fetched once more and the cache rewritten with the yields)."""
+    cached = NSE_DIR / f"indices_{day:%Y%m%d}.parquet"
+    if cached.exists():
+        try:
+            df = pd.read_parquet(cached)
+            if "div_yield" in df.columns:
+                return df["div_yield"]
+        except Exception:
+            _unlink(cached)
+    code, text = _get(INDEX_URL.format(d=day.strftime("%d%m%Y")))
+    if code != 200:
+        return None
+    try:
+        df = _parse_indices(text, day)
+    except Exception:
+        return None
+    if (date.today() - day).days > 2:
+        _write_parquet(df, cached)
+    return df["div_yield"] if "div_yield" in df.columns else None
+
+
+def index_yields(days: list[date], workers: int = 4, log=print) -> pd.DataFrame:
+    """Wide table (dates x index names) of NSE's daily dividend yield (%) per index - what turns a price index
+    into a total-return one (dividends.total_return). Kept incrementally in data/nse/index_yield.parquet."""
+    have = pd.read_parquet(INDEX_YIELDS) if INDEX_YIELDS.exists() else pd.DataFrame()
+    known = set(have.index.date) if len(have) else set()
+    missing = [d for d in days if d not in known]
+    if missing:
+        if len(missing) > 30:
+            log(f"Reading NSE index dividend yields for {len(missing)} days (one-time, a few minutes)...")
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            rows = {d: s for d, s in zip(missing, ex.map(_index_yield_day, missing)) if s is not None}
+        if rows:
+            new = pd.DataFrame(rows).T
+            new.index = pd.DatetimeIndex([pd.Timestamp(d) for d in new.index], name="date")
+            have = pd.concat([have, new]) if len(have) else new
+            have = have[~have.index.duplicated(keep="last")].sort_index()
+            have.columns = [str(c) for c in have.columns]
+            tmp = INDEX_YIELDS.with_suffix(".tmp")
+            have.to_parquet(tmp)
+            tmp.replace(INDEX_YIELDS)
+    return have
 
 
 def index_history(days: list[date], workers: int = 4, log=print) -> pd.DataFrame:

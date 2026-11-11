@@ -35,7 +35,7 @@ import bottleneck as bn
 import numpy as np
 import pandas as pd
 
-from . import corporate, nse, store
+from . import corporate, dividends, nse, store
 from .settings import HISTORY_DIR, ist_now
 
 PIT_DIR = HISTORY_DIR / "pit"
@@ -434,6 +434,22 @@ def _adjust(fr: dict[str, pd.DataFrame], prev_close: pd.DataFrame, after_missing
 RESCHEDULE_DAYS = 15     # the same action listed with ex-dates this close together = one action
 
 
+def _rights(raw_close: pd.DataFrame, prev_close: pd.DataFrame, adjustments: list[dict], log=print) -> list[dict]:
+    """Rights issues (NSE's corporate-actions list, cached: dividends.py): the history before each ex-date rescaled
+    by NSE's ex-rights base price / the raw close, unless another adjustment sits within 3 days (a split or bonus
+    on the same day re-bases the price too, and the build already matched that day to NSE)."""
+    try:
+        acts = dividends.actions(raw_close.index[0].date(), raw_close.index[-1].date(), log=log, offline=True)
+    except Exception as e:
+        log(f"  rights issues not checked ({type(e).__name__}: {e})")
+        return []
+    skip = {(pd.Timestamp(a["date"]) + pd.Timedelta(days=k), a["symbol"]) for a in adjustments for k in range(-3, 4)}
+    out = dividends.rights_factors(raw_close, acts, skip)
+    if out:
+        log(f"  + {len(out)} rights issues adjusted (NSE's ex-rights base price)")
+    return out
+
+
 def _listed_actions(close: pd.DataFrame, idx: pd.DatetimeIndex) -> dict[tuple[pd.Timestamp, str], list[date]]:
     """(ex-date, today's symbol) -> notice-file days listing it, for every price-affecting action in the
     consolidated notice table on a stock and trading day we have prices for. NSE sometimes lists an
@@ -592,7 +608,13 @@ def build(days: list[date], keep_symbols: list[str] = (), download: bool = True,
     fr = {f: pd.DataFrame(wk[f], index=dates, columns=kept) for f in OUT_FIELDS}
     prev_close = pd.DataFrame(wk["prev_close"], index=dates, columns=kept)
     del wk
+    raw_close = fr["close"].copy()                       # as NSE printed it (for the rights issues below)
     adjustments = _adjust(fr, prev_close, after_missing, log, reference, reuse)
+    rights = _rights(raw_close, prev_close, adjustments, log)
+    del raw_close
+    if rights:
+        apply_adjustments(fr, rights)
+        adjustments = sorted(adjustments + rights, key=lambda a: (a["date"], a["symbol"]))
     col = pd.Index(all_syms).get_indexer(kept)
     uni = pd.DataFrame(member[:, col], index=dates, columns=kept)
     last_day = dates[-1]
@@ -740,6 +762,14 @@ def backtest_setup(cfg: dict, frames: dict, info: dict, current: list[str], live
     etfs = [e for e in etfs if e in frames["close"].columns]
     bp = panel_from_wide(backtest_frames(data, frames, etfs), list(data.members) + etfs, etfs=set(etfs),
                          universe=data.universe)
+    paid = 0
+    try:   # total return: each dividend as a yield on the raw close before its ex-date (dividends.py)
+        acts = dividends.actions(bp.dates[0].date(), bp.dates[-1].date(), log=log)
+        bp.dividends = dividends.yields(bp.close, as_traded(data, bp.close), acts)
+        paid = int((bp.dividends.to_numpy() > 0).sum())
+    except Exception as e:
+        bp.dividends = None
+        log(f"Dividends left out of the backtests ({type(e).__name__}: {e}) - price returns only.")
     bf = Factors(bp, etfs=set(etfs), industry=industry, results_dates=results_dates)
     btrad = tradable_mask(bf, float(flt.get("min_price", 50)), float(flt.get("min_turnover_cr", 5)),
                           price=as_traded(data, bp.close))     # a later split must not decide the minimum price
@@ -752,7 +782,11 @@ def backtest_setup(cfg: dict, frames: dict, info: dict, current: list[str], live
         "members": len(data.members), "gone": data.info["members_no_longer_trading"],
         "last_day": data.info["last_day"],
         "update_error": data.info.get("update_error"),     # set when today's update failed (see update)
+        "dividends": paid > 0, "dividend_payouts": paid,
     })
+    out["note"] += (f" Total return: {paid:,} dividends are paid in cash on their ex-dates (taxed at your slab from "
+                    "FY 2020-21), and the indices they are compared with include dividends too." if paid
+                    else " Price returns only: dividends are not counted.")
     if out["update_error"]:
         out["note"] += f" Today's update failed ({out['update_error']}): the last good build, data to {out['last_day']}."
     if industry:   # share of member-days whose industry is known (NSE lists industries only for today's members)

@@ -16,12 +16,12 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from . import corporate, outlook, paper, pit
+from . import corporate, dividends, outlook, paper, pit
 from .costs import CostModel, TaxModel
 from .engine import (EventStrategy, _curve_stats, _period_ends, evaluate, equal_weight_index, simulate,
                      working_status)
 from .events import results_history, trading_holidays, upcoming_results
-from .nse import index_history
+from .nse import index_history, index_yields
 from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
 from .panel import Factors, panel_from_wide
@@ -34,7 +34,7 @@ from .universe import get_universe, industry_map
 LATEST_FILE = RESULTS_DIR / "latest.json"
 TIMING_CACHE = RESULTS_DIR / "timing_cache.json"
 REJECTED_CACHE = RESULTS_DIR / "rejected_cache.json"   # B4: re-test results of strategies that never trade
-ENGINE_VERSION = 7  # bump when simulation logic changes, so cached timing ranges are recomputed
+ENGINE_VERSION = 8  # bump when simulation logic changes, so cached timing ranges are recomputed
 NEEDS_INDUSTRY = {"sector_rotation"}   # strategies whose picks depend on each stock's industry
 # (4: ETF stray open prints cleaned, low-vol "most traded" among stocks only; 6: no fills on gap-filled days or
 #  at locked circuits, cash yield less a fund fee and taxed, calendar-year CAGR, Sharpe over cash, idle windows
@@ -282,6 +282,21 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     bt = pit.backtest_setup(cfg, frames, info, list(uni["symbol"]), {"f": f, "trad": trad, "ew": ew, "n500": n500},
                             log, etfs=etfs, industry=industry, results_dates=results_hist)
     bf, btrad, bew, bn500 = bt["f"], bt["trad"], bt["ew"], bt["n500"]
+    # With dividends in the backtests, the indices they are compared with are total-return ones too (NSE's daily
+    # dividend yield per index: dividends.total_return); price returns on both sides otherwise.
+    idx_yield = None
+    if bt.get("dividends"):
+        try:
+            idx_yield = index_yields([d.date() for d in p.dates if d <= done_upto], log=log).reindex(p.dates).ffill()
+        except Exception as e:
+            log(f"Index dividend yields unavailable ({type(e).__name__}: {e}) - indices are price returns")
+
+    def _tr(series, name):
+        dy = _index_column(idx_yield, name) if idx_yield is not None else None
+        return dividends.total_return(series, dy) if series is not None and dy is not None else series
+
+    bench50 = _tr(bf.p.index_close, "Nifty 50")
+    bn500 = _tr(bn500, "Nifty 500")
     timing_cache = _load_json(TIMING_CACHE)
     rejected_cache = _load_json(REJECTED_CACHE)
     # Inputs that change results without changing the config (part of every cache signature).
@@ -311,8 +326,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             hit = rejected_cache.get(s.key)
             if not (hit and hit.get("sig") == sig):
                 res = simulate(s, bf, costs, btrad, capital=capital, min_position=min_position, cash_rate=cash_rate)
-                factor = _index_column(idx_hist, s.benchmark)
-                m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
+                factor = _tr(_index_column(idx_hist, s.benchmark), s.benchmark)
+                m = evaluate(res, bench50, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
                              cash_rate=cash_rate, stt_pct=costs.stt_pct)
                 m["full"]["factor_benchmark_name"] = s.benchmark or None
                 m["full"]["backtest_universe"] = bt["universe"]
@@ -350,8 +365,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         live_eq = float(live_res.equity.dropna().iloc[-1]) if live_res.equity.notna().any() else 0.0
         res = live_res if bf is f else simulate(s, bf, costs, btrad, capital=capital, min_position=min_position,
                                                 cash_rate=cash_rate)
-        factor = _index_column(idx_hist, s.benchmark)
-        m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
+        factor = _tr(_index_column(idx_hist, s.benchmark), s.benchmark)
+        m = evaluate(res, bench50, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
                      cash_rate=cash_rate, stt_pct=costs.stt_pct)
         m["full"]["factor_benchmark_name"] = s.benchmark or None
         m["full"]["backtest_universe"] = bt["universe"]
@@ -598,7 +613,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         log(f"Paper-trading journal problem: {type(e).__name__}: {e}")
         result["paper"] = {}
     trades_df = pd.DataFrame(trade_rows, columns=_TRADE_COLS)
-    _save(result, curves, bf.p, bew, bn500, started, trades=trades_df, screener=screener)
+    _save(result, curves, bf.p, bew, bn500, started, trades=trades_df, screener=screener, n50=bench50)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
     try:   # the chart's Outlook base rates: re-measured once the point-in-time universe has a new day (~1 minute)
         outlook.refresh_if_stale(log=log)
@@ -700,11 +715,13 @@ def _write_atomic(path, write) -> None:
 
 
 def _save(result: dict, curves: dict, p, ew: pd.Series, n500: pd.Series | None, started,
-          trades: pd.DataFrame | None = None, screener: pd.DataFrame | None = None) -> None:
+          trades: pd.DataFrame | None = None, screener: pd.DataFrame | None = None,
+          n50: pd.Series | None = None) -> None:
     """B9: every artifact first, latest.json LAST. latest.json is the commit marker: a reader that sees a
     new scan_id can rely on curves / trades / screener of that scan already being in place."""
     df = pd.DataFrame(curves)
-    df["NIFTY 50"] = p.index_close.reindex(df.index).ffill() / p.index_close.reindex(df.index).ffill().iloc[0]
+    n50 = p.index_close if n50 is None else n50       # total return when the backtests include dividends
+    df["NIFTY 50"] = n50.reindex(df.index).ffill() / n50.reindex(df.index).ffill().iloc[0]
     df["Average stock"] = ew.reindex(df.index) / ew.reindex(df.index).iloc[0]
     if n500 is not None and n500.notna().any():
         n5 = n500.reindex(df.index).ffill()

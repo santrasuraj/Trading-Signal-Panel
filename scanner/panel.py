@@ -32,6 +32,9 @@ class Panel:
     # Optional point-in-time universe (True = member that day). When set, cross-sectional factors
     # (ranks, z-scores, breadth) compare a stock only with that day's members; None = all columns.
     universe: pd.DataFrame | None = None
+    # Optional dividend yield on each ex-date (dividends.yields): a stock held before it pays that share of its
+    # previous close in cash (engine.simulate). None = price returns only.
+    dividends: pd.DataFrame | None = None
 
     @property
     def dates(self) -> pd.DatetimeIndex:

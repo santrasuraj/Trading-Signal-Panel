@@ -190,7 +190,7 @@ export default function ChartPage() {
   const symbol = raw.toUpperCase()
   const [sp, setSp] = useSearchParams()
   const tfRaw = (sp.get('tf') as ChartTf | IntradayTf | null) ?? '1d'
-  const intraTf: IntradayTf | null = tfRaw === '5m' || tfRaw === '15m' ? tfRaw : null
+  const intraTf: IntradayTf | null = tfRaw === '1m' || tfRaw === '5m' || tfRaw === '15m' ? tfRaw : null
   const tf: ChartTf = intraTf ? '1d' : (tfRaw as ChartTf)        // the daily chart query keeps running underneath
   const range = (sp.get('range') as ChartRange | null) ?? '1y'
   const days = Math.min(20, Math.max(1, Number(sp.get('days')) || 3))
@@ -355,7 +355,7 @@ export default function ChartPage() {
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 max-md:contents">
           <span className="flex-1 md:hidden" aria-hidden />
           <div className="scroll-x no-scrollbar flex min-w-0 items-center gap-2 max-md:order-[50] max-md:w-full">
-            <Segmented<ChartTf | IntradayTf> ariaLabel="Timeframe" value={intraTf ?? tf} onChange={(v) => set('tf', v === '1d' ? null : v)} items={[{ id: '5m', label: '5m', title: '5-minute candles with VWAP (FYERS feed and history)' }, { id: '15m', label: '15m' }, { id: '1d', label: '1D' }, { id: '1w', label: '1W' }]} />
+            <Segmented<ChartTf | IntradayTf> ariaLabel="Timeframe" value={intraTf ?? tf} onChange={(v) => set('tf', v === '1d' ? null : v)} items={[{ id: '1m', label: '1m', title: '1-minute candles with VWAP (from the live FYERS feed: the symbols it streams)' }, { id: '5m', label: '5m', title: '5-minute candles with VWAP (FYERS feed and history)' }, { id: '15m', label: '15m' }, { id: '1d', label: '1D' }, { id: '1w', label: '1W' }]} />
             {intraTf
               ? <Segmented<string> ariaLabel="Sessions" value={String(days)} onChange={(v) => set('days', v === '3' ? null : v)} items={['1', '3', '5', '10'].map((n) => ({ id: n, label: `${n}D`, title: `Last ${n} session${n === '1' ? '' : 's'}` }))} />
               : <Segmented<ChartRange> ariaLabel="Range" value={range} onChange={(v) => set('range', v === '1y' ? null : v)} items={RANGES.map((r) => ({ id: r, label: r.toUpperCase() === 'MAX' ? 'Max' : r.toUpperCase() }))} />}

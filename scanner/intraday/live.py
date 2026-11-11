@@ -7,6 +7,7 @@ universe - builds 5-minute bars from the ticks, and every few seconds writes:
   data/intraday/live/forming.json       the bar currently forming per symbol, and when the last tick came
   data/intraday/live/prints_YYYYMMDD.parquet, book.json   large trades and order-book totals (footprints.py)
   data/intraday/live/orders_feed.json   your FYERS order updates from the order socket (order_feed.py, read-only)
+  data/intraday/live/1m_YYYYMMDD.parquet, forming_1m.json   the same ticks as 1-minute bars (1-minute charts)
 At the end of the session the completed bars are merged into the intraday store, so they are kept
 even though FYERS' REST history only covers a rolling year. The intraday scanner reads these files
 for today's setups instead of Yahoo's ~15-minute delayed data, as long as ticks keep arriving.
@@ -38,6 +39,7 @@ SESSION_END = (15, 31)
 LOGIN_POLL_SECONDS = 60
 STALE_SECONDS = 120             # no tick for this long during the session = the live feed is not working
 FORMING_FILE_NAME = "forming.json"
+FORMING_1M_NAME = "forming_1m.json"
 LOCK_FILE_NAME = ".live.lock"
 
 
@@ -51,9 +53,13 @@ def live_file(root, day=None):
     return live_dir(root) / f"{(day or ist_now().date()):%Y%m%d}.parquet"
 
 
-def load_live(root, day=None) -> pd.DataFrame:
-    """Today's completed live bars (empty if the live service hasn't run today)."""
-    p = live_file(root, day)
+def live_file_1m(root, day=None):
+    return live_dir(root) / f"1m_{(day or ist_now().date()):%Y%m%d}.parquet"
+
+
+def load_live(root, day=None, one_minute: bool = False) -> pd.DataFrame:
+    """Today's completed live bars (empty if the live service hasn't run today); `one_minute`: the 1-minute ones."""
+    p = live_file_1m(root, day) if one_minute else live_file(root, day)
     if not p.exists():
         return idata.empty_bars()
     try:
@@ -86,11 +92,11 @@ def _iso(epoch: float | None) -> str | None:
     return datetime.fromtimestamp(epoch, IST).isoformat(timespec="seconds") if epoch else None
 
 
-def _write(root, done: pd.DataFrame, forming: dict, last_tick: str | None = None) -> None:
+def _write(root, done: pd.DataFrame, forming: dict, last_tick: str | None = None, one_minute: bool = False) -> None:
     """Merge newly completed bars into today's file and replace forming.json. Both writes are atomic and
     retried (on Windows a replace fails while a scan is reading the file); a failure raises, so the caller
-    keeps the bars for the next attempt instead of losing them."""
-    p = live_file(root)
+    keeps the bars for the next attempt instead of losing them. `one_minute`: the 1-minute files instead."""
+    p = live_file_1m(root) if one_minute else live_file(root)
     if len(done):
         old = pd.read_parquet(p) if p.exists() else idata.empty_bars()   # unreadable: raise, never overwrite
         allb = pd.concat([old, done], ignore_index=True) if len(old) else done
@@ -98,7 +104,7 @@ def _write(root, done: pd.DataFrame, forming: dict, last_tick: str | None = None
         tmp = p.with_suffix(".tmp")
         allb.to_parquet(tmp, index=False)
         idata._replace(tmp, p)
-    f = live_dir(root) / FORMING_FILE_NAME
+    f = live_dir(root) / (FORMING_1M_NAME if one_minute else FORMING_FILE_NAME)
     tmp = f.with_suffix(".tmp")
     tmp.write_text(json.dumps({"updated": ist_now().isoformat(timespec="seconds"), "last_tick": last_tick,
                                "bars": forming}, default=str), encoding="utf-8")
@@ -201,6 +207,7 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     tickers = quote_hub.plan_tickers(_wanted(root), base, fno_tickers, MAX_SYMBOLS)
     book = quote_hub.QuoteBook()              # every tick's latest price: the screen's live quotes
     builder = idata.TickBarBuilder(interval)
+    builder1 = idata.TickBarBuilder("1m")      # the same ticks as 1-minute bars (1-minute charts, archived at the close)
     from ..footprints import FootprintRecorder
     recorder = FootprintRecorder()            # large trades + order-book totals for Big money live (footprints.py)
     from ..fno_live import FnoRecorder
@@ -230,6 +237,7 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
                 return
             with lock:
                 builder.on_tick(msg)
+                builder1.on_tick(msg)
                 try:
                     recorder.on_tick(msg)
                 except Exception:              # a footprint glitch must never stop the bars
@@ -319,6 +327,12 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
             with lock:
                 done = builder.flush()
                 forming, last = _forming(builder), status["last_tick"]
+                done1, forming1 = builder1.flush(), _forming(builder1)
+            try:
+                _write(root, done1, forming1, one_minute=True)
+            except Exception:                                # the 5-minute bars matter more: retry these next round
+                with lock:
+                    builder1.done[:0] = done1.to_dict("records")
             try:
                 _write(root, done, forming, _iso(last))     # outside the lock: ticks keep flowing meanwhile
                 written += len(done)
@@ -353,22 +367,34 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
         now = ist_now().replace(tzinfo=None)
         with lock:
             # end of session (or stopped early): close the bars whose time is over, keep everything in the store
-            for key, b in list(builder.cur.items()):
-                if b["ts"] + pd.Timedelta(minutes=builder.step) <= now:
-                    builder.done.append(builder.cur.pop(key))
+            for bld in (builder, builder1):
+                for key, b in list(bld.cur.items()):
+                    if b["ts"] + pd.Timedelta(minutes=bld.step) <= now:
+                        bld.done.append(bld.cur.pop(key))
             done = builder.flush()
             forming, last = _forming(builder), status["last_tick"]
+            done1, forming1 = builder1.flush(), _forming(builder1)
         try:
             _write(root, done, forming, _iso(last))
             written += len(done)
         except Exception as e:
             log(f"Live: final write failed ({type(e).__name__}: {e})")
         try:
+            _write(root, done1, forming1, one_minute=True)
+        except Exception as e:
+            log(f"Live: final write of the 1-minute bars failed ({type(e).__name__}: {e})")
+        try:
             today = load_live(root)
             if len(today):
                 idata.IntradayStore(root / "bars").save(idata.clean_bars(today, interval), interval)
         except Exception as e:
             log(f"Live: saving today's bars to the intraday store failed ({type(e).__name__}: {e})")
+        try:   # 1-minute bars are kept from the live feed only (FYERS' 1-minute history would cost ~150 more calls a day)
+            today1 = load_live(root, one_minute=True)
+            if len(today1):
+                idata.IntradayStore(root / "bars").save(idata.clean_bars(today1, "1m"), "1m")
+        except Exception as e:
+            log(f"Live: saving today's 1-minute bars failed ({type(e).__name__}: {e})")
         log(f"Live session ended: {written} bars written, {status['ticks']} ticks, {status['errors']} errors")
     return written
 

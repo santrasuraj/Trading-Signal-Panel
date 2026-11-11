@@ -98,6 +98,7 @@ class SimResult:
     next_orders: list[dict]              # orders that would be placed at the next open
     start_index: int
     cash_income: dict[int, float] = field(default_factory=dict)   # financial year -> rupees earned on idle cash
+    dividend_income: dict[int, float] = field(default_factory=dict)   # financial year -> dividends received
 
 
 def rebalance_days(dates: pd.DatetimeIndex, how: str, offset: int = 0,
@@ -207,6 +208,9 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
     # the fund's yearly fee, accrued over the calendar days since the previous row (weekends and holidays too)
     cash_fee = idx.to_series().diff().dt.days.fillna(0).to_numpy(dtype=float) / 365.25 * costs.cash_fee_pct / 100
     cash_income: dict[int, float] = {}
+    div_income: dict[int, float] = {}
+    D = (p.dividends.reindex(index=idx, columns=symbols).fillna(0.0).to_numpy(dtype=float)
+         if getattr(p, "dividends", None) is not None else None)
     pos: dict[int, dict] = {}            # col -> position
     pending_sell: dict[int, str] = {}    # col -> reason
     pending_buy: list[int] = []
@@ -238,6 +242,15 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
             cash += earned
             fy = dates[t].year if dates[t].month >= 4 else dates[t].year - 1
             cash_income[fy] = cash_income.get(fy, 0.0) + earned
+        # Dividends: a stock held at yesterday's close pays on its ex-date (today), even if it is sold at today's open.
+        if D is not None and pos and t > t0:
+            for c, ps in pos.items():
+                y = D[t, c]
+                if y > 0 and not math.isnan(C_ffill[t - 1, c]):
+                    amt = ps["qty"] * C_ffill[t - 1, c] * y
+                    cash += amt
+                    fy = dates[t].year if dates[t].month >= 4 else dates[t].year - 1
+                    div_income[fy] = div_income.get(fy, 0.0) + amt
         # 0) Holdings that stopped trading: sold at their last traded price.
         for c in [c for c in pos if t - last_seen[t, c] >= STALE_EXIT_DAYS and not math.isnan(C_ffill[t, c])]:
             close_position(t, c, C_ffill[t, c], "stopped trading")
@@ -352,7 +365,8 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                    [{"action": "BUY", "symbol": symbols[c], "reason": "entry signal" if is_event else "enters top ranks"}
                     for c in pending_buy])
     return SimResult(strategy.key, pd.Series(equity[t0:], index=idx[t0:]),
-                     pd.Series(invested[t0:], index=idx[t0:]), trades, open_positions, next_orders, t0, cash_income)
+                     pd.Series(invested[t0:], index=idx[t0:]), trades, open_positions, next_orders, t0, cash_income,
+                     div_income)
 
 
 # ------------------------------------------------------------------------------------- metrics
@@ -397,6 +411,9 @@ def _trade_stats(trades: list[Trade]) -> dict:
     }
 
 
+DIVIDEND_TAXED_FROM_FY = 2020     # Finance Act 2020: dividends taxed at the investor's slab from 1 Apr 2020 (DDT abolished)
+
+
 def after_tax_equity(res: SimResult, tax: TaxModel, stt_pct: float = 0.0) -> pd.Series:
     """Equity curve after paying capital-gains tax on each financial year's realised gains
     (paid on the first trading day of the next April; the current year's accrued tax is deducted at
@@ -406,7 +423,8 @@ def after_tax_equity(res: SimResult, tax: TaxModel, stt_pct: float = 0.0) -> pd.
 
     Like the buy-and-hold benchmarks, positions still open at the last date are taxed as if sold then.
     STT (`stt_pct` of each side's value) is not deductible from the gain (s.48), so it is added back to
-    each trade's P&L for the tax base. Income on idle cash (res.cash_income) is taxed at the slab rate."""
+    each trade's P&L for the tax base. Income on idle cash (res.cash_income) is taxed at the slab rate, and so are
+    dividends (res.dividend_income) from FY 2020-21 on; before that the company paid dividend distribution tax."""
     eq = res.equity.dropna()
     if eq.empty:
         return eq
@@ -435,7 +453,8 @@ def after_tax_equity(res: SimResult, tax: TaxModel, stt_pct: float = 0.0) -> pd.
             add(fy_last, (last - pd.Timestamp(ps["entry_date"])).days > 365, gain, last)
     factor = pd.Series(1.0, index=eq.index)
     scale, st_pool, lt_pool = 1.0, 0.0, 0.0
-    for fy in sorted(set(by_fy) | set(res.cash_income)):
+    divs = getattr(res, "dividend_income", None) or {}
+    for fy in sorted(set(by_fy) | set(res.cash_income) | set(divs)):
         row = by_fy.get(fy, [0.0] * 6)
         st, lt = row[0] * scale, row[1] * scale
         # the rate of what stays taxable: the gain-weighted rate of the year's positive gains
@@ -451,6 +470,8 @@ def after_tax_equity(res: SimResult, tax: TaxModel, stt_pct: float = 0.0) -> pd.
         used = min(lt, st_pool); lt -= used; st_pool -= used
         due = st * st_rate / 100 + max(0.0, lt - exempt) * lt_rate / 100
         due += max(0.0, res.cash_income.get(fy, 0.0) * scale) * tax.interest_pct / 100
+        if fy >= DIVIDEND_TAXED_FROM_FY:
+            due += max(0.0, divs.get(fy, 0.0) * scale) * tax.interest_pct / 100
         if due <= 0:
             continue
         later = eq.index[eq.index >= pd.Timestamp(fy + 1, 4, 1)]
@@ -552,6 +573,10 @@ def working_status(metrics: dict) -> tuple[str, str]:
 
 
 def equal_weight_index(f: Factors, tradable: pd.DataFrame) -> pd.Series:
-    """Daily-rebalanced equal-weight average of all tradable stocks (the 'average stock')."""
-    r = f.daily_ret.where(tradable.shift(1).fillna(False).astype(bool))
+    """Daily-rebalanced equal-weight average of all tradable stocks (the 'average stock'), with their dividends when
+    the panel has them (as the strategies get them)."""
+    held = tradable.shift(1).fillna(False).astype(bool)
+    r = f.daily_ret.where(held)
+    if getattr(f.p, "dividends", None) is not None:
+        r = r + f.p.dividends.reindex(index=r.index, columns=r.columns).fillna(0.0).where(held)
     return (1 + r.mean(axis=1).fillna(0)).cumprod()

@@ -977,6 +977,7 @@
       "required": false,
       "schema": {
        "enum": [
+        "1m",
         "5m",
         "15m"
        ],

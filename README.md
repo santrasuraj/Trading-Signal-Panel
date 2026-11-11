@@ -165,6 +165,15 @@ when one bar touches both), intraday positions are squared off at the close, and
 session with trades is saved to `data/replay_log.jsonl` with the P&L recomputed on the server from the bars, never
 taken from the browser; the page shows your practice record (win rate, per trade, R, profit factor, exits).
 
+### 1-minute charts, login reminder
+- **1-minute candles** (Chart › 1m, up to 5 sessions): the live service builds them from the same FYERS ticks as the
+  5-minute bars (`data/intraday/live/1m_YYYYMMDD.parquet`) and keeps them in the intraday store at each close, so they
+  exist for the symbols it streams, from the first session it runs with this version.
+- **08:45 login reminder** (task "NSE Scanner login reminder", added by the one-click setup on the Data & Settings
+  page): on a trading day without today's FYERS login it sends a Telegram message, and always logs a line to
+  `data/logs/reminders.log`. Nothing on holidays or once you are logged in.
+- **Paper** open positions are marked to the live price while the market is open.
+
 ### Coach (`g h`): where your own trading leaks money
 Reads only your own record: replays, real fills (`data/fills.jsonl`, matched buy to sell first-in, first-out) and your
 holdings against their stops. It checks your process: trades without a stop, holding losers longer than winners, one
@@ -276,8 +285,17 @@ What this shows:
 
 What is still not perfect:
 - **Timing luck:** the same strategy rebalanced a few days apart ends up several % a year apart (see the range).
-- **Rights issues are not adjusted** in the point-in-time prices, so an ex-rights day shows as a small loss
-  (slightly pessimistic). **Dividends are left out** of every line, the Nifty 500 index included (price returns).
+- **Total return.** Dividends are counted: a stock held before its ex-date pays its dividend in cash that day (NSE's
+  corporate-actions list, ~12,000 dividends since 2018, `scanner/dividends.py`), taxed at your slab from FY 2020-21
+  (before that the company paid dividend distribution tax). The indices they are compared with include dividends
+  too: the average stock gets the same dividends, and the Nifty 50 / 500 and factor indices accrue NSE's own daily
+  dividend yield (an approximation of NSE's TRI). Buy-and-hold benchmarks are taxed at LTCG at the end, slightly
+  generous to them. Effect on this data: average stock 14.0% -> 15.3% a year, Nifty 500 11.3% -> 12.7%, momentum
+  +0.6%, low volatility +1.7%. Pattern studies, scans and the late-entry test compare a stock with the average
+  member over the same days, so they stay on price returns.
+- **Rights issues are adjusted** in the point-in-time prices from their terms (NSE does not re-base the price for
+  them): the history before the ex-date is rescaled to the theoretical ex-rights price, (held x price + new x issue
+  price) / (held + new). 81 since 2018; Vodafone Idea's 2019 issue no longer shows as a 40% crash.
 - The universe ranks by traded value, re-ranked every day. NSE's Nifty 500 ranks by free-float company size and
   is reviewed twice a year.
 - A holding that stops trading (merger, delisting) is sold at its last price after 20 days without trades.
@@ -387,7 +405,7 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
   is then often a placeholder (BCG 2025: ₹2, opened at ₹21.80), so it is only trusted for a clean split ratio
   the market agrees with (CCAVENUE Oct 2026: 10:1 consolidation).
 - Checked against the main store (Oct 2026): 469 of 500 shared stocks agree within 2% on every day. The other 31:
-  12 rights issues (Yahoo adjusts them, NSE's prices here don't), 6 demergers where Yahoo used a different
+  12 rights issues (Yahoo adjusts them; the point-in-time prices now do too, from the issue terms), 6 demergers where Yahoo used a different
   factor (SIEMENS 2025, NMDC 2022 ...), 2 small demergers without a price gap that only Yahoo adjusts (Aarti
   Industries and TTML, July 2019), and Yahoo prices 2–4% off NSE on 18 Mar 2019 and 2 May 2025 (7 stocks, one day)
   and for about a week each between Apr 2024 and Nov 2025 (IIFL, Sobha, UPL, Thangamayil, M&M Finance, Adani
@@ -582,6 +600,5 @@ For the web API, `scanner.pit.comparison_report()` returns the same comparison (
 ### Roadmap
 | Next | Why |
 |---|---|
-| Adjust rights issues in the point-in-time prices (needs the RIGHTS rows of NSE's notices) | A little more accuracy |
 | Sector strength from NSE sector indices | Avoid weak sectors |
 | Momentum + low-volatility combined portfolio | Smoother returns |

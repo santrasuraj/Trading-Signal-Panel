@@ -24,6 +24,7 @@ SETUP_TIMEOUT_S = 180
 # (task name, when, what): the tasks setup_schedule.ps1 registers, in the order of a trading day
 JOBS = [
     ("NSE Scanner 0830", "Weekdays 08:30", "Scan on yesterday's official NSE data; Telegram summary"),
+    ("NSE Scanner login reminder", "Weekdays 08:45", "Reminds you on Telegram to log in to FYERS when today's login is missing"),
     ("NSE Scanner option chains", "Weekdays 09:12", "Option chains every minute in market hours; collects last night's Claude forecasts"),
     ("NSE Scanner intraday live", "Weekdays 09:14", "Live 5-minute bars from the FYERS feed (starts once you log in to Fyers)"),
     ("NSE Scanner intraday signals", "Weekdays 09:20-15:05, every 5 min", "Intraday signals (proven strategies only) and Big money live"),
