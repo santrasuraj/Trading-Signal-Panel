@@ -76,7 +76,9 @@ def _query(name: str) -> dict:
     try:
         r = subprocess.run(["schtasks", "/query", "/tn", name, "/fo", "csv", "/v"], capture_output=True, text=True,
                            timeout=20, creationflags=NO_WINDOW)
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:          # a busy PC: unknown, never "not set up"
+        return {"registered": False, "timeout": True}
+    except OSError:
         return {"registered": False}
     rows = list(csv.reader(io.StringIO(r.stdout or "")))
     if r.returncode != 0 or len(rows) < 2 or len(rows[1]) < 7:
@@ -97,8 +99,15 @@ def status(refresh: bool = False) -> dict:
     else:
         with ThreadPoolExecutor(max_workers=len(JOBS)) as ex:
             found = list(ex.map(_query, [n for n, _, _ in JOBS]))
-        jobs = [{"name": n, "when": w, "what": t, **f} for (n, w, t), f in zip(JOBS, found)]
-        out = {"available": True, "jobs": jobs, "missing": sum(1 for j in jobs if not j["registered"]),
+        before = {j["name"]: j for j in ((_cache["status"] or {}).get("jobs") or [])}
+        jobs = []
+        for (n, w, t), f in zip(JOBS, found):
+            if f.get("timeout") and n in before:      # Task Scheduler answered too slowly: keep the last answer
+                jobs.append(before[n])
+            else:
+                jobs.append({"name": n, "when": w, "what": t, **f})
+        out = {"available": True, "jobs": jobs,
+               "missing": sum(1 for j in jobs if not j["registered"] and not j.get("timeout")),
                "note": "Windows runs these while you are signed in to this PC (a sleeping PC catches up when it wakes, "
                        "a shut-down PC misses them). Fyers asks for one login each morning: the live jobs wait for it."}
     with _lock:

@@ -3,10 +3,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchJson } from './client'
 
-export type CalKind = 'results' | 'dividend' | 'rights' | 'bonus' | 'split' | 'buyback' | 'expiry' | 'holiday' | 'meeting'
+export type CalKind = 'econ' | 'results' | 'dividend' | 'rights' | 'bonus' | 'split' | 'buyback' | 'ipo' | 'expiry' | 'holiday' | 'meeting'
 export interface CalEvent {
   date: string; kind: CalKind; symbol: string | null; company: string | null; detail: string; mine: boolean; watch: boolean
   price: number | null; amount?: number | null; yield_pct?: number | null; buy_by?: string; monthly?: boolean
+  time?: string; importance?: 'high' | 'medium'; country?: string; source?: string; open?: string | null; close?: string | null
 }
 export interface CalendarResponse { from: string; to: string; days: number; events: CalEvent[]; counts: Record<CalKind, number>; mine: number; watch: number; notes: string[] }
 

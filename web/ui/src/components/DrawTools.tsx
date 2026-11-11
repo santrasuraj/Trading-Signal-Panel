@@ -3,7 +3,7 @@
 // an alert in one click (a trendline alert follows the line as it rises or falls).
 
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { Anchor, BellPlus, Minus, PenLine, RectangleHorizontal, Spline, Trash2, TrendingUp, Type } from 'lucide-react'
+import { Anchor, ArrowDown, ArrowUp, BellPlus, GitFork, Minus, MoveUpRight, PenLine, RectangleHorizontal, Ruler, Rows3, Spline, Trash2, TrendingUp, Type } from 'lucide-react'
 import type { MouseEventParams } from 'lightweight-charts'
 import { isFailure } from '@/api/client'
 import { useAlertMutations, useDrawings, useSaveDrawings } from '@/api/watch'
@@ -21,8 +21,14 @@ const TOOLS: { kind: DrawKind; label: string; icon: typeof Minus; clicks: number
   { kind: 'rect', label: 'Zone', icon: RectangleHorizontal, clicks: 2 },
   { kind: 'text', label: 'Text', icon: Type, clicks: 1 },
   { kind: 'avwap', label: 'Anchored VWAP', icon: Anchor, clicks: 1 },
+  { kind: 'ray', label: 'Ray', icon: MoveUpRight, clicks: 2 },
+  { kind: 'channel', label: 'Channel', icon: Rows3, clicks: 3 },
+  { kind: 'pitchfork', label: 'Pitchfork', icon: GitFork, clicks: 3 },
+  { kind: 'measure', label: 'Measure', icon: Ruler, clicks: 2 },
 ]
-const NAME: Record<DrawKind, string> = { hline: 'Level', trend: 'Trendline', fib: 'Fibonacci', rect: 'Zone', text: 'Note', avwap: 'Anchored VWAP' }
+const ARROWS: { note: 'up' | 'down'; label: string; icon: typeof Minus }[] = [{ note: 'up', label: 'Arrow up', icon: ArrowUp }, { note: 'down', label: 'Arrow down', icon: ArrowDown }]
+const NAME: Record<DrawKind, string> = { hline: 'Level', trend: 'Trendline', fib: 'Fibonacci', rect: 'Zone', text: 'Note', avwap: 'Anchored VWAP', ray: 'Ray', channel: 'Channel', pitchfork: 'Pitchfork', measure: 'Measure', arrow: 'Arrow' }
+const CLICKS = (k: DrawKind) => TOOLS.find((t) => t.kind === k)?.clicks ?? 1
 
 export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string; chartRef: RefObject<PriceChartHandle | null>; price: number | null; enabled: boolean }) {
   const q = useDrawings(symbol)
@@ -30,13 +36,14 @@ export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string
   const alerts = useAlertMutations()
   const toast = useToast()
   const [mode, setMode] = useState<DrawKind | null>(null)
-  const [first, setFirst] = useState<DrawPt | null>(null)
-  const firstRef = useRef<DrawPt | null>(null)          // the click handler reads this: two quick clicks never race a re-render
+  const [first, setFirst] = useState<DrawPt[]>([])
+  const firstRef = useRef<DrawPt[]>([])                // the click handler reads this: quick clicks never race a re-render
+  const [arrow, setArrow] = useState<'up' | 'down'>('up')
   const items = q.data?.drawings ?? []
-  const pick = (p: DrawPt | null) => { firstRef.current = p; setFirst(p) }
+  const pick = (p: DrawPt[]) => { firstRef.current = p; setFirst(p) }
   const put = (next: UserDrawing[]) => save.mutate(next, { onError: (e) => toast({ tone: 'bad', title: 'Drawing not saved', detail: isFailure(e) ? e.message : undefined }) })
 
-  useEffect(() => { setMode(null); pick(null) }, [symbol])
+  useEffect(() => { setMode(null); pick([]) }, [symbol])
   useEffect(() => {
     if (!mode || !enabled) return
     const chart = chartRef.current?.chart()
@@ -57,19 +64,24 @@ export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string
       } else if (mode === 'avwap') {
         put([...items, { id: newId(), kind: 'avwap', a: pt }])
         setMode(null)
-      } else if (!firstRef.current) {
-        pick(pt)
-      } else {
-        put([...items, { id: newId(), kind: mode, a: firstRef.current, b: pt }])
+      } else if (mode === 'arrow') {
+        put([...items, { id: newId(), kind: 'arrow', a: pt, note: arrow }])
         setMode(null)
-        pick(null)
+      } else if (firstRef.current.length + 1 < CLICKS(mode)) {
+        pick([...firstRef.current, pt])
+      } else {
+        const [a, b] = [...firstRef.current, pt]
+        const c = CLICKS(mode) === 3 ? pt : undefined
+        put([...items, { id: newId(), kind: mode, a, b: CLICKS(mode) === 3 ? firstRef.current[1] : b, ...(c ? { c } : {}) }])
+        setMode(null)
+        pick([])
       }
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setMode(null); pick(null) } }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setMode(null); pick([]) } }
     chart.subscribeClick(onClick)
     window.addEventListener('keydown', onKey)
     return () => { chart.unsubscribeClick(onClick); window.removeEventListener('keydown', onKey) }
-  }, [mode, items, enabled, chartRef]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, items, enabled, chartRef, arrow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const alertOn = (lvl: number) => {
     const kind = price != null && price > lvl ? 'below' : 'above'
@@ -87,8 +99,10 @@ export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string
       onError: (e) => toast({ tone: 'bad', title: 'Alert not saved', detail: isFailure(e) ? e.message : undefined }),
     })
   }
-  const one = mode === 'hline' || mode === 'text' || mode === 'avwap'
-  const hint = mode && (one ? (mode === 'avwap' ? 'Click the bar to anchor the VWAP' : mode === 'text' ? 'Click where the note goes' : 'Click the chart at the level') : first ? 'Click the second point' : 'Click the first point')
+  const one = mode === 'hline' || mode === 'text' || mode === 'avwap' || mode === 'arrow'
+  const third = mode === 'channel' ? 'Click a point the parallel line passes through' : 'Click the second swing'
+  const hint = mode && (one ? (mode === 'avwap' ? 'Click the bar to anchor the VWAP' : mode === 'text' ? 'Click where the note goes' : mode === 'arrow' ? 'Click where the arrow goes' : 'Click the chart at the level')
+    : first.length === 2 ? third : first.length === 1 ? (mode === 'pitchfork' ? 'Click the first swing' : 'Click the second point') : mode === 'pitchfork' ? 'Click the pivot' : 'Click the first point')
 
   return (
     <>
@@ -102,7 +116,11 @@ export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string
           <div className="space-y-2 p-2.5">
             <div className="flex flex-wrap gap-1.5">{TOOLS.map((t) => (
               <Button key={t.kind} size="sm" variant={mode === t.kind ? 'primary' : 'secondary'} icon={<t.icon className="h-3.5 w-3.5" />}
-                onClick={() => { setMode(t.kind); pick(null); close() }}>{t.label}</Button>
+                onClick={() => { setMode(t.kind); pick([]); close() }}>{t.label}</Button>
+            ))}
+            {ARROWS.map((t) => (
+              <Button key={t.note} size="sm" variant={mode === 'arrow' && arrow === t.note ? 'primary' : 'secondary'} icon={<t.icon className="h-3.5 w-3.5" />}
+                onClick={() => { setArrow(t.note); setMode('arrow'); pick([]); close() }}>{t.label}</Button>
             ))}</div>
             {items.length === 0 ? <p className="text-xs text-muted">No drawings on {symbol} yet. Pick a tool, then click the chart.</p> : (
               <ul className="max-h-60 space-y-0.5 overflow-auto">{items.map((d) => (
@@ -111,6 +129,7 @@ export function DrawTools({ symbol, chartRef, price, enabled }: { symbol: string
                     {d.kind === 'hline' ? <>Level <span className="num">{num(d.price, 2)}</span></>
                       : d.kind === 'text' ? <>Note <span className="text-muted">"{d.note}" · {date(d.a?.t, { year: false })}</span></>
                       : d.kind === 'avwap' ? <>Anchored VWAP <span className="text-muted">from {date(d.a?.t, { year: false })}</span></>
+                      : d.kind === 'arrow' ? <>Arrow {d.note === 'up' ? '▲' : '▼'} <span className="text-muted">{date(d.a?.t, { year: false })}</span></>
                       : <>{NAME[d.kind]} <span className="text-muted">{date(d.a?.t, { year: false })} <span className="num">{num(d.a?.v, 2)}</span> → {date(d.b?.t, { year: false })} <span className="num">{num(d.b?.v, 2)}</span></span></>}
                   </span>
                   {d.kind === 'hline' && d.price != null && <IconButton label="Alert at this level" onClick={() => alertOn(d.price!)}><BellPlus className="h-3.5 w-3.5" /></IconButton>}

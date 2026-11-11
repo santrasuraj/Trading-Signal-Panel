@@ -20,6 +20,9 @@ const Calendar = lazy(() => import('@/pages/Calendar'))
 const Tax = lazy(() => import('@/pages/Tax'))
 const Risk = lazy(() => import('@/pages/Risk'))
 const OptionBuilder = lazy(() => import('@/pages/OptionBuilder'))
+const Setups = lazy(() => import('@/pages/Setups'))
+const Journal = lazy(() => import('@/pages/Journal'))
+const OptionsBacktest = lazy(() => import('@/pages/OptionsBacktest'))
 const Coach = lazy(() => import('@/pages/Coach'))
 const Signals = lazy(() => import('@/pages/Signals'))
 const SignalTrack = lazy(() => import('@/pages/SignalTrack'))
@@ -92,6 +95,9 @@ export const router = createBrowserRouter([
       { path: 'tax', element: g(<Tax />) },
       { path: 'risk', element: g(<Risk />) },
       { path: 'option-builder', element: g(<OptionBuilder />) },
+      { path: 'setups', element: g(<Setups />) },
+      { path: 'journal', element: g(<Journal />) },
+      { path: 'options-backtest', element: g(<OptionsBacktest />) },
       { path: 'coach', element: g(<Coach />) },
       { path: 'paper', element: g(<Paper />) },
       { path: 'paper/:key', element: g(<Paper />) },

@@ -31,12 +31,17 @@ import { PriceStamp } from '@/components/LivePrice'
 import { ActionPanel } from '@/components/ActionCard'
 import { IntradayChart } from '@/components/charts/IntradayChart'
 import { BrickChart } from '@/components/charts/BrickChart'
+import { KagiChart, PnfChart, VolumeByPriceCard } from '@/components/charts/PnfKagi'
 import { heikinAshi, lineBreak, renko, type ChartType } from '@/lib/chartTypes'
 import { WatchButton, AlertButton } from '@/components/WatchButtons'
 import { useDrawings, useIntradayChart, type IntradayTf } from '@/api/watch'
 import { DrawTools } from '@/components/DrawTools'
 import { DepthLadder } from '@/components/DepthLadder'
 import { SeasonalityCard } from '@/components/SeasonalityCard'
+import { AnnouncementsCard } from '@/components/AnnouncementsCard'
+import { FundamentalsCard } from '@/components/FundamentalsCard'
+import { LayoutMenu } from '@/components/LayoutMenu'
+import { FormulaMenu, FormulaPanes, useFormulaSeries } from '@/components/FormulaMenu'
 import { VolumeProfile, type Profile } from '@/components/VolumeProfile'
 import type { FlowBars } from '@/components/charts/IntradayChart'
 import { useQuery } from '@tanstack/react-query'
@@ -46,12 +51,12 @@ import type { Ticket } from '@/api/orders'
 import { levelOverlays, lineDrawings } from '@/lib/userDrawings'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
-type Ind = IndicatorId | 'volume' | 'donchian' | 'keltner' | 'stoch' | 'adx' | 'atr' | 'obv' | 'cci' | 'mfi' | 'willr' | 'roc' | 'ichimoku' | 'aroon'
+type Ind = IndicatorId | 'volume' | 'donchian' | 'keltner' | 'stoch' | 'adx' | 'atr' | 'obv' | 'cci' | 'mfi' | 'willr' | 'roc' | 'ichimoku' | 'aroon' | 'wsma' | 'wrsi'
 const IND_MENU: { id: Ind; label: string }[] = [
   { id: 'sma20', label: 'SMA 20' }, { id: 'sma50', label: 'SMA 50' }, { id: 'sma100', label: 'SMA 100' }, { id: 'sma200', label: 'SMA 200' },
   { id: 'ema9', label: 'EMA 9' }, { id: 'ema21', label: 'EMA 21' }, { id: 'ema50', label: 'EMA 50' }, { id: 'ema200', label: 'EMA 200' },
   { id: 'bb_mid', label: 'Bollinger 20, 2' }, { id: 'keltner', label: 'Keltner 20, 2 ATR' }, { id: 'donchian', label: 'Donchian 20' },
-  { id: 'supertrend', label: 'Supertrend 10, 3' }, { id: 'ichimoku', label: 'Ichimoku 9, 26, 52' }, { id: 'psar', label: 'Parabolic SAR' }, { id: 'volume', label: 'Volume' },
+  { id: 'supertrend', label: 'Supertrend 10, 3' }, { id: 'ichimoku', label: 'Ichimoku 9, 26, 52' }, { id: 'psar', label: 'Parabolic SAR' }, { id: 'wsma', label: 'Weekly SMA 10 & 30 (daily chart)' }, { id: 'volume', label: 'Volume' },
 ]
 const PANE_MENU: { id: Ind; label: string }[] = [
   { id: 'rsi14', label: 'RSI 14' }, { id: 'macd', label: 'MACD 12, 26, 9' },
@@ -60,7 +65,7 @@ const PANE_MENU: { id: Ind; label: string }[] = [
 const PANE_IDS = new Set<string>(PANE_MENU.map((m) => m.id))
 const GROUPS: Partial<Record<Ind, IndicatorId[]>> = {
   bb_mid: ['bb_upper', 'bb_mid', 'bb_lower'], macd: ['macd', 'macd_signal', 'macd_hist'], donchian: ['dc_upper', 'dc_lower'],
-  keltner: ['kc_upper', 'kc_mid', 'kc_lower'], ichimoku: ['ichi_tenkan', 'ichi_kijun', 'ichi_span_a', 'ichi_span_b'], ...Object.fromEntries(OSCILLATORS.map((o) => [o.id, o.series.map(([k]) => k)])),
+  keltner: ['kc_upper', 'kc_mid', 'kc_lower'], ichimoku: ['ichi_tenkan', 'ichi_kijun', 'ichi_span_a', 'ichi_span_b'], wsma: ['w_sma10', 'w_sma30'], ...Object.fromEntries(OSCILLATORS.map((o) => [o.id, o.series.map(([k]) => k)])),
 }
 
 type LevelId = 'sr' | 'pivots' | 'intraday' | 'options' | 'range' | 'chart_patterns' | 'candles'
@@ -366,7 +371,8 @@ export default function ChartPage() {
   // your own drawings (DrawTools): levels as price lines, trendlines / Fibonacci as line drawings
   const dq = useDrawings(symbol)
   const allOverlays = useMemo(() => [...overlays, ...levelOverlays(dq.data?.drawings ?? [])], [overlays, dq.data])
-  const allDrawings = useMemo(() => [...drawings, ...lineDrawings(dq.data?.drawings ?? [], d ? d.bars.t[d.bars.t.length - 1] : null, d?.bars)], [drawings, dq.data, d])
+  const fs = useFormulaSeries(symbol, range, !intraTf && !!d)
+  const allDrawings = useMemo(() => [...drawings, ...lineDrawings(dq.data?.drawings ?? [], d ? d.bars.t[d.bars.t.length - 1] : null, d?.bars), ...fs.price], [drawings, dq.data, d, fs.price])
   // chart type: Heikin Ashi keeps the dates (indicators, markers, drawings still line up); Renko / line break don't
   const [ctype, setCtype] = useLocalStorage<ChartType>('qd.chart.type', 'candles')
   const [box, setBox] = useLocalStorage('qd.chart.renkoBox', 2)
@@ -405,12 +411,12 @@ export default function ChartPage() {
           </div>
           {!intraTf && (
             <select aria-label="Chart type" title="Chart type" value={ctype} onChange={(e) => setCtype(e.target.value as ChartType)} className="input h-8 px-2 text-[13px]">
-              <option value="candles">Candles</option><option value="heikin">Heikin Ashi</option><option value="renko">Renko</option><option value="linebreak">Line break</option>
+              <option value="candles">Candles</option><option value="heikin">Heikin Ashi</option><option value="renko">Renko</option><option value="linebreak">Line break</option><option value="pnf">Point &amp; Figure</option><option value="kagi">Kagi</option>
             </select>
           )}
-          {!intraTf && ctype === 'renko' && (
-            <select aria-label="Renko brick size" title="Brick size, % of the first close" value={box} onChange={(e) => setBox(Number(e.target.value))} className="input h-8 px-2 text-[13px]">
-              {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n}% bricks</option>)}
+          {!intraTf && (ctype === 'renko' || ctype === 'pnf' || ctype === 'kagi') && (
+            <select aria-label={ctype === 'kagi' ? 'Kagi reversal' : ctype === 'pnf' ? 'Point and figure box size' : 'Renko brick size'} title={ctype === 'kagi' ? 'The move against the line that turns it' : 'Box size, % of the price'} value={box} onChange={(e) => setBox(Number(e.target.value))} className="input h-8 px-2 text-[13px]">
+              {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{ctype === 'kagi' ? `${n * 2}% reversal` : ctype === 'pnf' ? `${n}% boxes` : `${n}% bricks`}</option>)}
             </select>
           )}
           <Popover align="right" width={248} trigger={({ toggle, open }) => <Button icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Indicators" title="Indicators" className="max-sm:px-2.5"><span className="max-sm:hidden">Indicators</span></Button>}>
@@ -425,6 +431,10 @@ export default function ChartPage() {
             </div>
           </Popover>
           <DrawTools symbol={symbol} chartRef={ref} price={quote?.price ?? null} enabled={!intraTf && !!d} />
+          <FormulaMenu symbol={symbol} />
+          <LayoutMenu current={{ ind, log, lines, ctype, tf: intraTf ?? tf, range, levels: lvSaved }}
+            apply={(l) => { setInd(l.ind as Ind[]); setLog(l.log); setLines(l.lines); setCtype(l.ctype as ChartType); setLvSel(l.levels)
+              setSp((p) => { const n = new URLSearchParams(p); if (l.tf && l.tf !== '1d') n.set('tf', l.tf); else n.delete('tf'); if (l.range && l.range !== '1y') n.set('range', l.range); else n.delete('range'); return n }, { replace: true }) }} />
           {intraTf && (
             <Button onClick={() => setFlowOn((x) => !x)} className={cn('max-sm:px-2.5', flowOn && 'border-accent text-accent')}
               title="Estimated buy / sell volume: delta per bar, cumulative delta and today's volume profile (from the FYERS feed)">Order flow</Button>
@@ -479,7 +489,12 @@ export default function ChartPage() {
           {intraTf ? (
             iq.data && iq.data.symbol === symbol ? <IntradayChart data={iq.data} live={quote} height={height} flow={flow?.bars} />
               : iq.error ? <div className="p-4"><ErrorState error={iq.error} compact /></div> : <SkeletonChart height={height} />
-          ) : q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : ctype === 'renko' || ctype === 'linebreak' ? (
+          ) : q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : ctype === 'pnf' || ctype === 'kagi' ? (
+            <div>
+              {ctype === 'pnf' ? <PnfChart bars={d.bars} boxPct={box} height={height} /> : <KagiChart bars={d.bars} revPct={box * 2} height={height} />}
+              <p className="border-t border-line px-3 py-1.5 text-2xs text-faint">{ctype === 'pnf' ? `Point & Figure: an X for each ${box}% rise, an O for each ${box}% fall; a new column only after a 3-box reversal (highs and lows).` : `Kagi: the line turns after a ${box * 2}% move against it; thick (green) once it rises above the last shoulder, thin (red) once it falls below the last waist.`} Time is left out: no indicators or drawings on this view. Widen the range (top) for more history.</p>
+            </div>
+          ) : ctype === 'renko' || ctype === 'linebreak' ? (
             <div>
               <BrickChart bricks={bricks} height={height} />
               <p className="border-t border-line px-3 py-1.5 text-2xs text-faint">{ctype === 'renko' ? `Renko: a ${box}% brick each time the close moves a full brick (two to reverse).` : 'Three-line break: a new line when the close breaks the last line; a reversal must break the last three.'} Time is left out: no indicators, markers or drawings on this view. {bricks.length} {ctype === 'renko' ? 'bricks' : 'lines'}.</p>
@@ -500,6 +515,7 @@ export default function ChartPage() {
               )}
             </div>
           )}
+          {!intraTf && <FormulaPanes own={fs.own} />}
         </Card>
         {panel && (
           <div className="min-w-0 space-y-3 self-start">
@@ -507,7 +523,10 @@ export default function ChartPage() {
             <DepthLadder symbol={symbol} onPick={openTicket} />
             {flowOn && intraTf && (flow ? <VolumeProfile profile={flow.profile} poc={flow.poc} va={flow.value_area} totals={flow.totals} note={flow.note} />
               : fq.error ? <Card title="Order flow today"><p className="text-xs text-muted">{isFailure(fq.error) ? `${fq.error.message} ${fq.error.hint ?? ''}` : 'Unavailable.'}</p></Card> : null)}
+            {!intraTf && d && <VolumeByPriceCard bars={d.bars} last={quote?.price ?? d.bars.c[d.bars.c.length - 1] ?? null} />}
             <SeasonalityCard symbol={symbol} />
+            <FundamentalsCard symbol={symbol} />
+            <AnnouncementsCard symbol={symbol} />
           </div>
         )}
         {ticket && <OrderTicket open={!!ticket} onClose={() => setTicket(null)} initial={ticket} />}

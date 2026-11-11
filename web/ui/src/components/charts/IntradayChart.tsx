@@ -40,6 +40,11 @@ export function IntradayChart({ data, live, height, flow }: { data: IntradayChar
     const rows = b.t.map((t, i) => ({ time: t as UTCTimestamp, open: b.o[i], high: b.h[i], low: b.l[i], close: b.c[i] }))
     c.setData(rows)
     candles.current = c
+    // the daily chart's levels (previous session's high / low / close, daily SMAs): higher-timeframe context
+    const toneColor = { profit: pal.up, loss: pal.down, muted: pal.faint, info: pal.info }
+    for (const lv of data.daily_levels ?? []) {
+      c.createPriceLine({ price: lv.price, color: toneColor[lv.tone] ?? pal.faint, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: lv.label })
+    }
     last.current = rows.length ? { ...rows[rows.length - 1], time: rows[rows.length - 1].time as number } : null
     chart.priceScale('right', 0).applyOptions({ scaleMargins: { top: 0.08, bottom: 0.22 } })
     const vol = chart.addSeries(HistogramSeries, { priceScaleId: '', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false }, 0)

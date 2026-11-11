@@ -117,6 +117,18 @@ def main() -> int:
     return code
 
 
+def _company_numbers() -> None:
+    """After the F&O files: new quarterly filings of the companies already stored (checked over a week ago)."""
+    try:
+        from scanner import fundamentals
+        stored = sorted(p.stem for p in fundamentals.folder().glob("*.json")) if fundamentals.folder().exists() else []
+        if stored:
+            rep = fundamentals.refresh(stored, log=lambda m: print(m, flush=True), max_age_days=7)
+            print(f"Company numbers: {rep['updated']} of {rep['wanted']} due companies checked", flush=True)
+    except Exception as e:                       # never fails the F&O job
+        print(f"  ! company numbers: {type(e).__name__}: {e}", flush=True)
+
+
 def _run(args) -> int:
     cfg = load_config()
     plan = str(cfg.get("fyers_plan", "standard"))
@@ -129,6 +141,7 @@ def _run(args) -> int:
             for e in rep["errors"] + rep["pending"]:
                 print(f"  ! {e}", flush=True)
             code = 0 if rep["added"] or not rep["errors"] else 1
+            _company_numbers()
             args.fno = False
         code = max(code, _ai(cfg, submit=args.ai_forecast))
         if not any((*jobs, args.options)):
@@ -138,6 +151,7 @@ def _run(args) -> int:
         rep = fno.refresh(log=lambda m: print(m, flush=True))
         for e in rep["errors"] + rep["pending"]:
             print(f"  ! {e}", flush=True)
+        _company_numbers()
         return 0 if rep["added"] or not rep["errors"] else 1
     if args.usage or not any((*jobs, args.options)):
         print(json.dumps(usage(plan), indent=1))

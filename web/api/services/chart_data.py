@@ -24,7 +24,9 @@ INDICATORS = ("sma20", "sma50", "sma200", "ema21", "bb_upper", "bb_mid", "bb_low
               "stoch_k", "stoch_d", "adx14", "plus_di", "minus_di", "atr14", "obv", "cci20", "mfi14", "willr14", "roc12",
               # Ichimoku (9, 26, 52; the cloud drawn where it applies: 26 bars after it is computed), Parabolic SAR,
               # Aroon 25
-              "ichi_tenkan", "ichi_kijun", "ichi_span_a", "ichi_span_b", "psar", "aroon_up", "aroon_down")
+              "ichi_tenkan", "ichi_kijun", "ichi_span_a", "ichi_span_b", "psar", "aroon_up", "aroon_down",
+              # the weekly chart's SMA 10 / 30 and RSI 14 on the daily chart (each week's value from its last day on)
+              "w_sma10", "w_sma30", "w_rsi14")
 DEFAULT_INDICATORS = ("sma20", "sma50", "sma200", "rsi14")
 
 
@@ -86,6 +88,19 @@ def weekly(df: pd.DataFrame) -> pd.DataFrame:
     last_day = pd.Series(df.index, index=df.index).groupby(df.index.to_period("W-FRI")).last()
     w.index = pd.DatetimeIndex(last_day.reindex(w.index).values, name="date")
     return w
+
+
+def higher_tf(df: pd.DataFrame) -> pd.DataFrame:
+    """Weekly SMA 10 / 30 and RSI 14 laid on daily bars: a week's value shows from its last day on (the current
+    week's from today, as the weekly chart shows it now); earlier days of a week carry the week before's."""
+    w = weekly(df)
+    c = w["close"]
+    d = c.diff()
+    up, dn = d.clip(lower=0), -d.clip(upper=0)
+    rs = _wilder(up, 14) / _wilder(dn, 14).replace(0, np.nan)
+    wk = pd.DataFrame({"w_sma10": c.rolling(10, min_periods=10).mean(), "w_sma30": c.rolling(30, min_periods=30).mean(),
+                       "w_rsi14": 100 - 100 / (1 + rs)}, index=w.index)
+    return wk.reindex(df.index, method="ffill")
 
 
 def with_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -189,6 +204,8 @@ def build(symbol: str, tf: str, rng: str, indicators: list[str]) -> dict:
     elif tf == "1mo":
         df = monthly(df)
     full = with_indicators(df)
+    if tf == "1d" and any(k.startswith("w_") for k in indicators):
+        full = full.join(higher_tf(df))
     days = RANGE_DAYS[rng]
     view = full if days is None else full[full.index >= full.index[-1] - pd.Timedelta(days=days)]
     first = view.index[0].date().isoformat()

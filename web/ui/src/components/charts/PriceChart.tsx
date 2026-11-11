@@ -49,11 +49,11 @@ const LINE_COLOR: Partial<Record<IndicatorId, 'warn' | 'accent' | 'violet' | 'in
   sma20: 'warn', sma50: 'accent', sma200: 'violet', ema21: 'info', bb_upper: 'muted', bb_mid: 'muted', bb_lower: 'muted',
   ema9: 'info', ema50: 'accent', ema200: 'violet', sma100: 'muted', supertrend: 'warn', dc_upper: 'profit', dc_lower: 'loss',
   kc_upper: 'info', kc_mid: 'info', kc_lower: 'info',
-  ichi_tenkan: 'info', ichi_kijun: 'loss', ichi_span_a: 'profit', ichi_span_b: 'loss', psar: 'fg',
+  ichi_tenkan: 'info', ichi_kijun: 'loss', ichi_span_a: 'profit', ichi_span_b: 'loss', psar: 'fg', w_sma10: 'profit', w_sma30: 'loss',
 }
 const LABEL: Partial<Record<IndicatorId, string>> = {
   sma20: 'SMA 20', sma50: 'SMA 50', sma200: 'SMA 200', ema21: 'EMA 21', bb_upper: 'BB up', bb_mid: 'BB mid', bb_lower: 'BB low',
-  ema9: 'EMA 9', ema50: 'EMA 50', ema200: 'EMA 200', sma100: 'SMA 100', supertrend: 'Supertrend',
+  ema9: 'EMA 9', ema50: 'EMA 50', ema200: 'EMA 200', sma100: 'SMA 100', supertrend: 'Supertrend', w_sma10: 'Weekly SMA 10', w_sma30: 'Weekly SMA 30',
 }
 /** Price-pane lines: [indicator, the menu item that switches it on] */
 const OVERLAYS: [IndicatorId, string][] = [
@@ -61,6 +61,7 @@ const OVERLAYS: [IndicatorId, string][] = [
   ['ema50', 'ema50'], ['ema200', 'ema200'], ['bb_upper', 'bb_mid'], ['bb_mid', 'bb_mid'], ['bb_lower', 'bb_mid'],
   ['supertrend', 'supertrend'], ['dc_upper', 'donchian'], ['dc_lower', 'donchian'], ['kc_upper', 'keltner'], ['kc_mid', 'keltner'], ['kc_lower', 'keltner'],
   ['ichi_tenkan', 'ichimoku'], ['ichi_kijun', 'ichimoku'], ['ichi_span_a', 'ichimoku'], ['ichi_span_b', 'ichimoku'], ['psar', 'psar'],
+  ['w_sma10', 'wsma'], ['w_sma30', 'wsma'],
 ]
 type Tone = 'accent' | 'warn' | 'profit' | 'loss' | 'fg' | 'info'
 /** Oscillator panes below the price, in this order: the series, their colours, reference lines and a fixed range. */
@@ -68,6 +69,7 @@ export const OSCILLATORS: { id: string; label: string; series: [IndicatorId, Ton
   { id: 'stoch', label: 'Stochastic 14, 3', series: [['stoch_k', 'accent'], ['stoch_d', 'warn']], lines: [20, 80], range: [0, 100] },
   { id: 'adx', label: 'ADX 14 (+DI / -DI)', series: [['adx14', 'fg'], ['plus_di', 'profit'], ['minus_di', 'loss']], lines: [25] },
   { id: 'atr', label: 'ATR 14', series: [['atr14', 'accent']] },
+  { id: 'wrsi', label: 'Weekly RSI 14 (daily chart)', series: [['w_rsi14', 'warn']], lines: [30, 50, 70], range: [0, 100] },
   { id: 'obv', label: 'On-balance volume', series: [['obv', 'accent']] },
   { id: 'cci', label: 'CCI 20', series: [['cci20', 'accent']], lines: [-100, 100] },
   { id: 'mfi', label: 'Money flow 14', series: [['mfi14', 'accent']], lines: [20, 80], range: [0, 100] },

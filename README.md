@@ -207,6 +207,71 @@ survivorship-free top 500, costs, slippage, tax, the "working" test, plus the fi
 years before it only, shown next to the hindsight best and a deflated Sharpe ratio, so the optimism of tuning is
 visible. A spec is data, never code (`scanner/custom.py`); saved in `data/custom_strategies.json`.
 
+### Live setups (`g g`)
+Today's intraday events from the live bars, newest first: gaps of 2%+, opening-range breaks (first 15 minutes), fresh
+highs / lows of the day (after 30+ minutes without one), VWAP crosses (after 30+ minutes on the other side), volume
+spikes (4x the day's average bar, Rs 20 lakh+ a minute) and 52-week breaks. Completed bars only, so an event never
+disappears. Filter by group or to your watchlists and holdings; optional desktop notifications while the page is open.
+Without the day's live service it replays the last stored session. Facts about the tape, not tested signals.
+
+### Exit plans: trailing stops and scale-out targets
+- Practice account (order ticket > Exit plan): a trailing stop (% or points behind the best price, never loosens), two
+  scale-out targets (part at each) and "stop to entry after target 1".
+- Real holdings (Orders > Protect): a trailing-stop suggestion (your % under the highest close since you bought); one
+  click puts it in the stop field, Protect still asks before anything is sent (cancel the old GTT first).
+
+### Trade journal (`/journal`)
+Every trade in one list: real FYERS fills (first-in first-out), the practice account and finished replays. Add a setup
+tag, tags, mistakes, notes, a 1-5 "followed my plan" rating and a chart screenshot. Statistics by setup, mistake, hour
+and weekday of entry, holding time and side; how far trades went against / for you while open (MAE / MFE: the room
+your stop needs, and how much of the move you kept).
+
+### Economic calendar, IPOs, announcements
+The Calendar adds RBI policy decisions (FY 2026-27 schedule), US Fed decisions (2026-27), India's CPI / WPI / IIP / GDP
+release days and the Budget (release rules: the official calendars have the final word; add your own events in
+data/econ_events.json), NSE IPOs (subscription dates, price band) and the latest NSE announcements from your stocks
+(routine filings hidden). Each stock's chart side panel lists its announcements with links to NSE's PDFs.
+
+### Options backtester (`/options-backtest`)
+Ten strategies (straddles, strangles, iron condor / butterfly, credit and debit spreads) on NIFTY or BANKNIFTY, one
+position per monthly or weekly expiry: strikes as % from the index, entry with N days left, stop and profit target
+checked at each close, slippage, and the real charges (Rs 20 a leg, STT 0.0625% / 0.1% from Oct 2024, exercise STT,
+exchange, stamp, GST). Data: NSE's daily F&O bhavcopy (`scanner/option_history.py`, NIFTY / BANKNIFTY options within
+20% and 70 days, a few MB a year): "Fetch 2 years of history" once (~1.2 MB a day from NSE), then the 19:30 F&O job
+adds each day. Daily closes only: an intraday spike through a stop is not seen.
+
+### Company numbers
+Revenue, profit, EPS, growth against the same quarter a year ago, net margin and P/E from NSE's quarterly filings
+(Integrated Filing - Financials, XBRL; consolidated when filed), on each stock's chart side panel. "Fetch all" (once,
+~1 hour in the background) fills the universe; the 19:30 job then checks stored companies weekly. Scans get P/E, EPS,
+revenue growth, profit growth and net margin, point in time (each quarter counts from the day it was filed).
+
+### More drawings, chart layouts, Point & Figure, Kagi, volume by price
+- Drawing tools add a ray, a parallel channel (3 clicks), an Andrews pitchfork (3 clicks), a measure tool (% , rupees,
+  days) and up / down arrows.
+- Layouts: name the chart's indicators, chart type, timeframe and options; apply them to any stock in one click.
+- Chart types add Point & Figure (X / O columns, % boxes, 3-box reversal) and Kagi (reversal %, thick above the last
+  shoulder, thin below the last waist). The side panel shows volume by price over the bars shown (point of control,
+  70% value area).
+
+### Higher timeframes
+- Daily chart: weekly SMA 10 & 30 on the price, weekly RSI 14 as a pane (each week's value from its last day).
+- Intraday charts: the previous session's high, low and close and the daily SMA 20 / 50 / 200 as lines.
+- Scans: weekly SMA 10 / 30, weekly RSI 14 and the 4-week return (completed weeks only, no look-ahead), with a
+  "Weekly uptrend, daily pullback" preset.
+
+### Automatic trendlines
+The chart patterns add automatic trendlines: the newest falling line through two swing highs 20+ bars apart that no
+close crossed (a breakout when a close goes above it) and the rising line through two swing lows (a breakdown). Drawn
+on the chart, usable as pattern alerts, and re-tested every Saturday with the other patterns (forward returns against
+the universe after costs): the chart shows their tested record.
+
+### Your own formulas
+Chart > Formulas: write an indicator such as `(close - sma(close, 50)) / atr(14)` in a small safe formula language
+(fields open, high, low, close, volume; + - * / and ** with a number; sma, ema, rsi, highest, lowest, ref, stdev, sum,
+roc, atr, abs, log, sqrt, max, min), check it, save it, and show it on the price or in its own pane. Saved formulas are
+scan fields under "Your formulas". Nothing else is accepted: a formula can only compute.
+
 ### Market calendar (`g q`)
 Results dates (NSE's event calendar), ex-dividend / rights / bonus / split / buyback dates (NSE's corporate actions),
 F&O expiries (weekly and monthly, from NSE's contract list) and market holidays, 2 weeks to 3 months ahead, nearest

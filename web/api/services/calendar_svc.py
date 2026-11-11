@@ -6,6 +6,11 @@
     settlement the record date is the ex-date: you must own the shares at the close of the trading day BEFORE it.
   * F&O expiries (NSE's contract list for the index underlyings and one stock): weekly and monthly.
   * Market holidays (NSE's trading-holiday list).
+  * Economic events (scanner/econ.py): RBI and US Fed decisions, India's CPI / WPI / IIP / GDP releases, the Budget.
+  * IPOs: issues open now and announced (NSE's IPO lists): subscription dates and price band.
+
+Company announcements (GET /api/announcements): NSE's filings of the last few days, for one stock or for your
+holdings and watchlists, routine ones (analyst meets, newspaper copies) left out unless asked for.
 
 Every source can fail on its own (NSE refuses or times out): the others still show, and a note says what is missing.
 """
@@ -17,7 +22,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from scanner import dividends, events, options as opt, watch
+from scanner import dividends, econ, events, options as opt, watch
 
 from . import data
 from ..util import today_ist
@@ -27,7 +32,10 @@ STOCK_FNO_PROBE = "RELIANCE"         # one stock's contract list gives the stock
 BONUS = re.compile(r"\bBONUS\b", re.I)
 SPLIT = re.compile(r"SPLIT|SUB[- ]?DIVISION", re.I)
 BUYBACK = re.compile(r"BUY\s*-?\s*BACK", re.I)
-KINDS = ("results", "dividend", "rights", "bonus", "split", "buyback", "expiry", "holiday", "meeting")
+KINDS = ("econ", "results", "dividend", "rights", "bonus", "split", "buyback", "ipo", "expiry", "holiday", "meeting")
+ROUTINE = re.compile(r"analyst|institutional investor|con\.? ?call|newspaper|trading window|certificate|loss of share|"
+                     r"duplicate|reg\. ?74|regulation 74|esop|esos|investor presentation|monitoring agency|"
+                     r"record date|book closure|shareholders meeting|postal ballot", re.I)
 
 
 def _holidays(start: date, end: date) -> tuple[list[dict], bool]:
@@ -146,6 +154,91 @@ def expiries(start: date, end: date) -> tuple[list[dict], bool]:
     return sorted(by_date.values(), key=lambda e: e["date"]), ok
 
 
+def ipos(start: date, end: date) -> tuple[list[dict], bool]:
+    """Issues open now and announced on NSE, by their subscription dates."""
+    out, ok = [], False
+    for path, params in (("ipo-current-issue", None), ("all-upcoming-issues", {"category": "ipo"})):
+        try:
+            rows = events._cached(f"ipo_{path}_{start:%Y%m%d}.json", 3 * 3600, lambda p=path, q=params: events._get_json(p, q))
+            ok = True
+        except Exception:
+            continue
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict):
+                continue
+            o, c = events._nse_date(r.get("issueStartDate")), events._nse_date(r.get("issueEndDate"))
+            name = str(r.get("companyName") or r.get("symbol") or "IPO").strip()
+            sym = str(r.get("symbol") or "").strip().upper() or None
+            band = str(r.get("issuePrice") or r.get("priceBand") or "").strip()
+            size = str(r.get("issueSize") or "").strip()
+            kind = "SME" if str(r.get("series") or "").upper() in ("SM", "ST") or "sme" in str(r.get("isBse") or "").lower() else "Mainboard"
+            for d, what in ((o, "opens"), (c, "closes")):
+                if d and start <= d <= end:
+                    out.append({"date": d.isoformat(), "kind": "ipo", "symbol": None, "ipo_symbol": sym,
+                                "detail": f"{name} IPO {what}" + (f" · price {band}" if band else "") + (f" · {kind}" if kind else "")
+                                          + (f" · {size} shares" if size and size.replace(',', '').isdigit() else ""),
+                                "open": o.isoformat() if o else None, "close": c.isoformat() if c else None})
+    seen, uniq = set(), []
+    for e in out:
+        k = (e["date"], e["detail"])
+        if k not in seen:
+            seen.add(k)
+            uniq.append(e)
+    return uniq, ok
+
+
+def _ann_rows(days: int, today: date) -> list[dict]:
+    start = today - timedelta(days=days)
+    return events._cached(f"ann_{start:%Y%m%d}_{today:%Y%m%d}.json", 30 * 60,
+                          lambda: events._get_json("corporate-announcements", {"index": "equities",
+                                                                              "from_date": start.strftime("%d-%m-%Y"),
+                                                                              "to_date": today.strftime("%d-%m-%Y")}))
+
+
+def _ann(r: dict) -> dict:
+    when = str(r.get("an_dt") or r.get("exchdisstime") or "")
+    try:
+        iso = pd.to_datetime(when, format="%d-%b-%Y %H:%M:%S").isoformat()
+    except (ValueError, TypeError):
+        iso = None
+    subj = str(r.get("desc") or "").strip()
+    text = re.sub(r"\s+", " ", str(r.get("attchmntText") or "")).strip()
+    url = str(r.get("attchmntFile") or "")
+    return {"symbol": str(r.get("symbol") or "").upper(), "company": r.get("sm_name"), "time": iso, "subject": subj,
+            "text": text[:400], "url": url if url.startswith("https://nsearchives.nseindia.com/") else None,
+            "routine": bool(ROUTINE.search(subj)) or bool(ROUTINE.search(text[:120]))}
+
+
+def announcements(symbol: str | None = None, days: int = 3, routine: bool = False, limit: int = 100,
+                  today: date | None = None) -> dict:
+    """NSE company announcements of the last `days` days: one stock, or your holdings and watchlists."""
+    today = today or today_ist()
+    days = max(1, min(int(days), 30))
+    try:
+        if symbol:
+            sym = symbol.upper()
+            start = today - timedelta(days=days)
+            rows = events._cached(f"ann_{sym}_{today:%Y%m%d}.json", 60 * 60,
+                                  lambda: events._get_json("corporate-announcements", {"index": "equities", "symbol": sym}))
+            rows = [r for r in rows if isinstance(r, dict) and (events._nse_date(str(r.get("an_dt", ""))[:11]) or today) >= start]
+            mine = {sym}
+        else:
+            rows = _ann_rows(days, today)
+            held, watched = _held_and_watched()
+            mine = held | watched
+    except Exception:
+        return {"items": [], "hidden": 0, "note": "NSE's announcements are unavailable right now (NSE did not respond)."}
+    items = [_ann(r) for r in rows if isinstance(r, dict)]
+    items = [x for x in items if x["symbol"] in mine]
+    hidden = sum(1 for x in items if x["routine"])
+    if not routine:
+        items = [x for x in items if not x["routine"]]
+    items.sort(key=lambda x: x["time"] or "", reverse=True)
+    return {"items": items[:max(1, min(limit, 300))], "hidden": hidden if not routine else 0, "days": days,
+            "note": "NSE filings: open the PDF for the full text. Routine filings (analyst meets, newspaper copies, "
+                    "trading-window notices) are hidden unless you ask for them."}
+
+
 def _last_close() -> dict[str, float]:
     try:
         c = data.store()["close"]
@@ -208,6 +301,18 @@ def calendar(days: int = 30, today: date | None = None) -> dict:
     if not exp_ok:
         notes.append("NSE's F&O contract list is unavailable: expiries are not shown.")
     out += exps
+
+    try:
+        from ..paths import P
+        for e in econ.events(today, end, P.data):
+            out.append({"date": e["date"], "kind": "econ", "symbol": None, "detail": f"{e['name']} · {e['detail']}",
+                        "time": e["time"], "importance": e["importance"], "country": e["country"], "source": e["source"]})
+    except Exception:
+        notes.append("The economic calendar could not be read.")
+    ip, ip_ok = ipos(today, end)
+    if not ip_ok:
+        notes.append("NSE's IPO lists are unavailable: IPOs are not shown.")
+    out += ip
 
     for e in out:
         s = e.get("symbol")

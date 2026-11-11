@@ -4,7 +4,7 @@
 
 export interface Ohlcv { t: string[]; o: number[]; h: number[]; l: number[]; c: number[]; v: number[] }
 export interface Brick { t: number; o: number; h: number; l: number; c: number; day: string }
-export type ChartType = 'candles' | 'heikin' | 'renko' | 'linebreak'
+export type ChartType = 'candles' | 'heikin' | 'renko' | 'linebreak' | 'pnf' | 'kagi'
 
 /** Heikin Ashi: close = average of the bar, open = midpoint of the previous HA body; smooths trends. */
 export function heikinAshi(b: Ohlcv): Ohlcv {
@@ -101,4 +101,98 @@ export function anchoredVwap(b: Ohlcv, from: string): { t: string; v: number }[]
     if (vol > 0) out.push({ t: b.t[i], v: Math.round((pv / vol) * 100) / 100 })
   }
   return out
+}
+
+// ---- Point & Figure: columns of X (rising) and O (falling) on a percentage box grid; a new column only after the
+// price reverses `rev` boxes. Highs and lows decide (the high-low method). Time is left out.
+export interface PnfColumn { up: boolean; from: number; to: number; start: string; end: string }   // box indexes, inclusive
+
+export function pnf(b: Ohlcv, boxPct = 2, rev = 3): { cols: PnfColumn[]; boxPrice: (i: number) => number } {
+  const k = Math.log(1 + boxPct / 100)
+  const boxPrice = (i: number) => Math.exp(i * k)
+  const cols: PnfColumn[] = []
+  if (!b.c.length) return { cols, boxPrice }
+  const fl = (x: number) => Math.floor(Math.log(x) / k + 1e-9)
+  const ce = (x: number) => Math.ceil(Math.log(x) / k - 1e-9)
+  let cur: PnfColumn | null = null
+  for (let i = 0; i < b.c.length; i++) {
+    const hi = fl(b.h[i]), lo = ce(b.l[i])
+    if (!cur) {
+      const first = fl(b.c[0])
+      if (hi > first) cur = { up: true, from: first, to: hi, start: b.t[i], end: b.t[i] }
+      else if (lo < first) cur = { up: false, from: first, to: lo, start: b.t[i], end: b.t[i] }
+      continue
+    }
+    if (cur.up) {
+      if (hi > cur.to) { cur.to = hi; cur.end = b.t[i] }
+      else if (lo <= cur.to - rev) { cols.push(cur); cur = { up: false, from: cur.to - 1, to: lo, start: b.t[i], end: b.t[i] } }
+    } else {
+      if (lo < cur.to) { cur.to = lo; cur.end = b.t[i] }
+      else if (hi >= cur.to + rev) { cols.push(cur); cur = { up: true, from: cur.to + 1, to: hi, start: b.t[i], end: b.t[i] } }
+    }
+  }
+  if (cur) cols.push(cur)
+  return { cols, boxPrice }
+}
+
+// ---- Kagi: a line that turns only when the close reverses `revPct` % from its extreme; it thickens (yang) when it
+// rises above the last shoulder and thins (yin) when it falls below the last waist.
+export interface KagiSeg { from: number; to: number; thick: boolean; start: string; end: string }
+
+export function kagi(b: Ohlcv, revPct = 4): KagiSeg[] {
+  const out: KagiSeg[] = []
+  if (b.c.length < 2) return out
+  let dir = 0, ext = b.c[0], startV = b.c[0], startT = b.t[0], endT = b.t[0]
+  let thick = true, shoulder = -Infinity, waist = Infinity
+  for (let i = 1; i < b.c.length; i++) {
+    const c = b.c[i]
+    if (dir === 0) {
+      if (c >= startV * (1 + revPct / 100)) { dir = 1; ext = c; endT = b.t[i] }
+      else if (c <= startV * (1 - revPct / 100)) { dir = -1; ext = c; endT = b.t[i] }
+      continue
+    }
+    if (dir === 1) {
+      if (c > ext) { ext = c; endT = b.t[i] }
+      else if (c <= ext * (1 - revPct / 100)) {
+        if (ext > shoulder && shoulder !== -Infinity) thick = true
+        out.push({ from: startV, to: ext, thick, start: startT, end: endT })
+        shoulder = ext; startV = ext; startT = endT; dir = -1; ext = c; endT = b.t[i]
+      }
+    } else {
+      if (c < ext) { ext = c; endT = b.t[i] }
+      else if (c >= ext * (1 + revPct / 100)) {
+        if (ext < waist && waist !== Infinity) thick = false
+        out.push({ from: startV, to: ext, thick, start: startT, end: endT })
+        waist = ext; startV = ext; startT = endT; dir = 1; ext = c; endT = b.t[i]
+      }
+    }
+  }
+  if (dir !== 0) out.push({ from: startV, to: ext, thick: dir === 1 ? (ext > shoulder ? true : thick) : (ext < waist ? false : thick), start: startT, end: endT })
+  return out
+}
+
+// ---- Volume by price over the bars shown: each bar's volume spread evenly over its high-low range, in `bins`
+// levels; the point of control (most volume) and the value area (70% of the volume around it).
+export function volumeByPrice(b: Ohlcv, bins = 40): { profile: { price: number; vol: number }[]; poc: number | null; va: [number, number] | null } {
+  const n = b.c.length
+  if (!n) return { profile: [], poc: null, va: null }
+  const lo = Math.min(...b.l), hi = Math.max(...b.h)
+  if (!(hi > lo)) return { profile: [], poc: null, va: null }
+  const step = (hi - lo) / bins
+  const vol = new Array(bins).fill(0)
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, Math.floor((b.l[i] - lo) / step)), z = Math.min(bins - 1, Math.floor((b.h[i] - lo) / step))
+    const share = b.v[i] / (z - a + 1)
+    for (let j = a; j <= z; j++) vol[j] += share
+  }
+  const profile = vol.map((v, j) => ({ price: Math.round((lo + (j + 0.5) * step) * 100) / 100, vol: v }))
+  let p = 0
+  for (let j = 1; j < bins; j++) if (vol[j] > vol[p]) p = j
+  const total = vol.reduce((x, y) => x + y, 0)
+  let a = p, z = p, got = vol[p]
+  while (got < total * 0.7 && (a > 0 || z < bins - 1)) {
+    const up = z < bins - 1 ? vol[z + 1] : -1, dn = a > 0 ? vol[a - 1] : -1
+    if (up >= dn) { z += 1; got += vol[z] } else { a -= 1; got += vol[a] }
+  }
+  return { profile, poc: profile[p].price, va: [profile[a].price, profile[z].price] }
 }

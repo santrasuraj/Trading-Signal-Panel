@@ -2,10 +2,11 @@
 // and P&L, stop-loss / target protection for delivery holdings (FYERS GTT OCO), slippage against the signals, and the
 // audit log of everything the app sent. Limits come from config.yaml `orders:` and are enforced on the server.
 
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { OctagonX, Power, ShieldCheck } from 'lucide-react'
-import { isFailure } from '@/api/client'
+import { fetchJson, isFailure } from '@/api/client'
 import { useOrderActions, useOrdersView } from '@/api/orders'
 import { PageHeader } from '@/components/domain'
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/feedback'
@@ -21,6 +22,8 @@ function ProtectRow({ symbol, qty, avg }: { symbol: string; qty: number; avg: nu
   const [stop, setStop] = useState(avg ? String(Math.round(avg * 0.92 * 20) / 20) : '')
   const [target, setTarget] = useState(avg ? String(Math.round(avg * 1.25 * 20) / 20) : '')
   const ok = Number(stop) > 0 && Number(target) > Number(stop)
+  const [trailPct, setTrailPct] = useState('8')
+  const trail = useQuery({ queryKey: ['trail', symbol, trailPct], queryFn: () => fetchJson<{ stop: number | null; note: string }>(`/api/trail/${encodeURIComponent(symbol)}?pct=${Number(trailPct) || 8}`), staleTime: 60_000, enabled: Number(trailPct) > 0 })
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-line/60 py-1.5 text-[13px]">
       <span className="w-28 font-semibold">{symbol}</span>
@@ -35,6 +38,11 @@ function ProtectRow({ symbol, qty, avg }: { symbol: string; qty: number; avg: nu
             onError: (e) => toast({ tone: 'bad', title: 'Not placed', detail: isFailure(e) ? e.message : undefined }),
           })
         }}>Protect</Button>
+      {trail.data?.stop != null && (
+        <span className="flex items-center gap-1 text-2xs text-muted" title={trail.data.note}>
+          Trailing stop <input aria-label={`${symbol} trailing %`} value={trailPct} onChange={(e) => setTrailPct(e.target.value)} className="input num h-6 w-10 px-1 text-right" />% →
+          <button type="button" className="link" onClick={() => setStop(String(trail.data!.stop))}>use ₹{num(trail.data.stop, 2)}</button>
+        </span>)}
     </div>
   )
 }

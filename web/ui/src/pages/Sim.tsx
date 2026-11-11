@@ -67,7 +67,7 @@ function Body({ d }: { d: SimAccount }) {
                 <td className="num text-right">{num(p.avg, 2)}</td>
                 <td className="num text-right">{num(p.price, 2)}</td>
                 <td className="text-right"><Money v={p.pnl} signed color dp={0} /></td>
-                <td className="num text-right text-muted">{p.stop != null ? num(p.stop, 2) : '—'} / {p.target != null ? num(p.target, 2) : '—'}</td>
+                <td className="num text-right text-muted">{p.stop != null ? num(p.stop, 2) : '—'} / {p.target != null ? num(p.target, 2) : '—'}{p.trail && <div className="text-2xs text-accent" title="Trailing stop: follows the best price, never loosens">trailing {p.trail.value}{p.trail.type === 'pct' ? '%' : ' pts'}</div>}{(p.targets ?? []).length > 0 && <div className="text-2xs" title={p.breakeven ? 'Stop moves to the entry after the first target' : undefined}>scale out {p.targets!.map((x) => `${x.qty}@${num(x.price, 2)}`).join(', ')}{p.breakeven ? ' · BE' : ''}</div>}</td>
                 <td className="px-4 text-right"><Button size="xs" variant="subtle" loading={a.close.isPending} onClick={() => a.close.mutate(p.symbol, { onError: fail('Not closed') })}>Close</Button></td>
               </tr>
             ))}</tbody>

@@ -248,7 +248,16 @@ CHART_INFO = {
                   "a close above the pause's high completes it."),
     "bear_flag": ("Bear flag", "bearish", "A sharp fall (the pole), then a short pause giving back under 38% of it: "
                   "a close below the pause's low completes it."),
+    "trendline_break_up": ("Falling trendline breakout", "bullish", "A falling line through two or more swing highs "
+                           "(drawn automatically) that held for 20+ bars: a close above it completes the break."),
+    "trendline_break_down": ("Rising trendline breakdown", "bearish", "A rising line through two or more swing lows "
+                             "(drawn automatically) that held for 20+ bars: a close below it completes the break."),
 }
+TL_MIN_SPAN = 20             # an automatic trendline joins swings at least 20 bars apart ...
+TL_SLOPE_ATR = 0.5           # ... and moves at least half an ATR over them (else it is a flat level, not a trendline)
+TL_TOUCH_ATR = 0.5           # a swing within half an ATR of the line counts as a touch
+TL_BREAK_ATR = 0.2           # a break: a close beyond the line by a fifth of an ATR
+TL_NEAR_ATR = 1.5            # an unbroken line is listed (forming) while the close is within 1.5 ATRs of it
 
 
 def turning_points(df: pd.DataFrame, k: int = PAT_K) -> list[tuple[int, str, float]]:
@@ -465,6 +474,55 @@ def _flags(df: pd.DataFrame, a: float) -> list[dict]:
     return []
 
 
+def _trendlines(df: pd.DataFrame, pts: list, a: float) -> list[dict]:
+    """Automatic trendlines: the newest falling line through two swing highs (resistance) and rising line through two
+    swing lows (support) that no close crossed while they formed; confirmed when a close breaks through."""
+    c, n = df["close"].to_numpy(float), len(df)
+    out = []
+    for kind in ("H", "L"):
+        sw = [(i, p) for i, t, p in pts if t == kind and n - 1 - i <= 150]
+        best = None
+        for j in range(len(sw) - 1, 0, -1):                  # the newest pair that makes a valid line
+            for k in range(j - 1, -1, -1):
+                (i1, p1), (i2, p2) = sw[k], sw[j]
+                if i2 - i1 < TL_MIN_SPAN:
+                    continue
+                m = (p2 - p1) / (i2 - i1)
+                if kind == "H" and not m * (i2 - i1) <= -TL_SLOPE_ATR * a:
+                    continue                                   # resistance must fall
+                if kind == "L" and not m * (i2 - i1) >= TL_SLOPE_ATR * a:
+                    continue                                   # support must rise
+                line = lambda x, i1=i1, p1=p1, m=m: p1 + m * (x - i1)   # noqa: E731
+                if kind == "H" and any(c[x] > line(x) + TL_BREAK_ATR * a for x in range(i1, i2 + 1)):
+                    continue
+                if kind == "L" and any(c[x] < line(x) - TL_BREAK_ATR * a for x in range(i1, i2 + 1)):
+                    continue
+                best = (i1, p1, i2, p2, m, line)
+                break
+            if best:
+                break
+        if not best:
+            continue
+        i1, p1, i2, p2, m, line = best
+        after = range(i2 + 1, n)
+        brk = next((x for x in after if (c[x] > line(x) + TL_BREAK_ATR * a if kind == "H" else c[x] < line(x) - TL_BREAK_ATR * a)), None)
+        if brk is None and abs(c[-1] - line(n - 1)) > TL_NEAR_ATR * a:
+            continue                                          # far from the line: nothing to watch
+        touches = [(i, p) for i, p in sw if i1 <= i <= (brk if brk is not None else n - 1) and abs(p - line(i)) <= TL_TOUCH_ATR * a]
+        key = "trendline_break_up" if kind == "H" else "trendline_break_down"
+        end = brk if brk is not None else n - 1
+        lvl = line(n - 1)
+        # the opposite swing between the two touches: the range the line capped (or held)
+        seg = df["low"].to_numpy(float)[i1:i2 + 1] if kind == "H" else df["high"].to_numpy(float)[i1:i2 + 1]
+        j = i1 + int(np.argmin(seg) if kind == "H" else np.argmax(seg))
+        out.append(_sketch(df, key, "confirmed" if brk is not None else "forming", i1,
+                           breakout=lvl, invalidation=(lvl - a) if kind == "H" else (lvl + a),
+                           target=None, direction=("up" if kind == "H" else "down") if brk is not None else None,
+                           confirmed_at=brk, points=sorted([(i, p, "") for i, p in touches] + [(j, float(seg[j - i1]), "")]),
+                           lines=[(i1, p1, end, line(end))]))
+    return out
+
+
 def chart_patterns(df: pd.DataFrame) -> list[dict]:
     """Classic chart patterns on the last daily bars, confirmed ones first (at most MAX_CHART_PATTERNS). Rules are
     the textbook ones, made exact: see the constants above. Tested by pattern_study.py: no edge after costs."""
@@ -479,7 +537,9 @@ def chart_patterns(df: pd.DataFrame) -> list[dict]:
     doubles = _doubles(d, pts, a)
     if hs:      # a head and shoulders' two troughs (peaks) also look like a double bottom (top): one reading only
         doubles = [x for x in doubles if x["start"] < hs[0]["start"]]
-    found = [p for p in doubles + hs + _triangles(d, pts, a) + _flags(d, a)
+    tri = _triangles(d, pts, a)
+    tls = _trendlines(d, pts, a) if not tri else []      # a triangle's lines already are these trendlines
+    found = [p for p in doubles + hs + tri + _flags(d, a) + tls
              if p["status"] == "forming" or p["confirmed_bars_ago"] <= CONFIRM_RECENT]
     found.sort(key=lambda p: p["start"], reverse=True)                   # newest first ...
     found.sort(key=lambda p: p["status"] != "confirmed")                 # ... confirmed ones before forming ones

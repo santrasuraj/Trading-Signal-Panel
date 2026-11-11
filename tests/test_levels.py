@@ -112,6 +112,8 @@ RISING_WEDGE = [(0, 85), (10, 100), (20, 90), (30, 106), (40, 98), (50, 110), (6
 BULL_FLAG = [(0, 100), (40, 100), (50, 125), (62, 121), (63, 128)]
 DOUBLE_TOP = [(0, 80), (30, 100), (45, 88), (60, 100), (75, 85)]
 HEAD_SHOULDERS = [(0, 80), (20, 95), (30, 88), (45, 105), (60, 88), (75, 95), (85, 90)]
+# a falling channel (not a triangle or wedge: its lines don't narrow) whose upper line breaks at the end
+TRENDLINE = [(0, 120), (10, 100), (20, 112), (30, 92), (40, 104), (50, 84), (55, 90), (60, 100)]
 # (pattern, closes, status): one textbook shape per chart pattern; the bearish / bullish twins are mirror images
 SHAPES = [
     ("double_top", path(DOUBLE_TOP), "confirmed"),
@@ -128,6 +130,8 @@ SHAPES = [
     ("falling_wedge", 200 - path(RISING_WEDGE), "forming"),
     ("bull_flag", path(BULL_FLAG), "confirmed"),
     ("bear_flag", 200 - path(BULL_FLAG), "confirmed"),
+    ("trendline_break_up", path(TRENDLINE), "confirmed"),
+    ("trendline_break_down", 200 - path(TRENDLINE), "confirmed"),
 ]
 
 

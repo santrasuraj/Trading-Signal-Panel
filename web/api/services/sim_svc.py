@@ -4,7 +4,9 @@ money and nothing sent to FYERS - the same order ticket as the real one, filled 
 Fills: a market order at the live price plus slippage (only while the market is open); a limit order rests until the
 live price reaches it (a buy at or below the limit, a sell at or above) and fills at the limit, or at the live price if
 that is better. A position may carry a stop-loss and a target: the stop fills at the live price plus slippage once it
-is touched, the target at the target. Intraday positions (product INTRADAY, which may be short) are squared off from
+is touched, the target at the target. A trailing stop follows the best price since entry (by a % or by points) and
+only ever tightens; scale-out targets each sell part of the position at their price, and "breakeven" moves the stop to
+the entry price once the first one fills (NinjaTrader's ATM strategy, on the practice account). Intraday positions (product INTRADAY, which may be short) are squared off from
 15:20. Charges are FYERS' (delivery or intraday) from the cost model. Orders and positions are checked whenever live
 quotes arrive (the dashboard's price stream) and on every read of the account.
 
@@ -85,6 +87,7 @@ def _fill(st: dict, o: dict, px: float, why: str) -> None:
             pos["stop"] = o["stop"]
         if o.get("target") is not None:
             pos["target"] = o["target"]
+        _copy_plan(pos, o)
     else:                                                          # reducing / closing / flipping
         closed = min(abs(old), qty)
         pnl = (px - pos["avg"]) * closed * (1 if old > 0 else -1)
@@ -97,7 +100,8 @@ def _fill(st: dict, o: dict, px: float, why: str) -> None:
             pos = None
         elif (rest > 0) != (old > 0):                              # flipped: the remainder opens the other way
             pos.update(qty=rest, avg=px, stop=o.get("stop"), target=o.get("target"),
-                       opened=now_ist().isoformat(timespec="seconds"))
+                       opened=now_ist().isoformat(timespec="seconds"), trail=None, targets=[], breakeven=False, peak=None)
+            _copy_plan(pos, o)
         else:
             pos["qty"] = rest
     if pos is None:
@@ -106,6 +110,35 @@ def _fill(st: dict, o: dict, px: float, why: str) -> None:
         st["positions"][sym] = pos
     o.update(status="filled", fill_price=round(px, 2), filled_at=now_ist().isoformat(timespec="seconds"),
              charges=round(charges, 2), note=why)
+
+
+def _copy_plan(pos: dict, o: dict) -> None:
+    """The exit plan an order carries (trailing stop, scale-out targets, breakeven) onto its position."""
+    if o.get("trail"):
+        pos["trail"], pos["peak"] = dict(o["trail"]), None
+    if o.get("targets"):
+        pos["targets"] = sorted(({"price": float(t["price"]), "qty": int(t["qty"])} for t in o["targets"]),
+                                key=lambda t: t["price"], reverse=pos.get("qty", 0) < 0)
+    if o.get("breakeven") is not None:
+        pos["breakeven"] = bool(o["breakeven"])
+
+
+def trail_stop(pos: dict, px: float) -> bool:
+    """Move a trailing stop with the best price since it was set. Only ever tightens. True if it moved."""
+    tr = pos.get("trail")
+    if not tr or not pos.get("qty"):
+        return False
+    long = pos["qty"] > 0
+    peak = pos.get("peak")
+    peak = px if peak is None else (max(peak, px) if long else min(peak, px))
+    pos["peak"] = peak
+    gap = peak * float(tr["value"]) / 100 if tr.get("type", "pct") == "pct" else float(tr["value"])
+    new = round(peak - gap if long else peak + gap, 2)
+    old = pos.get("stop")
+    if old is None or (new > old if long else new < old):
+        pos["stop"] = new
+        return True
+    return False
 
 
 def _slip(px: float, buying: bool, product: str) -> float:
@@ -139,6 +172,32 @@ def process(st: dict, quotes: dict[str, dict], session: str | None = None) -> bo
         if not q or q.get("price") is None or (q.get("source") or "live") not in LIVE:
             continue
         px, long = float(q["price"]), pos["qty"] > 0
+        if trail_stop(pos, px):
+            changed = True
+        # scale-out targets: each sells its part at its price; the first one can move the stop to breakeven
+        for t in list(pos.get("targets") or []):
+            if not (px >= t["price"] if long else px <= t["price"]):
+                break
+            q_take = min(int(t["qty"]), abs(pos["qty"]))
+            pos["targets"].remove(t)
+            first = not pos.get("scaled")
+            pos["scaled"] = True
+            o = {"id": uuid.uuid4().hex[:10], "symbol": sym, "side": "SELL" if long else "BUY", "qty": q_take,
+                 "type": "MARKET", "product": pos["product"], "limit_price": None, "status": "open",
+                 "created": now.isoformat(timespec="seconds"), "auto": "scale_out"}
+            avg = pos["avg"]
+            _fill(st, o, float(t["price"]), "scale_out")
+            st["orders"].append(o)
+            changed = True
+            pos = st["positions"].get(sym)
+            if pos is None:
+                break
+            if first and pos.get("breakeven"):
+                be = round(avg, 2)
+                if pos.get("stop") is None or (be > pos["stop"] if long else be < pos["stop"]):
+                    pos["stop"] = be
+        if pos is None:
+            continue
         why = None
         if square and pos["product"] == "INTRADAY":
             why, fill = "square_off", _slip(px, not long, "INTRADAY")
@@ -205,7 +264,10 @@ def place(t: dict) -> dict:
         o = {"id": uuid.uuid4().hex[:10], "symbol": sym, "side": side, "qty": qty, "type": typ, "product": product,
              "limit_price": float(t["limit_price"]) if typ == "LIMIT" else None, "stop": t.get("stop"),
              "target": t.get("target"), "status": "open", "created": now_ist().isoformat(timespec="seconds"),
-             "ref_price": live}
+             "ref_price": live, "trail": t.get("trail"), "targets": t.get("targets") or [],
+             "breakeven": bool(t.get("breakeven"))}
+        if sum(int(x["qty"]) for x in o["targets"]) > qty:
+            raise ApiException("VALIDATION", "The scale-out targets add up to more than the order's quantity.")
         if typ == "MARKET":
             _fill(st, o, _slip(float(live), side == "BUY", product), "market")
         st["orders"].append(o)
@@ -239,13 +301,23 @@ def close(symbol: str) -> dict:
                   "product": pos["product"]})
 
 
-def set_levels(symbol: str, stop: float | None, target: float | None) -> dict:
+def set_levels(symbol: str, stop: float | None, target: float | None, trail: dict | None = None,
+               targets: list[dict] | None = None, breakeven: bool | None = None) -> dict:
     with _lock:
         st = _load()
         pos = st["positions"].get(symbol.upper())
         if not pos:
             raise ApiException("NOT_FOUND", f"No practice position in {symbol.upper()}.")
+        if targets and sum(int(x["qty"]) for x in targets) > abs(pos["qty"]):
+            raise ApiException("VALIDATION", "The scale-out targets add up to more than the position.")
         pos["stop"], pos["target"] = stop, target
+        pos["trail"], pos["peak"] = (dict(trail) if trail else None), None
+        if targets is not None:
+            _copy_plan(pos, {"targets": targets})
+            if not targets:
+                pos["targets"] = []
+        if breakeven is not None:
+            pos["breakeven"] = bool(breakeven)
         _save(st)
         return pos
 
@@ -282,5 +354,6 @@ def view() -> dict:
                       "realised": round(sum(t["pnl"] for t in trades), 2)},
             "session": session, "created": st.get("created"),
             "note": "Practice account on live prices: nothing is sent to FYERS. Market orders fill at the live price plus "
-                    "slippage, limit orders when the price reaches them; stops and targets close a position; intraday "
+                    "slippage, limit orders when the price reaches them; stops and targets close a position, a trailing "
+                    "stop follows the best price, scale-out targets sell part at each; intraday "
                     "positions are squared off from 15:20. FYERS' charges apply."}

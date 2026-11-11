@@ -21,6 +21,7 @@ from scanner.intraday import data as idata
 from scanner.intraday.live import FORMING_1M_NAME, FORMING_FILE_NAME, live_dir, live_file, live_file_1m
 from scanner.intraday.quote_hub import to_ticker
 
+from . import data
 from ..errors import ApiException
 from ..paths import P
 from ..util import today_ist
@@ -97,6 +98,29 @@ def vwap(df: pd.DataFrame) -> list[float | None]:
     return [None if not np.isfinite(x) else float(x) for x in v.fillna(np.nan)]
 
 
+def daily_levels(symbol: str, last_ts) -> list[dict]:
+    """The daily chart's levels on an intraday chart: the previous session's high, low and close, and the daily
+    SMA 20 / 50 / 200 as of that close (higher-timeframe context, no look-ahead)."""
+    try:
+        c = data.store()
+        sym = symbol.upper()
+        day = pd.Timestamp(last_ts).normalize()
+        close = c["close"][sym].dropna()
+        close = close[close.index < day]
+        if close.empty:
+            return []
+        prev = close.index[-1]
+        out = [{"price": round(float(c["high"].at[prev, sym]), 2), "label": "Prev high", "tone": "profit"},
+               {"price": round(float(c["low"].at[prev, sym]), 2), "label": "Prev low", "tone": "loss"},
+               {"price": round(float(close.iloc[-1]), 2), "label": "Prev close", "tone": "muted"}]
+        for n in (20, 50, 200):
+            if len(close) >= n:
+                out.append({"price": round(float(close.iloc[-n:].mean()), 2), "label": f"Daily SMA {n}", "tone": "info"})
+        return [x for x in out if x["price"] == x["price"]]
+    except Exception:
+        return []
+
+
 def build(symbol: str, tf: str = "5m", days: int = 3) -> dict:
     if tf not in TFS:
         raise ApiException("VALIDATION", "tf must be 1m, 5m, 15m, 30m or 1h.")
@@ -118,7 +142,7 @@ def build(symbol: str, tf: str = "5m", days: int = 3) -> dict:
     t = ((df["ts"] - pd.Timestamp("1970-01-01")) // pd.Timedelta(seconds=1)).astype("int64").tolist()
     r2 = lambda s: [round(float(x), 2) for x in s]  # noqa: E731
     src = sorted(set(raw["source"].astype(str)))
-    return {"symbol": symbol.upper(), "tf": tf, "days": days,
+    return {"symbol": symbol.upper(), "tf": tf, "days": days, "daily_levels": daily_levels(symbol, df["ts"].max()),
             "sessions": sorted({d.date().isoformat() for d in df["ts"].dt.normalize()}),
             "bars": {"t": t, "o": r2(df["open"]), "h": r2(df["high"]), "l": r2(df["low"]), "c": r2(df["close"]),
                      "v": [float(x) for x in df["volume"]]},

@@ -8,12 +8,15 @@ import { useCalendar, type CalEvent, type CalKind } from '@/api/desk'
 import { PageHeader } from '@/components/domain'
 import { Banner, EmptyState, ErrorState, SkeletonRows } from '@/components/feedback'
 import { Card, Segmented } from '@/components/ui'
+import { AnnouncementsCard } from '@/components/AnnouncementsCard'
 import { date as fmtDate, money, todayIST } from '@/lib/format'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 import { cn } from '@/lib/csv'
 
 type Scope = 'mine' | 'all'
 const KIND: Record<CalKind, { label: string; cls: string; help: string }> = {
+  econ: { label: 'Economy', cls: 'bg-violet/15 text-violet', help: 'A scheduled economic release or policy decision (RBI, US Fed, inflation, GDP, Budget). Moves the whole market.' },
+  ipo: { label: 'IPO', cls: 'bg-info/15 text-info', help: 'A new issue opening or closing for subscription on NSE.' },
   results: { label: 'Results', cls: 'bg-accent/15 text-accent', help: 'Quarterly results: a bigger move than usual, and a stop can gap overnight.' },
   dividend: { label: 'Ex-dividend', cls: 'bg-profit/15 text-profit', help: 'Own the shares at the close of the "buy by" day to get the dividend. The price drops by about the dividend on the ex-date.' },
   rights: { label: 'Rights', cls: 'bg-warn/15 text-warn', help: 'Rights issue: holders on the record date may buy new shares at the issue price.' },
@@ -25,7 +28,7 @@ const KIND: Record<CalKind, { label: string; cls: string; help: string }> = {
   meeting: { label: 'Board meeting', cls: 'bg-raised text-muted', help: 'Board meeting (fund raising, bonus, other business).' },
 }
 const FILTERS: { id: 'all' | CalKind; label: string }[] = [
-  { id: 'all', label: 'All' }, { id: 'results', label: 'Results' }, { id: 'dividend', label: 'Dividends' }, { id: 'expiry', label: 'Expiries' },
+  { id: 'all', label: 'All' }, { id: 'econ', label: 'Economy' }, { id: 'results', label: 'Results' }, { id: 'ipo', label: 'IPOs' }, { id: 'dividend', label: 'Dividends' }, { id: 'expiry', label: 'Expiries' },
 ]
 
 function dayLabel(d: string, today: string): string {
@@ -41,6 +44,7 @@ function Row({ e }: { e: CalEvent }) {
   return (
     <li className={cn('flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2', (e.mine || e.watch) && 'bg-accent/5')}>
       <span className={cn('w-[104px] shrink-0 rounded px-1.5 py-0.5 text-center text-2xs font-semibold', k.cls)} title={k.help}>{k.label}{e.kind === 'expiry' && e.monthly ? ' · monthly' : ''}</span>
+      {e.kind === 'econ' && <span className={cn('w-[110px] shrink-0 text-2xs', e.importance === 'high' ? 'font-semibold text-fg' : 'text-muted')} title={e.source}>{e.country === 'US' ? '🇺🇸' : '🇮🇳'} {e.time} {e.importance === 'high' ? '· high impact' : ''}</span>}
       {e.symbol ? (
         <Link to={`/chart/${e.symbol}`} className="w-[110px] shrink-0 font-semibold text-fg hover:text-accent">{e.symbol}</Link>
       ) : null}
@@ -87,6 +91,7 @@ export default function Calendar() {
         <EmptyState icon={<CalendarDays />} title="Nothing in this window">{scope === 'mine' ? 'None of your holdings or watchlist stocks has an event in this window.' : 'Try a longer window.'}</EmptyState>
       ) : (
         <div className="flex flex-col gap-3">
+          <AnnouncementsCard days={3} limit={12} title="Latest announcements from your stocks" />
           {groups.map(([day, ev]) => (
             <Card key={day} flush title={`${fmtDate(day, { year: false })} · ${dayLabel(day, today)}`}
               subtitle={ev.some((e) => e.kind === 'holiday') ? 'Market closed' : `${ev.length} event${ev.length === 1 ? '' : 's'}`}>

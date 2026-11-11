@@ -15,6 +15,7 @@ History-based numbers assume the next year looks like the last ones: a crash wor
 from __future__ import annotations
 
 import math
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -204,3 +205,43 @@ def view() -> dict:
     out["price_source"] = source
     out["as_of"] = today_ist().isoformat()
     return out
+
+
+def trail_suggestion(symbol: str, pct: float = 8.0) -> dict:
+    """A trailing stop for a real holding: `pct` under the highest close since it was bought (holdings.csv buy date,
+    else Quant Desk's recorded fills, else the last 20 sessions). Information only: the Orders page's Protect places
+    it after you confirm (cancel the old GTT first)."""
+    from scanner import fills
+    sym = symbol.upper()
+    since = None
+    try:
+        h = data.holdings_df()
+        ds = [d for d in h.loc[h["symbol"] == sym, "buy_date"] if isinstance(d, date) and not pd.isna(d)]
+        since = min(ds) if ds else None
+    except Exception:
+        pass
+    if since is None:
+        try:
+            _, still = fills.round_trips(fills.read())
+            ts = [pd.Timestamp(x["time"]).date() for x in still if x.get("symbol") == sym and x.get("time")]
+            since = min(ts) if ts else None
+        except Exception:
+            pass
+    try:
+        c = data.store_close()[sym].dropna()
+    except Exception:
+        c = pd.Series(dtype=float)
+    basis = "since you bought" if since else "over the last 20 sessions"
+    c = c[c.index >= pd.Timestamp(since)] if since else c.iloc[-20:]
+    q = quotes_svc.quotes([sym]).get("quotes") or []
+    live = float(q[0]["price"]) if q and q[0].get("price") else None
+    if c.empty and live is None:
+        return {"symbol": sym, "stop": None, "note": "No prices for this stock."}
+    high, when = (float(c.max()), c.idxmax().date().isoformat()) if len(c) else (live, today_ist().isoformat())
+    if live is not None and live > high:
+        high, when = live, today_ist().isoformat()
+    stop = round(round(high * (1 - pct / 100) / 0.05) * 0.05, 2)
+    return {"symbol": sym, "since": since.isoformat() if since else None, "high": round(high, 2), "high_date": when,
+            "pct": pct, "stop": stop, "price": live,
+            "note": f"{pct:g}% under the highest close {basis} (₹{high:,.2f} on {when}). Cancel the old GTT before "
+                    "protecting with the new stop."}

@@ -3,6 +3,7 @@
 // Real: fill in, Review (sends nothing: the server returns the exact FYERS order, every check, the charges and the
 // risk), then tick "I have checked this order" and Send (one attempt, never retried).
 
+import type { SimScale, SimTrail } from '@/api/sim'
 import { useEffect, useState } from 'react'
 import { CheckCircle2, ShieldAlert, XCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -35,18 +36,19 @@ export function OrderTicket({ open, onClose, initial, mode: wanted }: { open: bo
   const ov = useOrdersView(false)
   const [mode, setMode] = useState<Mode>(wanted ?? 'sim')
   const [simType, setSimType] = useState<'LIMIT' | 'MARKET'>('LIMIT')
+  const [plan, setPlan] = useState<ExitPlan>(NO_PLAN)
   const [t, setT] = useState<Ticket>(initial)
   const [pv, setPv] = useState<Preview | null>(null)
   const [checked, setChecked] = useState(false)
   useEffect(() => {
     if (!open) return
-    setT(initial); setPv(null); setChecked(false); a.place.reset(); a.preview.reset(); sim.order.reset()
+    setT(initial); setPv(null); setChecked(false); a.place.reset(); a.preview.reset(); sim.order.reset(); setPlan(NO_PLAN)
     setMode(wanted ?? (ov.data?.enabled ? 'real' : 'sim'))
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
   const edit = (k: keyof Ticket, v: unknown) => { setT((x) => ({ ...x, [k]: v })); setPv(null); setChecked(false) }
   const review = () => a.preview.mutate(t, { onSuccess: setPv })
   const placeSim = () => sim.order.mutate({ symbol: t.symbol, side: t.side, qty: t.qty, type: simType, product: t.product,
-    limit_price: simType === 'LIMIT' ? t.limit_price : null, stop: t.stop ?? null, target: t.target ?? null })
+    limit_price: simType === 'LIMIT' ? t.limit_price : null, stop: t.stop ?? null, target: t.target ?? null, ...planBody(plan, t.qty) })
   const res = a.place.data
   const simRes = sim.order.data
   const buy = t.side === 'BUY'
@@ -85,6 +87,7 @@ export function OrderTicket({ open, onClose, initial, mode: wanted }: { open: bo
         <div className="space-y-3 text-[13px]">
           <Segmented<'LIMIT' | 'MARKET'> size="xs" ariaLabel="Order type" value={simType} onChange={setSimType} items={[{ id: 'LIMIT', label: 'Limit' }, { id: 'MARKET', label: 'Market (at the live price)' }]} />
           <Fields t={t} edit={edit} limit={simType === 'LIMIT'} />
+          <PlanFields plan={plan} setPlan={setPlan} qty={t.qty} />
           {errText && <p className="text-xs text-loss">{errText}</p>}
           <p className="text-2xs text-faint">Practice account on live prices: no money, nothing sent to FYERS. A stop or target closes the position by itself; intraday positions close at 15:20. FYERS' charges apply.</p>
         </div>
@@ -127,5 +130,40 @@ export function OrderTicket({ open, onClose, initial, mode: wanted }: { open: bo
         </div>
       )}
     </Dialog>
+  )
+}
+
+// ---- exit plan (practice account): trailing stop, two scale-out targets, breakeven after the first
+export interface ExitPlan { trailOn: boolean; trailType: 'pct' | 'points'; trailValue: number | null; t1: number | null; t1Pct: number; t2: number | null; breakeven: boolean }
+export const NO_PLAN: ExitPlan = { trailOn: false, trailType: 'pct', trailValue: 5, t1: null, t1Pct: 50, t2: null, breakeven: true }
+
+export function planBody(p: ExitPlan, qty: number): { trail: SimTrail | null; targets: SimScale[]; breakeven: boolean } {
+  const targets: SimScale[] = []
+  const q1 = p.t2 != null ? Math.max(1, Math.floor((qty * p.t1Pct) / 100)) : qty
+  if (p.t1 != null && p.t1 > 0 && qty > 0) targets.push({ price: p.t1, qty: Math.min(q1, qty) })
+  if (p.t2 != null && p.t2 > 0 && qty - (targets[0]?.qty ?? 0) > 0) targets.push({ price: p.t2, qty: qty - (targets[0]?.qty ?? 0) })
+  return { trail: p.trailOn && p.trailValue ? { type: p.trailType, value: p.trailValue } : null, targets, breakeven: p.breakeven && targets.length > 0 }
+}
+
+function PlanFields({ plan, setPlan, qty }: { plan: ExitPlan; setPlan: (p: ExitPlan) => void; qty: number }) {
+  const set = <K extends keyof ExitPlan>(k: K, v: ExitPlan[K]) => setPlan({ ...plan, [k]: v })
+  const n = (s: string) => (s === '' ? null : Number(s))
+  const b = planBody(plan, qty)
+  return (
+    <details className="rounded border border-line px-2 py-1.5" open={plan.trailOn || plan.t1 != null}>
+      <summary className="cursor-pointer text-xs font-medium text-fg">Exit plan: trailing stop, scale out</summary>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <label className="col-span-2 flex items-center gap-2 text-2xs text-muted"><input type="checkbox" checked={plan.trailOn} onChange={(e) => set('trailOn', e.target.checked)} /> Trailing stop: follows the best price, never loosens</label>
+        {plan.trailOn && <>
+          <label className="text-2xs text-muted">Distance<input aria-label="Trailing distance" inputMode="decimal" value={plan.trailValue ?? ''} onChange={(e) => set('trailValue', n(e.target.value))} className="input num mt-0.5 block h-8 w-full px-2 text-right" /></label>
+          <label className="text-2xs text-muted">In<select aria-label="Trailing distance unit" className="input mt-0.5 block h-8 w-full px-1" value={plan.trailType} onChange={(e) => set('trailType', e.target.value as 'pct' | 'points')}><option value="pct">% of the price</option><option value="points">₹ (points)</option></select></label>
+        </>}
+        <label className="text-2xs text-muted">Target 1 ₹<input aria-label="Target 1" inputMode="decimal" value={plan.t1 ?? ''} onChange={(e) => set('t1', n(e.target.value))} className="input num mt-0.5 block h-8 w-full px-2 text-right" /></label>
+        <label className="text-2xs text-muted">Sell there (%)<input aria-label="Share at target 1" inputMode="numeric" value={plan.t1Pct} onChange={(e) => set('t1Pct', Math.max(1, Math.min(100, Number(e.target.value) || 50)))} className="input num mt-0.5 block h-8 w-full px-2 text-right" /></label>
+        <label className="text-2xs text-muted">Target 2 ₹ (the rest)<input aria-label="Target 2" inputMode="decimal" value={plan.t2 ?? ''} onChange={(e) => set('t2', n(e.target.value))} className="input num mt-0.5 block h-8 w-full px-2 text-right" /></label>
+        <label className="flex items-end gap-2 pb-2 text-2xs text-muted"><input type="checkbox" checked={plan.breakeven} onChange={(e) => set('breakeven', e.target.checked)} /> Stop to entry after target 1</label>
+      </div>
+      {b.targets.length > 0 && <p className="mt-1 text-2xs text-muted">{b.targets.map((x) => `${x.qty} at ₹${x.price}`).join(', then ')}</p>}
+    </details>
   )
 }

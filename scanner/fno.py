@@ -225,6 +225,11 @@ def refresh(days: int = DEFAULT_DAYS, log=print, today: date | None = None) -> d
         with _write_lock():
             _append(folder() / PART_NAME, pd.concat(parts, ignore_index=True), d)
             _append(folder() / FUT_NAME, fut, d)
+        try:                              # the index options' daily prices, for the options backtester
+            from . import option_history
+            option_history.add_day(body, d)
+        except Exception as e:
+            rep["errors"].append(f"{d}: option history: {type(e).__name__}: {e}")
         rep["added"].append(d.isoformat())
         log(f"  F&O {d}: {len(fut)} underlyings, participant positions stored")
     rep["elapsed_s"] = round(time.monotonic() - t0, 1)

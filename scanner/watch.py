@@ -378,13 +378,16 @@ def feed_symbols() -> list[str]:
 # ---- chart drawings (per symbol) ----------------------------------------------------------------------------------
 
 DRAWINGS_FILE_NAME = "drawings.json"
-DRAW_KINDS = ("hline", "trend", "fib", "rect", "text", "avwap")
+DRAW_KINDS = ("hline", "trend", "fib", "rect", "text", "avwap", "ray", "channel", "pitchfork", "measure", "arrow")
 MAX_DRAWINGS = 50
 
 
 def _point(p) -> dict:
     t = str((p or {}).get("t") or "")[:10]
-    v = float((p or {}).get("v"))
+    try:
+        v = float((p or {}).get("v"))
+    except (TypeError, ValueError):
+        raise ValueError("A drawing point needs a date and a positive price.") from None
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", t) or not v == v or v <= 0:
         raise ValueError("A drawing point needs a date and a positive price.")
     return {"t": t, "v": round(v, 2)}
@@ -410,10 +413,14 @@ def save_drawings(symbol: str, items: list[dict]) -> list[dict]:
             if not v == v or v <= 0:
                 raise ValueError("A level needs a positive price.")
             x["price"] = round(v, 2)
-        elif kind in ("text", "avwap"):              # one point: a note on the chart / the anchor of a VWAP
+        elif kind in ("text", "avwap", "arrow"):     # one point: a note, the anchor of a VWAP, an arrow
             x["a"] = _point(d.get("a"))
             if kind == "text" and not x["note"].strip():
                 raise ValueError("A text note needs some text.")
+            if kind == "arrow" and x["note"] not in ("up", "down"):
+                raise ValueError("An arrow points up or down.")
+        elif kind in ("channel", "pitchfork"):        # three points: a line and its parallel / a pivot and two swings
+            x["a"], x["b"], x["c"] = _point(d.get("a")), _point(d.get("b")), _point(d.get("c"))
         else:
             x["a"], x["b"] = _point(d.get("a")), _point(d.get("b"))
         out.append(x)

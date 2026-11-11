@@ -144,3 +144,22 @@ def test_server_watcher_sees_code_changes(tmp_path, monkeypatch):
 def test_real_watch_dirs_are_the_apps_code():
     from web import serve
     assert [d.relative_to(serve.ROOT).as_posix() for d in serve.WATCH_DIRS] == ["web/api", "scanner"]
+
+
+
+def test_a_slow_task_scheduler_never_reads_as_not_set_up(monkeypatch):
+    """Under heavy load schtasks can time out: the job keeps its last known state and is not counted as missing."""
+    import subprocess
+    from web.api.services import automation_svc as a
+    monkeypatch.setattr(a.os, "name", "nt")
+    real_query = a._query
+    monkeypatch.setattr(a, "_query", lambda name: {"registered": True, "state": "Ready", "next_run": None,
+                                                   "last_run": None, "last_result": "ok", "ok": True})
+    assert a.status(refresh=True)["missing"] == 0
+
+    def slow(*args, **kw):
+        raise subprocess.TimeoutExpired("schtasks", 20)
+    monkeypatch.setattr(a, "_query", real_query)
+    monkeypatch.setattr(a.subprocess, "run", slow)
+    again = a.status(refresh=True)
+    assert again["missing"] == 0 and all(j["registered"] for j in again["jobs"])

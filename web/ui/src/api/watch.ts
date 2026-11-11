@@ -78,7 +78,9 @@ export const useActions = (symbols: string[]) => {
 }
 
 export type IntradayTf = '1m' | '5m' | '15m' | '30m' | '1h'
+export interface DailyLevel { price: number; label: string; tone: 'profit' | 'loss' | 'muted' | 'info' }
 export interface IntradayChartData {
+  daily_levels?: DailyLevel[]
   symbol: string; tf: IntradayTf; days: number; sessions: string[]
   bars: { t: number[]; o: number[]; h: number[]; l: number[]; c: number[]; v: number[] }
   vwap: (number | null)[]; forming: boolean; sources: string[]; note: string

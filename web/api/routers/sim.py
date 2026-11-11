@@ -13,6 +13,16 @@ from ..services import depth_svc, sim_svc
 router = APIRouter(prefix="/api", tags=["sim"])
 
 
+class Trail(Model):
+    type: Literal["pct", "points"] = "pct"
+    value: float = Field(..., gt=0, le=100000)
+
+
+class ScaleTarget(Model):
+    price: float = Field(..., gt=0)
+    qty: int = Field(..., ge=1, le=1_000_000)
+
+
 class SimOrder(Model):
     symbol: str = Field(..., max_length=25)
     side: Literal["BUY", "SELL"]
@@ -22,11 +32,17 @@ class SimOrder(Model):
     limit_price: float | None = None
     stop: float | None = None
     target: float | None = None
+    trail: Trail | None = None                       # trailing stop: % or points behind the best price
+    targets: list[ScaleTarget] = Field([], max_length=4)    # scale out: part of the position at each price
+    breakeven: bool = False                          # stop to the entry price after the first target
 
 
 class Levels(Model):
     stop: float | None = None
     target: float | None = None
+    trail: Trail | None = None
+    targets: list[ScaleTarget] | None = Field(None, max_length=4)
+    breakeven: bool | None = None
 
 
 class Reset(Model):
@@ -57,7 +73,9 @@ def close(symbol: str = Path(..., max_length=25)):
 
 @router.post("/sim/levels/{symbol}", response_model=None, response_class=SafeJSONResponse)
 def levels(body: Levels, symbol: str = Path(..., max_length=25)):
-    return sim_svc.set_levels(symbol, body.stop, body.target)
+    return sim_svc.set_levels(symbol, body.stop, body.target, body.trail.model_dump() if body.trail else None,
+                              [t.model_dump() for t in body.targets] if body.targets is not None else None,
+                              body.breakeven)
 
 
 @router.post("/sim/reset", response_model=None, response_class=SafeJSONResponse)

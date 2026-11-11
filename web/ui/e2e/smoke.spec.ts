@@ -6,7 +6,8 @@ const PAGES: [string, RegExp][] = [
   ['/chart/RELIANCE', /RELIANCE/], ['/charts', /Multi-chart/], ['/portfolio', /Portfolio/], ['/orders', /Orders/],
   ['/sim', /Practice/], ['/replay', /Replay/], ['/coach', /Coach/], ['/paper', /Paper/], ['/benchmarks', /Benchmarks/],
   ['/strategies', /Strategies/], ['/signals', /Signals/], ['/calendar', /Market calendar/], ['/tax', /Tax harvesting/],
-  ['/risk', /Portfolio risk/], ['/option-builder', /Option strategy builder/],
+  ['/risk', /Portfolio risk/], ['/option-builder', /Option strategy builder/], ['/setups', /Live setups/], ['/journal', /Trade journal/],
+  ['/options-backtest', /Options backtester/],
 ]
 
 async function open(page: Page, path: string) {

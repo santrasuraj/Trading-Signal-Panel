@@ -5667,6 +5667,766 @@
      }
     }
    }
+  },
+  "/api/setups": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Live Setups",
+    "description": "Today's intraday events (gaps, opening-range breaks, fresh highs / lows, VWAP crosses, volume spikes, 52-week\nbreaks) from the live bars, newest first. `kinds`: comma-separated; `scope=mine`: watchlists and holdings.",
+    "operationId": "live_setups_api_setups_get",
+    "parameters": [
+     {
+      "name": "kinds",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 300
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Kinds"
+      }
+     },
+     {
+      "name": "scope",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "mine"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Scope"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 500,
+       "minimum": 1,
+       "default": 200,
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/trail/{symbol}": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Trail",
+    "description": "A trailing-stop suggestion for a real holding: `pct` under the highest close since it was bought.",
+    "operationId": "trail_api_trail__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 25,
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "pct",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "number",
+       "maximum": 50,
+       "exclusiveMinimum": 0,
+       "default": 8.0,
+       "title": "Pct"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/journal": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Journal",
+    "description": "Every trade (real fills, practice account, replays) with your notes, and the statistics by setup, mistake,\nhour, weekday, holding time and side, plus how far trades went against / for you while open.",
+    "operationId": "journal_api_journal_get",
+    "parameters": [
+     {
+      "name": "source",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "all",
+        "real",
+        "practice",
+        "replay"
+       ],
+       "type": "string",
+       "default": "all",
+       "title": "Source"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/journal/{trade_id}": {
+   "put": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Journal Note",
+    "description": "Your setup tag, tags, mistakes, notes, 0-5 rating and a chart screenshot for one trade.",
+    "operationId": "journal_note_api_journal__trade_id__put",
+    "parameters": [
+     {
+      "name": "trade_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{12}$",
+       "title": "Trade Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/JournalNote"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/journal/{trade_id}/image": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Journal Image",
+    "operationId": "journal_image_api_journal__trade_id__image_get",
+    "parameters": [
+     {
+      "name": "trade_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{12}$",
+       "title": "Trade Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/announcements": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Announcements",
+    "description": "NSE company announcements of the last `days` days: one stock (`symbol`) or your holdings and watchlists.",
+    "operationId": "announcements_api_announcements_get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 25
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "days",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 30,
+       "minimum": 1,
+       "default": 3,
+       "title": "Days"
+      }
+     },
+     {
+      "name": "routine",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "title": "Routine"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 300,
+       "minimum": 1,
+       "default": 100,
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options-backtest/status": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Optbt Status",
+    "description": "Stored option history (days, range) and the background fetch's progress.",
+    "operationId": "optbt_status_api_options_backtest_status_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options-backtest/history": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Optbt History",
+    "description": "Fetch NSE's daily index-option prices for the last `days` trading days not stored yet (background).",
+    "operationId": "optbt_history_api_options_backtest_history_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/HistoryBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options-backtest/run": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Optbt Run",
+    "description": "Backtest an options strategy, one position per expiry cycle, on the stored daily option prices.",
+    "operationId": "optbt_run_api_options_backtest_run_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/OptBtSpec"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/fundamentals-status": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Fundamentals Status",
+    "description": "How many companies' numbers are stored, and the background fetch's progress.",
+    "operationId": "fundamentals_status_api_fundamentals_status_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/fundamentals/refresh": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Fundamentals Refresh",
+    "description": "Fetch every universe company's last quarters from NSE in the background (skips ones checked recently).",
+    "operationId": "fundamentals_refresh_api_fundamentals_refresh_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/fundamentals/{symbol}": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Fundamentals",
+    "description": "A company's quarterly revenue, profit, EPS, growth, margin and P/E from NSE's filings.",
+    "operationId": "fundamentals_api_fundamentals__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 25,
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/chart-layouts": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Chart Layouts",
+    "description": "Your saved chart layouts (indicators, chart type, timeframe, options), applied to any stock.",
+    "operationId": "chart_layouts_api_chart_layouts_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Put Chart Layouts",
+    "operationId": "put_chart_layouts_api_chart_layouts_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChartLayouts"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/formulas": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Formulas",
+    "description": "Your saved formulas (custom indicators) and the functions a formula may use.",
+    "operationId": "formulas_api_formulas_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Put Formulas",
+    "description": "Save your formulas (each becomes a scan field in 'Your formulas').",
+    "operationId": "put_formulas_api_formulas_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FormulasBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/formulas/check": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Check Formula",
+    "description": "Check a formula and show its last values on one stock.",
+    "operationId": "check_formula_api_formulas_check_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FormulaCheck"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/formula-series/{symbol}": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Formula Series",
+    "description": "A formula's values on one stock's daily bars over the chart's range (computed on the full history).",
+    "operationId": "formula_series_api_formula_series__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 25,
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "expr",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 300,
+       "title": "Expr"
+      }
+     },
+     {
+      "name": "range",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "3m",
+        "6m",
+        "1y",
+        "2y",
+        "5y",
+        "max"
+       ],
+       "type": "string",
+       "default": "1y",
+       "title": "Range"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -8905,6 +9665,82 @@
     ],
     "title": "Changes"
    },
+   "ChartLayout": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "ind": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "maxItems": 40,
+      "title": "Ind",
+      "default": []
+     },
+     "log": {
+      "type": "boolean",
+      "title": "Log",
+      "default": false
+     },
+     "lines": {
+      "type": "boolean",
+      "title": "Lines",
+      "default": true
+     },
+     "ctype": {
+      "type": "string",
+      "maxLength": 20,
+      "title": "Ctype",
+      "default": "candles"
+     },
+     "tf": {
+      "type": "string",
+      "maxLength": 4,
+      "title": "Tf",
+      "default": "1d"
+     },
+     "range": {
+      "type": "string",
+      "maxLength": 4,
+      "title": "Range",
+      "default": "1y"
+     },
+     "levels": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "maxItems": 20,
+      "title": "Levels",
+      "default": []
+     }
+    },
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "ChartLayout"
+   },
+   "ChartLayouts": {
+    "properties": {
+     "layouts": {
+      "items": {
+       "$ref": "#/components/schemas/ChartLayout"
+      },
+      "type": "array",
+      "maxItems": 30,
+      "title": "Layouts",
+      "default": []
+     }
+    },
+    "type": "object",
+    "title": "ChartLayouts"
+   },
    "ChartMarker": {
     "properties": {
      "t": {
@@ -10904,6 +11740,84 @@
     ],
     "title": "FnoStatus"
    },
+   "FormulaCheck": {
+    "properties": {
+     "expr": {
+      "type": "string",
+      "maxLength": 300,
+      "title": "Expr"
+     },
+     "symbol": {
+      "type": "string",
+      "maxLength": 25,
+      "title": "Symbol",
+      "default": "NIFTY50"
+     }
+    },
+    "type": "object",
+    "required": [
+     "expr"
+    ],
+    "title": "FormulaCheck"
+   },
+   "FormulaItem": {
+    "properties": {
+     "id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 8
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Id"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "expr": {
+      "type": "string",
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Expr"
+     },
+     "pane": {
+      "type": "string",
+      "enum": [
+       "price",
+       "own"
+      ],
+      "title": "Pane",
+      "default": "own"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name",
+     "expr"
+    ],
+    "title": "FormulaItem"
+   },
+   "FormulasBody": {
+    "properties": {
+     "formulas": {
+      "items": {
+       "$ref": "#/components/schemas/FormulaItem"
+      },
+      "type": "array",
+      "maxItems": 30,
+      "title": "Formulas",
+      "default": []
+     }
+    },
+    "type": "object",
+    "title": "FormulasBody"
+   },
    "FullMetrics": {
     "properties": {
      "trades": {
@@ -11736,6 +12650,19 @@
      "count"
     ],
     "title": "HistBin"
+   },
+   "HistoryBody": {
+    "properties": {
+     "days": {
+      "type": "integer",
+      "maximum": 750.0,
+      "minimum": 20.0,
+      "title": "Days",
+      "default": 500
+     }
+    },
+    "type": "object",
+    "title": "HistoryBody"
    },
    "HoldingDefaults": {
     "properties": {
@@ -13558,6 +14485,91 @@
     ],
     "title": "JournalInfo"
    },
+   "JournalNote": {
+    "properties": {
+     "setup": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 60
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Setup"
+     },
+     "tags": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 12
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tags"
+     },
+     "mistakes": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 12
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mistakes"
+     },
+     "notes": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 4000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notes"
+     },
+     "rating": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 5.0,
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rating"
+     },
+     "image": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 600000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Image"
+     }
+    },
+    "type": "object",
+    "title": "JournalNote"
+   },
    "Leader": {
     "properties": {
      "symbol": {
@@ -13606,6 +14618,42 @@
        }
       ],
       "title": "Target"
+     },
+     "trail": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/Trail"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "targets": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/ScaleTarget"
+        },
+        "type": "array",
+        "maxItems": 4
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Targets"
+     },
+     "breakeven": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Breakeven"
      }
     },
     "type": "object",
@@ -17041,6 +18089,108 @@
      "note"
     ],
     "title": "OptBigTradesResponse"
+   },
+   "OptBtSpec": {
+    "properties": {
+     "underlying": {
+      "type": "string",
+      "enum": [
+       "NIFTY",
+       "BANKNIFTY"
+      ],
+      "title": "Underlying",
+      "default": "NIFTY"
+     },
+     "strategy": {
+      "type": "string",
+      "enum": [
+       "short_straddle",
+       "short_strangle",
+       "iron_condor",
+       "iron_fly",
+       "bull_put",
+       "bear_call",
+       "long_straddle",
+       "long_strangle",
+       "bull_call",
+       "bear_put"
+      ],
+      "title": "Strategy",
+      "default": "iron_condor"
+     },
+     "cycle": {
+      "type": "string",
+      "enum": [
+       "monthly",
+       "weekly"
+      ],
+      "title": "Cycle",
+      "default": "monthly"
+     },
+     "entry_dte": {
+      "type": "integer",
+      "maximum": 60.0,
+      "minimum": 1.0,
+      "title": "Entry Dte",
+      "default": 30
+     },
+     "short_pct": {
+      "type": "number",
+      "maximum": 15.0,
+      "minimum": 0.0,
+      "title": "Short Pct",
+      "default": 2.0
+     },
+     "wing_pct": {
+      "type": "number",
+      "maximum": 20.0,
+      "minimum": 0.0,
+      "title": "Wing Pct",
+      "default": 4.0
+     },
+     "stop_pct": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 1000.0,
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop Pct"
+     },
+     "target_pct": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 100.0,
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target Pct"
+     },
+     "lots": {
+      "type": "integer",
+      "maximum": 100.0,
+      "minimum": 1.0,
+      "title": "Lots",
+      "default": 1
+     },
+     "slippage_pct": {
+      "type": "number",
+      "maximum": 10.0,
+      "minimum": 0.0,
+      "title": "Slippage Pct",
+      "default": 1.0
+     }
+    },
+    "type": "object",
+    "title": "OptBtSpec"
    },
    "OptChainRef": {
     "properties": {
@@ -21614,6 +22764,27 @@
     ],
     "title": "SaveBody"
    },
+   "ScaleTarget": {
+    "properties": {
+     "price": {
+      "type": "number",
+      "exclusiveMinimum": 0.0,
+      "title": "Price"
+     },
+     "qty": {
+      "type": "integer",
+      "maximum": 1000000.0,
+      "minimum": 1.0,
+      "title": "Qty"
+     }
+    },
+    "type": "object",
+    "required": [
+     "price",
+     "qty"
+    ],
+    "title": "ScaleTarget"
+   },
    "ScanAccepted": {
     "properties": {
      "accepted": {
@@ -22654,6 +23825,30 @@
        }
       ],
       "title": "Target"
+     },
+     "trail": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/Trail"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "targets": {
+      "items": {
+       "$ref": "#/components/schemas/ScaleTarget"
+      },
+      "type": "array",
+      "maxItems": 4,
+      "title": "Targets",
+      "default": []
+     },
+     "breakeven": {
+      "type": "boolean",
+      "title": "Breakeven",
+      "default": false
      }
     },
     "type": "object",
@@ -27777,6 +28972,30 @@
      "reasons"
     ],
     "title": "TradesPage"
+   },
+   "Trail": {
+    "properties": {
+     "type": {
+      "type": "string",
+      "enum": [
+       "pct",
+       "points"
+      ],
+      "title": "Type",
+      "default": "pct"
+     },
+     "value": {
+      "type": "number",
+      "maximum": 100000.0,
+      "exclusiveMinimum": 0.0,
+      "title": "Value"
+     }
+    },
+    "type": "object",
+    "required": [
+     "value"
+    ],
+    "title": "Trail"
    },
    "UniverseHealth": {
     "properties": {

@@ -62,3 +62,34 @@ def test_depth_reply_is_read_into_bids_and_asks():
     d = depth_svc.parse("TCS", r)
     assert d["bids"][0] == {"price": 999.5, "qty": 120, "orders": 3} and d["asks"][0]["price"] == 1000
     assert d["total_buy"] == 5000 and d["ltp"] == 999.8
+
+
+def test_trailing_stop_only_tightens_and_closes(env):
+    prices, _ = env
+    sim_svc.place({"symbol": "TCS", "side": "BUY", "qty": 10, "type": "MARKET", "product": "CNC",
+                   "trail": {"type": "pct", "value": 5}})
+    assert sim_svc.view()["positions"][0]["stop"] == 950                    # 5% under the entry
+    prices["TCS"] = 1100.0
+    assert sim_svc.view()["positions"][0]["stop"] == 1045                   # follows the best price
+    prices["TCS"] = 1060.0
+    assert sim_svc.view()["positions"][0]["stop"] == 1045                   # never loosens
+    prices["TCS"] = 1040.0
+    v = sim_svc.view()
+    assert v["positions"] == [] and v["trades"][0]["reason"] == "stop" and v["trades"][0]["pnl"] == 400
+
+
+def test_scale_out_targets_and_breakeven(env):
+    prices, _ = env
+    sim_svc.place({"symbol": "TCS", "side": "BUY", "qty": 10, "type": "MARKET", "product": "CNC", "stop": 950,
+                   "targets": [{"price": 1050, "qty": 5}, {"price": 1100, "qty": 5}], "breakeven": True})
+    prices["TCS"] = 1055.0
+    v = sim_svc.view()
+    p = v["positions"][0]
+    assert p["qty"] == 5 and p["stop"] == 1000 and len(p["targets"]) == 1      # half sold, stop at the entry
+    assert v["trades"][0]["reason"] == "scale_out" and v["trades"][0]["exit"] == 1050
+    prices["TCS"] = 1101.0
+    v = sim_svc.view()
+    assert v["positions"] == [] and sum(t["pnl"] for t in v["trades"]) == 750
+    with pytest.raises(ApiException):
+        sim_svc.place({"symbol": "TCS", "side": "BUY", "qty": 2, "type": "MARKET", "product": "CNC",
+                       "targets": [{"price": 1200, "qty": 3}]})

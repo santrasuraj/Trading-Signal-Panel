@@ -116,6 +116,55 @@ FIELDS: dict[str, Field] = {
                        if "deliv_pct" in c.extra else pd.DataFrame(np.nan, index=c.p.dates, columns=c.p.close.columns)),
 }
 
+def _fund(c: "Ctx", key: str) -> pd.DataFrame:
+    """Company numbers, point in time (scanner/fundamentals.py): each quarter's value from the day it was filed."""
+    if "_fund" not in c.extra:
+        from . import fundamentals
+        c.extra["_fund"] = fundamentals.frames(list(c.p.close.columns), c.p.dates)
+    f = c.extra["_fund"]
+    if key == "pe":
+        eps = f["eps_ttm"]
+        return c.p.close / eps.where(eps > 0)
+    return f[key]
+
+
+def _weekly(c: "Ctx", key: str) -> pd.DataFrame:
+    """Weekly-chart fields on daily rows: each completed week's value from the week's last day on (no look-ahead:
+    the current, unfinished week never counts)."""
+    if "_weekly" not in c.extra:
+        close = c.p.close
+        wk = close.index.to_period("W-FRI")
+        last_day = pd.Series(close.index, index=close.index).groupby(wk).transform("max")
+        wclose = close.groupby(wk).last()
+        d = wclose.diff()
+        up, dn = d.clip(lower=0), -d.clip(upper=0)
+        rs = up.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean() / dn.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean().replace(0, np.nan)
+        wf = {"w_sma10": wclose.rolling(10, min_periods=10).mean(), "w_sma30": wclose.rolling(30, min_periods=30).mean(),
+              "w_rsi14": 100 - 100 / (1 + rs), "w_ret_4": (wclose / wclose.shift(4) - 1) * 100}
+        complete = (close.index == last_day.to_numpy())             # a week's value appears on its last trading day
+        out = {}
+        for k, v in wf.items():
+            daily = v.reindex(wk).set_axis(close.index)
+            out[k] = daily.where(pd.Series(complete, index=close.index), axis=0).ffill()
+        c.extra["_weekly"] = out
+    return c.extra["_weekly"][key]
+
+
+FIELDS.update({
+    "w_sma10": Field("Weekly SMA 10 (completed weeks)", "Weekly", "₹", lambda c: _weekly(c, "w_sma10")),
+    "w_sma30": Field("Weekly SMA 30 (completed weeks)", "Weekly", "₹", lambda c: _weekly(c, "w_sma30")),
+    "w_rsi14": Field("Weekly RSI 14 (completed weeks)", "Weekly", "", lambda c: _weekly(c, "w_rsi14")),
+    "w_ret_4": Field("Return over the last 4 weeks %", "Weekly", "%", lambda c: _weekly(c, "w_ret_4")),
+})
+
+FIELDS.update({
+    "pe": Field("P/E (last 4 quarters' EPS)", "Company", "x", lambda c: _fund(c, "pe")),
+    "eps_ttm": Field("EPS, last 4 quarters", "Company", "₹", lambda c: _fund(c, "eps_ttm")),
+    "sales_growth": Field("Revenue growth vs a year ago %", "Company", "%", lambda c: _fund(c, "sales_growth")),
+    "profit_growth": Field("Profit growth vs a year ago %", "Company", "%", lambda c: _fund(c, "profit_growth")),
+    "net_margin": Field("Net profit margin %", "Company", "%", lambda c: _fund(c, "net_margin")),
+})
+
 PRESETS = [
     {"name": "20-day breakout on 2x volume (uptrend)", "match": "all", "direction": "long", "rules": [
         {"left": "close", "op": ">", "right": {"field": "high_20_prev"}},
@@ -134,6 +183,15 @@ PRESETS = [
         {"left": "close", "op": ">", "right": {"field": "sma50"}}]},
     {"name": "MACD crosses above signal", "match": "all", "direction": "long", "rules": [
         {"left": "macd", "op": "crosses_above", "right": {"field": "macd_signal"}}]},
+    {"name": "Weekly uptrend, daily pullback (two timeframes)", "match": "all", "direction": "long", "rules": [
+        {"left": "close", "op": ">", "right": {"field": "w_sma30"}},
+        {"left": "w_rsi14", "op": ">", "right": {"value": 50}},
+        {"left": "rsi14", "op": "<", "right": {"value": 40}}]},
+    {"name": "Growing profits, reasonable P/E, uptrend", "match": "all", "direction": "long", "rules": [
+        {"left": "profit_growth", "op": ">=", "right": {"value": 20}},
+        {"left": "sales_growth", "op": ">=", "right": {"value": 10}},
+        {"left": "pe", "op": "<=", "right": {"value": 40}},
+        {"left": "close", "op": ">", "right": {"field": "sma200"}}]},
 ]
 
 
@@ -424,3 +482,10 @@ def catalog() -> dict:
 
 def dumps(x) -> str:
     return json.dumps(x, default=str)
+
+
+try:                                   # your saved formulas as scan fields (scanner/formula.py)
+    from . import formula as _formula
+    _formula.register_fields()
+except Exception:                      # a broken formulas.json must never stop the scans
+    pass

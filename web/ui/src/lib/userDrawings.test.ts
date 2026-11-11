@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fibPrices, levelOverlays, lineDrawings, timeToISO, lineLevel } from './userDrawings'
+import { fibPrices, levelOverlays, lineDrawings, timeToISO, lineLevel, measureText } from './userDrawings'
 
 describe('user drawings', () => {
   it('reads every chart time format as a date', () => {
@@ -48,5 +48,30 @@ describe('zones, notes, anchored VWAP and trendline levels', () => {
   })
   it('extends a trendline by calendar days', () => {
     expect(lineLevel({ t: '2026-10-01', v: 100 }, { t: '2026-11-01', v: 131 }, '2026-11-11')).toBeCloseTo(141)
+  })
+})
+
+describe('channel, pitchfork, ray, measure, arrow', () => {
+  const a = { t: '2026-01-01', v: 100 }, b = { t: '2026-01-11', v: 110 }, c = { t: '2026-01-06', v: 120 }
+  it('a channel runs parallel through the third point and extends to the last bar', () => {
+    const [d] = lineDrawings([{ id: 'c', kind: 'channel', a, b, c }], '2026-01-21')
+    const [base, par, mid] = d.lines
+    expect(base.points[1]).toEqual({ t: '2026-01-21', v: 120 })
+    expect(par.points[0].v - base.points[0].v).toBeCloseTo(15)          // C sits 15 above the line on its day
+    expect(mid.style).toBe('dotted')
+  })
+  it('a pitchfork has a median line and two tines', () => {
+    const [d] = lineDrawings([{ id: 'p', kind: 'pitchfork', a: { t: '2026-01-01', v: 100 }, b: { t: '2026-01-11', v: 120 }, c: { t: '2026-01-21', v: 110 }}], '2026-02-01')
+    expect(d.lines.map((l) => l.id)).toEqual(['u:p:median', 'u:p:b', 'u:p:c'])
+    expect(d.lines.every((l) => l.points[l.points.length - 1].t === '2026-02-01')).toBe(true)
+  })
+  it('a ray extends its line, a measure labels the move, an arrow marks a bar', () => {
+    const [r] = lineDrawings([{ id: 'r', kind: 'ray', a, b }], '2026-01-21')
+    expect(r.lines[0].points[2]).toEqual({ t: '2026-01-21', v: 120 })
+    const [m] = lineDrawings([{ id: 'm', kind: 'measure', a, b }], null)
+    expect(m.lines[0].labels[0].text).toBe('+10.0% · ₹10.00 · 10 days')
+    expect(measureText(b, a)).toBe('-9.1% · ₹10.00 · 10 days')
+    const [ar] = lineDrawings([{ id: 'x', kind: 'arrow', a, note: 'down' }], null)
+    expect(ar.lines[0].labels[0].text).toBe('▼')
   })
 })
