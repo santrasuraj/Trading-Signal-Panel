@@ -66,6 +66,7 @@ tax:
   stcg_pct: 20.8             # held <= 12 months
   ltcg_pct: 13.0             # held > 12 months ...
   ltcg_exempt: 125000        # ... above Rs 1.25 lakh per financial year
+  dated: 1                   # 1 = gains before 23 Jul 2024 at the old 15% / 10% (Rs 1 lakh exemption); 0 = today's rates for every year
 
 # Strategies. Each is re-tested on 8 years of data after every scan.
 # Set enabled: false to hide one, or change its numbers (the backtest updates automatically).

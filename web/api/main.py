@@ -26,7 +26,7 @@ from fastapi.routing import APIRoute
 from . import errors
 from .errors import ApiException, SafeJSONResponse
 from .routers import (action, ai, fno, levels, lookup, market, ops, options, outlook, overview, portfolio, smart_money,
-                      scans, strategies, stream, system, watch)
+                      research, scans, strategies, stream, system, watch)
 from .security import SecurityMiddleware
 from .services import fyers_svc
 
@@ -67,6 +67,8 @@ def warm_up(app: FastAPI | None = None) -> None:
              data.index_history, market_derived.factors, lambda: market_derived.breadth("1y"),
              market_derived.industries, data._past_results_index, lambda: smart_money_svc._derived(30),
              lambda: smart_money_svc._derived(90)]
+    from .services import late_entry_svc
+    steps.append(lambda: late_entry_svc.report(wait=True))     # late-entry BUYs on Today (~10 s, the 8-year panel)
     if app is not None:
         steps.append(app.openapi)
     for step in steps:
@@ -90,7 +92,7 @@ def create_app(warm: bool = True) -> FastAPI:
     app.add_middleware(SecurityMiddleware)
     errors.install(app)
     for r in (system, overview, strategies, lookup, portfolio, market, ops, smart_money, options, fno, levels, outlook, ai,
-              action, watch, scans, stream):
+              action, watch, scans, research, stream):
         app.include_router(r.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 
+import pandas as pd
+
 
 @dataclass(frozen=True)
 class CostModel:
@@ -61,6 +63,22 @@ class TaxModel:
     ltcg_pct: float = 13.0
     ltcg_exempt: float = 125000.0
     interest_pct: float = 31.2        # 30% slab + 4% cess; set your own slab
+    # Dated rates (Finance (No. 2) Act 2024): the rates above apply to gains realised from 23 Jul 2024; before that
+    # STCG was 15% and LTCG 10% (+ 4% cess) with a Rs 1 lakh LTCG exemption (Rs 1.25 lakh from FY 2024-25 on).
+    dated: float = 1.0                # 0 = use today's rates for every year (the old, pessimistic way)
+
+    CHANGE = pd.Timestamp("2024-07-23")
+    OLD_STCG, OLD_LTCG, OLD_EXEMPT = 15.6, 10.4, 100000.0
+
+    def rates_on(self, exit_date) -> tuple[float, float]:
+        """(STCG %, LTCG %) for a gain realised on `exit_date`."""
+        if self.dated and pd.Timestamp(exit_date) < self.CHANGE:
+            return self.OLD_STCG, self.OLD_LTCG
+        return self.stcg_pct, self.ltcg_pct
+
+    def exempt_for_fy(self, fy: int) -> float:
+        """LTCG exemption of the financial year starting in April of `fy`."""
+        return self.OLD_EXEMPT if self.dated and fy < 2024 else self.ltcg_exempt
 
     @classmethod
     def from_config(cls, cfg: dict | None) -> "TaxModel":

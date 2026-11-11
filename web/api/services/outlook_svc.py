@@ -401,6 +401,8 @@ SAST_DAYS = 365
 def _verdict(full: dict, daily: pd.DataFrame, stu: dict | None, codes: dict, lt: dict, sym: str, last_day: str,
              results_on: str | None, scen: dict) -> dict:
     m = ol.match(stu, codes) if stu else None
+    if data.symbol_kind(sym) == "index":
+        m = _index_match(sym, daily) or m     # an index: its own history, not a study measured on stocks
     sup = next((x["price"] for x in scen["below"] if x["kind"] in ("support", "sma", "low_52w")), None)
     res = next((x["price"] for x in scen["above"] if x["kind"] in ("resistance", "sma", "high_52w")), None)
     v = ov.assess(full, daily["close"], m, st.all_strategies(lt) if lt else [], sym, last_day=last_day,
@@ -408,6 +410,29 @@ def _verdict(full: dict, daily: pd.DataFrame, stu: dict | None, codes: dict, lt:
     closes = data.store_close()
     rows = ov.score(_read(P.results / ov.JOURNAL_FILE.name, []), {c: closes[c] for c in closes.columns})
     return {**v, "track": ov.track(rows)}
+
+
+INDEX_HISTORY_NAME = {"NIFTY50": "Nifty 50", "NIFTY500": "Nifty 500", "BANKNIFTY": "Nifty Bank"}
+
+
+def _index_match(sym: str, daily: pd.DataFrame) -> dict | None:
+    """scanner/index_study.py on the index's NSE history (falls back to the store's daily closes)."""
+    from scanner import index_study
+    close = None
+    try:
+        ih = data.index_history()
+        name = INDEX_HISTORY_NAME.get(sym)
+        if ih is not None and name in ih.columns:
+            close = ih[name].astype(float)
+    except Exception:
+        close = None
+    if close is None or close.dropna().empty:
+        close = daily["close"]
+    else:
+        last = daily["close"].dropna()
+        if len(last) and last.index[-1] > close.dropna().index[-1]:        # today's (live) close on top
+            close = pd.concat([close, last[last.index > close.dropna().index[-1]]])
+    return index_study.match_for(close, INDEX_HISTORY_NAME.get(sym, sym))
 
 
 def _read(path, default):

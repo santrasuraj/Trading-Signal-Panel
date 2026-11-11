@@ -528,6 +528,48 @@
     }
    }
   },
+  "/api/strategies/{key}/late-entry": {
+   "get": {
+    "tags": [
+     "strategies"
+    ],
+    "summary": "Late Entry Report",
+    "description": "Does the edge survive joining the strategy's trades 5, 10 or 21 trading days late? (a few seconds the first time)",
+    "operationId": "late_entry_report_api_strategies__key__late_entry_get",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9_]{1,40}$",
+       "title": "Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/screener": {
    "get": {
     "tags": [
@@ -4012,6 +4054,86 @@
      }
     }
    }
+  },
+  "/api/scans/from-text": {
+   "post": {
+    "tags": [
+     "scans"
+    ],
+    "summary": "From Text",
+    "description": "Claude translates a plain-English scan idea into the builder's rules (needs ANTHROPIC_API_KEY in .env).",
+    "operationId": "from_text_api_scans_from_text_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TextBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/research/walk-forward": {
+   "get": {
+    "tags": [
+     "research"
+    ],
+    "summary": "Walk Forward",
+    "description": "Does following the strategies the app calls working pay? (the rule replayed month by month, out of sample)",
+    "operationId": "walk_forward_api_research_walk_forward_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/research/benchmarks": {
+   "get": {
+    "tags": [
+     "research"
+    ],
+    "summary": "Bench",
+    "description": "This app's speed and depth, measured now on this PC, next to what the competitors publish.",
+    "operationId": "bench_api_research_benchmarks_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -4508,6 +4630,28 @@
        }
       ],
       "title": "Strength Grade"
+     },
+     "late_days": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Late Days"
+     },
+     "late_lag": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Late Lag"
      }
     },
     "type": "object",
@@ -4535,7 +4679,9 @@
      "provisional",
      "below_min_position",
      "strength_score",
-     "strength_grade"
+     "strength_grade",
+     "late_days",
+     "late_lag"
     ],
     "title": "ActionOrder"
    },
@@ -18680,6 +18826,17 @@
        }
       ],
       "title": "Ask"
+     },
+     "tick_at": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tick At"
      }
     },
     "type": "object",
@@ -18696,7 +18853,8 @@
      "low",
      "volume",
      "bid",
-     "ask"
+     "ask",
+     "tick_at"
     ],
     "title": "Quote"
    },
@@ -24297,6 +24455,20 @@
      "configured"
     ],
     "title": "TelegramConfig"
+   },
+   "TextBody": {
+    "properties": {
+     "text": {
+      "type": "string",
+      "maxLength": 1000,
+      "title": "Text"
+     }
+    },
+    "type": "object",
+    "required": [
+     "text"
+    ],
+    "title": "TextBody"
    },
    "Ticker": {
     "properties": {

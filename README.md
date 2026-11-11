@@ -42,6 +42,13 @@ The **Today** page (`g d`) and the top of every **Chart** page give one answer p
 | **HOLD** | You hold it and no exit fired. |
 | **NO EDGE** | Anything else, with how close each working strategy is to acting (its rank and next review, or "holds it in its model since …"). |
 
+**BUY (late entry).** A stock a working strategy already holds (bought on an earlier day) is a BUY only when that
+strategy's **late-entry test** says joining that late still paid: every trade of its 8-year survivorship-free backtest
+re-run with the entry 5, 10 or 21 trading days after the model's own, exit unchanged, against the average top-500
+stock over the same days after ~0.45% costs (`scanner/late_entry.py`, Late entry card on each strategy page). On
+11 Nov 2026: Earnings gap-up (working) still pays up to 10 days late (+2.3% vs the average stock after costs, t 2.1),
+so the 4 stocks it bought 4-9 days earlier showed as BUY; momentum leaders shows no edge once late.
+
 Buys of strategies whose backtest is *mixed* or *too new* are shown as "unproven buy" lines, never as the answer;
 not-working strategies never appear. Results days, the F&O ban list, the regime filter and provisional (intraday)
 scans are risk chips that never change the answer. Candle and chart patterns, option positioning, F&O build-ups and
@@ -99,6 +106,21 @@ here, since the best of many looks good by chance), every rolling 12-month windo
 second. Verdict: *likely real* (deflated Sharpe 95%+ and 75%+ of the histories beat the average stock), *could be luck*
 or *likely luck*. On 11 Nov 2026: momentum leaders "could be luck" (deflated 66%), trend breakout and low volatility
 "likely luck".
+
+### Checks on the app itself (Benchmarks page, `g k`)
+- **Walk-forward of the "working" rule** (`web/api/services/walkforward.py`): each month-end, the rule the Action card
+  uses (beat both the Nifty 50 and the average stock over 12 and 6 months, no loss to date) is applied with only the
+  data up to then, and the strategies it calls working are held for the next month. Sep 2020 - Nov 2026: following it
+  made +26.4%/yr vs +17.4% holding every strategy, +21.5% the average stock and +13.4% the Nifty 50 (t 2.1 vs every
+  strategy).
+- **Speed and depth measured on this PC** next to what Trade Ideas, TrendSpider, NinjaTrader and MetaTrader publish,
+  and the FYERS tick-to-screen latency measured in your browser.
+- **Options direction for an index from the index itself** (`scanner/index_study.py`): NIFTY's options verdict uses
+  NIFTY's own history of today's setup (trend vs the 50 / 200-day average, RSI band), not a study measured on stocks.
+- **Dated capital-gains tax**: gains realised before 23 Jul 2024 are taxed at the old 15% / 10% (+ cess, Rs 1 lakh LTCG
+  exemption), later ones at 20% / 12.5% (`tax: dated: 0` in config.yaml uses today's rates for every year).
+- **Scans in plain English** (Scans page, needs `ANTHROPIC_API_KEY` in `.env`): Claude turns the idea into the builder's
+  rules, says what it could not express, and you check, run and backtest it.
 
 ### Chart tools
 - **Draw** (1D / 1W chart): levels, trendlines and Fibonacci retracements, saved per stock (`data/drawings.json`);
@@ -179,7 +201,7 @@ Same rules, same costs and tax, 2019-08-19 to 2026-10-22:
 | Nifty 500 index (the real one) | – | +13.3% | – | −38% | 0.80 | +12.0% |
 
 *Timing range* = the same rules rebalanced a few days earlier, or started a few weeks later.
-*After tax* = short-term gains taxed at 20.8% every April (buy & hold pays 13% once, at the end).
+*After tax* = short-term gains taxed every April at the rate of the day they were realised (15.6% before 23 Jul 2024, 20.8% after; buy & hold pays LTCG once, at the end).
 *Updated 23 Oct 2026* after fixing price-data errors in both data sets (missing NSE sessions, wrong "data
 corrections", three incomplete NSE files). Momentum point-in-time went 27.1% → 28.3% (inside its timing range),
 trend breakout 44.1% → 39.8% on today's list and 21.0% → 19.6% point-in-time.
@@ -485,6 +507,8 @@ scanner/
   intraday/quote_hub.py  live quotes from the FYERS WebSocket (quotes.json) and the screen's subscriptions
   watch.py       watchlists and one-shot price alerts (checked by the live service and the dashboard)
   scans.py       your own scans: rules over whole-market factors, today's matches, 8-year point-in-time backtest
+  late_entry.py  does a strategy's edge survive joining its trades 5 / 10 / 21 days late (late-entry BUYs)
+  index_study.py an index's own history of today's setup (options direction for NIFTY / BANKNIFTY)
   options.py     NSE option chains: parsing, Black-76 IV / greeks, PCR, max pain, OI levels, unusual activity
   options_research.py  do PCR / max pain / the straddle's expected move hold up on the stored days?
   fno.py         NSE participant-wise OI and F&O bhavcopy: FII/DII/Pro/Client positions, futures build-ups

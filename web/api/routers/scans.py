@@ -10,7 +10,7 @@ from scanner import scans
 
 from ..errors import ApiException, SafeJSONResponse
 from ..models import Model
-from ..services import data
+from ..services import benchmarks, data
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
 SCAN_ID = r"^[0-9a-f]{12}$"
@@ -94,7 +94,20 @@ def backtest(body: ScanBody):
     """The scan's event study on 8 years of the survivorship-free top 500 (a few seconds; the first one loads the data)."""
     scan = _scan(body)
     try:
-        return scans.backtest(scan)
+        out = scans.backtest(scan)
+        benchmarks.record("scan_backtest", out.get("elapsed_s") or 0)
+        return out
     except RuntimeError as e:
         raise ApiException("FEATURE_UNAVAILABLE", str(e), "Double-click 4_build_universe.bat once (about 30 minutes).",
                            {"feature": "pit"})
+
+
+class TextBody(Model):
+    text: str = Field(..., max_length=1000)
+
+
+@router.post("/from-text", response_model=None, response_class=SafeJSONResponse)
+def from_text(body: TextBody):
+    """Claude translates a plain-English scan idea into the builder's rules (needs ANTHROPIC_API_KEY in .env)."""
+    from ..services import scan_text
+    return scan_text.translate(body.text)

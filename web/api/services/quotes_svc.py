@@ -116,7 +116,7 @@ def _from_hub(syms: list[str], info: dict | None) -> dict[str, dict]:
         if q and q.get("price"):
             out[s] = {k: q.get(k) for k in ("symbol", "price", "prev_close", "change_pct", "time", "open", "high",
                                              "low", "volume", "bid", "ask")}
-            out[s].update(source="live", delayed=False)
+            out[s].update(source="live", delayed=False, tick_at=q.get("received"))   # when the tick arrived (epoch s)
     return out
 
 

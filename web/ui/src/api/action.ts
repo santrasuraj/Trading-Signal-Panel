@@ -15,6 +15,7 @@ export interface ActionOrder {
   action: Side; price: number | null; qty: number | null; amount: number | null; stop: number | null
   stop_distance_pct: number | null; risk_amount: number | null; reason: string
   provisional: boolean; below_min_position: boolean; strength_score: number | null; strength_grade: string | null
+  late_days: number | null; late_lag: number | null           // a late-entry BUY (scanner/late_entry.py)
 }
 
 export interface ActionCardData {

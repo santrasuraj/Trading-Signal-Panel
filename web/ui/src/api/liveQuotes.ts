@@ -67,12 +67,23 @@ export class QuoteStream {
     }
   }
 
+  private latency: number[] = []
+
+  /** Seconds from the FYERS tick reaching the live service to this tab, for recent live quotes. */
+  latencySamples(): number[] { return [...this.latency] }
+
   /** The symbols the stream currently carries (tests, diagnostics). */
   streamKey(): string { return this.key }
 
   /** Apply one server event (exported for tests). */
   apply(d: QuotesResponse & { full?: boolean }, now: number = Date.now()): void {
-    for (const q of d.quotes ?? []) this.quotes.set(q.symbol, { ...q, received: now })
+    for (const q of d.quotes ?? []) {
+      this.quotes.set(q.symbol, { ...q, received: now })
+      if (q.source === 'live' && q.tick_at && !d.full) {                 // tick -> screen latency (benchmarks page)
+        this.latency.push(Math.max(0, now / 1000 - q.tick_at))
+        if (this.latency.length > 2000) this.latency.splice(0, this.latency.length - 2000)
+      }
+    }
     this.meta = { as_of: d.as_of, session: d.session, note: d.note, connected: true }
     this.bump()
   }

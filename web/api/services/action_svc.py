@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from scanner import big_money
+from scanner import big_money, late_entry
 
 from . import data, holdings_svc, paper_svc, signal_quality, sizing, strategies as st, track_svc
 from . import results as results_svc
@@ -52,7 +52,7 @@ def _order_view(o: dict, ev: dict) -> dict:
     return {**ev, "action": o["action"], "price": o["price"], "qty": o["qty"], "amount": o["amount"], "stop": o["stop"],
             "stop_distance_pct": o["stop_distance_pct"], "risk_amount": o["risk_amount"], "reason": o["reason"],
             "provisional": o["provisional"], "below_min_position": o["below_min_position"],
-            "strength_score": stg.get("score"), "strength_grade": stg.get("grade")}
+            "strength_score": stg.get("score"), "strength_grade": stg.get("grade"), "late_days": None, "late_lag": None}
 
 
 class Context:
@@ -88,6 +88,8 @@ class Context:
         except Exception:
             self.ban = set()
         self.warn_days = sizing.warn_days()
+        from . import late_entry_svc
+        self.late = late_entry_svc.report(wait=False)      # None until computed (in the background, a few seconds)
 
     def working(self, s: dict) -> bool:
         return s["status"] == "working" and not st.comparison_only(s)
@@ -115,6 +117,44 @@ def _near(ctx: Context, sym: str) -> list[str]:
         if summ.get("blocked_by_regime"):
             out.append(f"{summ['name']}: regime filter on (Nifty below its 200-day average): no new buys.")
     return out[:6]
+
+
+def _late_buy(ctx: Context, sym: str) -> dict | None:
+    """A working strategy holds `sym` in its model (bought on an earlier day) and its late-entry test at that delay
+    shows an edge after costs (scanner/late_entry.py): an order to join it now, else None."""
+    if ctx.late is None:
+        return None
+    best = None
+    for s in ctx.active:
+        if not ctx.working(s):
+            continue
+        p = next((x for x in s.get("positions") or [] if x.get("symbol") == sym), None)
+        if p is None or p.get("days") is None:
+            continue
+        days = int(p["days"])
+        lag = late_entry.lag_for(days)
+        res = ((ctx.late.get("strategies") or {}).get(s["key"]) or {}).get("lags", {}).get(str(lag)) if lag else None
+        if not res or res.get("verdict") != "edge":
+            continue
+        summ = ctx.summ[s["key"]]
+        price = num(p.get("last_price"))
+        per = num(summ.get("per_position")) or 0.0
+        qty = int(per // price) if price and per else None
+        stop = num(p.get("stop"))
+        o = {**_evidence(s, summ, ctx.track), "action": "BUY", "price": price, "qty": qty,
+             "amount": round(qty * price, 2) if qty and price else None, "stop": stop,
+             "stop_distance_pct": round((stop / price - 1) * 100, 2) if stop and price else None,
+             "risk_amount": round(qty * (price - stop), 2) if qty and price and stop else None,
+             "reason": (f"Late entry: the model bought on {fmt_date(p.get('entry_date'))} ({days} trading days ago). "
+                        f"Joining up to {lag} days late: {res['after_cost_pct']:+.2f}% vs the average stock after costs, "
+                        f"t {res['t']:.1f}, {res['n']} late trades."),
+             "provisional": bool(ctx.lt.get("live")), "below_min_position": bool(qty and price and qty * price < st.min_position(ctx.lt)),
+             "strength_score": None, "strength_grade": None, "late_days": days, "late_lag": lag}
+        if best is None or (res.get("t") or 0) > (best.get("_t") or 0):
+            best = {**o, "_t": res.get("t") or 0}
+    if best:
+        best.pop("_t", None)
+    return best
 
 
 def _risks(ctx: Context, sym: str, provisional: bool) -> list[dict]:
@@ -177,6 +217,12 @@ def card(ctx: Context, sym: str) -> dict:
         headline = (f"BUY at the next open: {primary['strategy_name']} (backtest working"
                     + (f", {primary['cagr_pct']:+.1f}%/yr after costs" if isinstance(primary.get("cagr_pct"), (int, float)) else "")
                     + ")" + (f", stop {stop:,.2f}" if isinstance(stop, (int, float)) else "") + ".")
+    elif not working_sells and (late := _late_buy(ctx, sym)) is not None:
+        state, primary = "BUY", late
+        stop = late.get("stop")
+        headline = (f"BUY (late entry): {late['strategy_name']} bought it {late['late_days']} trading days ago and still "
+                    f"holds it; joining up to {late['late_lag']} days late still beat the average stock after costs in its "
+                    f"backtest" + (f". Stop {stop:,.2f}" if isinstance(stop, (int, float)) else "") + ".")
     else:
         state = "NO_EDGE"
         primary = None
@@ -233,6 +279,12 @@ def today() -> dict:
     for sym, os_ in ctx.orders.items():
         if sym not in syms and any(ctx.working(ctx.by_key[o["strategy_key"]]) for o in os_ if o["strategy_key"] in ctx.by_key):
             syms.append(sym)
+    if ctx.late is not None:                        # stocks a working strategy holds: candidates for a late-entry BUY
+        for s in ctx.active:
+            if ctx.working(s):
+                for p in s.get("positions") or []:
+                    if p.get("symbol") and p["symbol"] not in syms:
+                        syms.append(p["symbol"])
     cards = [card(ctx, s) for s in syms]
     acts = [c for c in cards if c["state"] in ("BUY", "SELL")]
     acts.sort(key=lambda c: (c["state"] != "SELL", -((c["primary"] or {}).get("strength_score") or 0)))

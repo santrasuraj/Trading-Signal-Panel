@@ -75,3 +75,8 @@ export interface Robustness {
 
 export const useRobustness = (key: string) =>
   useQuery({ queryKey: ['robustness', key], queryFn: () => fetchJson<Robustness>(`/api/strategies/${key}/robustness`), staleTime: Infinity, enabled: !!key })
+
+export interface ScanFromText { scan: Scan; rules_text: string[]; explanation: string; unsupported: string; model: string }
+export const useScanFromText = () => useMutation({ mutationFn: (text: string) => post<ScanFromText>('/api/scans/from-text', { text }) })
+export const useAiConfigured = () =>
+  useQuery({ queryKey: ['ai', 'status'], queryFn: () => fetchJson<{ configured: boolean }>('/api/ai/status'), staleTime: 60_000 })

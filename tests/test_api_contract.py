@@ -1481,3 +1481,26 @@ def test_chart_drawings_round_trip(client):
     assert len(client.get("/api/drawings/IGIL").json()["drawings"]) == 2
     assert client.put("/api/drawings/IGIL", json={"drawings": [{"kind": "circle"}]}, headers=H).status_code == 422
     client.put("/api/drawings/IGIL", json={"drawings": []}, headers=H)
+
+
+# ------------------------------------------------------------------ research: walk-forward, benchmarks, late entry, from-text
+def test_walk_forward_and_benchmarks(client):
+    r = client.get("/api/research/walk-forward")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["verdict"] in ("pays", "hurts", "no_difference") and len(d["curve"]["t"]) == d["months"]
+    b = client.get("/api/research/benchmarks").json()
+    assert {x["key"] for x in b["rows"]} >= {"chart", "scan_today", "monte_carlo", "full_scan"}
+    assert all(x["value"] is None or x["value"] >= 0 for x in b["rows"])
+
+
+def test_late_entry_and_text_scans_degrade_cleanly(client, monkeypatch):
+    key = client.get("/api/strategies").json()["strategies"][0]["key"]
+    r = client.get(f"/api/strategies/{key}/late-entry")
+    assert r.status_code in (200, 501)
+    if r.status_code == 200:
+        assert r.json()["lags"] == [0, 5, 10, 21]
+    from web.api.services import ai_svc
+    monkeypatch.setattr(ai_svc, "_key", lambda: "")
+    t = client.post("/api/scans/from-text", json={"text": "stocks at a new 52-week high"}, headers={"X-Quant-Desk": "1"})
+    assert t.status_code == 501 and t.json()["error"]["code"] == "FEATURE_UNAVAILABLE"

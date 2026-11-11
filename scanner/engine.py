@@ -410,23 +410,38 @@ def after_tax_equity(res: SimResult, tax: TaxModel, stt_pct: float = 0.0) -> pd.
     eq = res.equity.dropna()
     if eq.empty:
         return eq
+    # per FY: [short-term net gain, long-term net gain, sum of positive ST gains x rate, of positive ST gains,
+    #          the same two for LT] - the rate depends on the exit date (TaxModel.rates_on: 23 Jul 2024 change)
     by_fy: dict[int, list[float]] = {}
+
+    def add(fy: int, is_long: bool, gain: float, when) -> None:
+        row = by_fy.setdefault(fy, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        st_rate, lt_rate = tax.rates_on(when) if hasattr(tax, "rates_on") else (tax.stcg_pct, tax.ltcg_pct)
+        k = 1 if is_long else 0
+        row[k] += gain
+        if gain > 0:
+            row[4 if is_long else 2] += gain * (lt_rate if is_long else st_rate)
+            row[5 if is_long else 3] += gain
+
     for t in res.trades:
         fy = t.exit_date.year if t.exit_date.month >= 4 else t.exit_date.year - 1
         is_long = (t.exit_date - t.entry_date).days > 365
-        gain = t.pnl + t.qty * (t.entry_price + t.exit_price) * stt_pct / 100
-        by_fy.setdefault(fy, [0.0, 0.0])[1 if is_long else 0] += gain
+        add(fy, is_long, t.pnl + t.qty * (t.entry_price + t.exit_price) * stt_pct / 100, t.exit_date)
     last = eq.index[-1]
     fy_last = last.year if last.month >= 4 else last.year - 1
     for ps in res.open_positions:
         gain = ps["qty"] * (ps["last_price"] - ps["entry_price"])
         if math.isfinite(gain):
-            is_long = (last - pd.Timestamp(ps["entry_date"])).days > 365
-            by_fy.setdefault(fy_last, [0.0, 0.0])[1 if is_long else 0] += gain
+            add(fy_last, (last - pd.Timestamp(ps["entry_date"])).days > 365, gain, last)
     factor = pd.Series(1.0, index=eq.index)
     scale, st_pool, lt_pool = 1.0, 0.0, 0.0
     for fy in sorted(set(by_fy) | set(res.cash_income)):
-        st, lt = (g * scale for g in by_fy.get(fy, (0.0, 0.0)))
+        row = by_fy.get(fy, [0.0] * 6)
+        st, lt = row[0] * scale, row[1] * scale
+        # the rate of what stays taxable: the gain-weighted rate of the year's positive gains
+        st_rate = row[2] / row[3] if row[3] > 0 else tax.stcg_pct
+        lt_rate = row[4] / row[5] if row[5] > 0 else tax.ltcg_pct
+        exempt = tax.exempt_for_fy(fy) if hasattr(tax, "exempt_for_fy") else tax.ltcg_exempt
         if st < 0:
             st_pool, st = st_pool - st, 0.0
         if lt < 0:
@@ -434,7 +449,7 @@ def after_tax_equity(res: SimResult, tax: TaxModel, stt_pct: float = 0.0) -> pd.
         used = min(st, st_pool); st -= used; st_pool -= used
         used = min(lt, lt_pool); lt -= used; lt_pool -= used
         used = min(lt, st_pool); lt -= used; st_pool -= used
-        due = st * tax.stcg_pct / 100 + max(0.0, lt - tax.ltcg_exempt) * tax.ltcg_pct / 100
+        due = st * st_rate / 100 + max(0.0, lt - exempt) * lt_rate / 100
         due += max(0.0, res.cash_income.get(fy, 0.0) * scale) * tax.interest_pct / 100
         if due <= 0:
             continue

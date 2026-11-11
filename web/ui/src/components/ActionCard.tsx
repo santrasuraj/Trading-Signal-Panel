@@ -72,6 +72,7 @@ export function ActionCardView({ a, compact }: { a: ActionCardData; compact?: bo
       {p && (a.state === 'BUY' || a.state === 'SELL') && (
         <div className="mt-2 space-y-1.5">
           <OrderLine o={p} live={q?.price} />
+          {p.late_lag != null && <div className="text-xs text-muted"><span className="font-medium text-fg">Late entry, tested:</span> {p.reason}</div>}
           <Evidence o={p} />
           {p.below_min_position && <div className="text-2xs text-warn">Below the minimum position size in config.yaml: costs eat a larger share.</div>}
         </div>

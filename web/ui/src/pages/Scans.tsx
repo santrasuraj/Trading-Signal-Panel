@@ -3,11 +3,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { FlaskConical, Play, Plus, Save, Trash2, X } from 'lucide-react'
+import { FlaskConical, Play, Plus, Save, Sparkles, Trash2, X } from 'lucide-react'
 import { isFailure } from '@/api/client'
 import { useLiveQuotes } from '@/api/hooks'
 import {
-  OP_LABEL, VERDICT_TEXT, useBacktestScan, useRunScan, useSavedScans, useScanCatalog, useScanStore,
+  OP_LABEL, VERDICT_TEXT, useAiConfigured, useBacktestScan, useRunScan, useSavedScans, useScanCatalog, useScanFromText, useScanStore,
   type Scan, type ScanBacktest, type ScanField, type ScanOp, type ScanRule, type ScanRun,
 } from '@/api/scans'
 import { PageHeader } from '@/components/domain'
@@ -150,6 +150,32 @@ function Backtest({ b }: { b: ScanBacktest }) {
   )
 }
 
+function FromText({ onScan }: { onScan: (s: Scan) => void }) {
+  const ai = useAiConfigured()
+  const m = useScanFromText()
+  const [text, setText] = useState('')
+  const on = !!ai.data?.configured
+  return (
+    <Card title="Describe it in plain English" subtitle="Claude turns your idea into the builder's rules; you check them, run and backtest">
+      <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) m.mutate(text, { onSuccess: (r) => onScan(r.scan) }) }}>
+        <input aria-label="Scan idea" value={text} maxLength={1000} onChange={(e) => setText(e.target.value)} disabled={!on}
+          placeholder={on ? 'e.g. leaders near their 52-week high with volume at least twice normal' : 'Needs ANTHROPIC_API_KEY in .env'}
+          className="input h-8 min-w-0 flex-1 px-2 text-[13px]" />
+        <Button size="sm" type="submit" icon={<Sparkles className="h-3.5 w-3.5" />} disabled={!on || !text.trim()} loading={m.isPending}>Build with Claude</Button>
+      </form>
+      {!on && <p className="mt-2 text-2xs text-faint">Add your Anthropic API key to the .env file (ANTHROPIC_API_KEY=...) to turn this on. Each translation costs a few paise.</p>}
+      {m.error && <p className="mt-2 text-xs text-loss">{isFailure(m.error) ? m.error.message : 'Translation failed.'}</p>}
+      {m.data && (
+        <div className="mt-2 space-y-1 text-xs">
+          <p className="text-muted">{m.data.explanation}</p>
+          {m.data.unsupported && <p className="text-warn">Left out (the builder can't express it): {m.data.unsupported}</p>}
+          <p className="text-faint">Loaded into the rules below: {m.data.rules_text.join(m.data.scan.match === 'all' ? ' AND ' : ' OR ')}.</p>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export default function Scans() {
   const cat = useScanCatalog()
   const saved = useSavedScans()
@@ -172,6 +198,7 @@ export default function Scans() {
       {cat.error ? <div className="card"><ErrorState error={cat.error} /></div> : !cat.data ? <Skeleton className="h-40 w-full" /> : (
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
           <div className="min-w-0 space-y-3">
+            <FromText onScan={(s) => load(s)} />
             <Card title="Rules">
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <input aria-label="Scan name" value={scan.name} maxLength={60} onChange={(e) => setScan({ ...scan, name: e.target.value })} className="input h-8 w-64 px-2 text-[13px] font-medium" />

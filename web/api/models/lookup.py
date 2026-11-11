@@ -184,6 +184,7 @@ class Quote(Model):
     volume: float | None = None
     bid: float | None = None
     ask: float | None = None
+    tick_at: float | None = None                  # live: epoch seconds the live service received the tick (latency)
 
 
 class QuotesResponse(Model):

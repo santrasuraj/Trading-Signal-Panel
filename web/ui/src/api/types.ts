@@ -105,6 +105,7 @@ export interface Quote {
   symbol: string; price: number; prev_close: number | null; change_pct: number | null; time: string;
   source?: QuoteSource; delayed?: boolean;
   open?: number | null; high?: number | null; low?: number | null; volume?: number | null; bid?: number | null; ask?: number | null;
+  tick_at?: number | null;     // live: epoch seconds the live service received the tick
 }
 export interface QuotesResponse {
   as_of: string; session: MarketSession; source: QuoteSource; delayed: boolean; note: string; quotes: Quote[];

@@ -33,6 +33,8 @@ class ActionOrder(Model):
     below_min_position: bool
     strength_score: int | None = None
     strength_grade: str | None = None
+    late_days: int | None = None                  # a late-entry BUY: trading days since the model's own buy
+    late_lag: int | None = None                   # ... and the tested delay that covers it (5 / 10 / 21)
 
 
 class ActionHolding(Model):

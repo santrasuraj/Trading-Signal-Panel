@@ -422,8 +422,26 @@ def test_after_tax_losses_offset_and_ltcg_exemption():
         Trade("C", pd.Timestamp("2022-01-01"), 1, pd.Timestamp("2023-10-01"), 1, 1, 100_000, 10, 400, "x"),  # LT gain
     ]
     out = after_tax_equity(_result_with(trades, eq), TaxModel())
-    # ST net 20k -> 4,160 tax; LT 100k is under the 1.25L exemption -> 0
-    assert out.iloc[-1] == pytest.approx(1_000_000 - 20_000 * 0.208)
+    # FY 2023-24 (before the 23 Jul 2024 change): ST net 20k at 15.6% -> 3,120; LT 100k is not above the 1L exemption
+    assert out.iloc[-1] == pytest.approx(1_000_000 - 20_000 * 0.156)
+    flat = after_tax_equity(_result_with(trades, eq), TaxModel(dated=0))
+    assert flat.iloc[-1] == pytest.approx(1_000_000 - 20_000 * 0.208)      # today's rates for every year
+
+
+def test_after_tax_uses_the_rate_of_the_exit_date():
+    from scanner.costs import TaxModel
+    from scanner.engine import Trade, after_tax_equity
+    idx = pd.bdate_range("2024-04-01", "2025-06-30")
+    eq = pd.Series(1_000_000.0, index=idx)
+    trades = [   # FY 2024-25: one short-term gain before 23 Jul 2024 (15.6%), one after (20.8%)
+        Trade("A", pd.Timestamp("2024-04-02"), 1, pd.Timestamp("2024-07-01"), 1, 1, 10_000, 1, 60, "x"),
+        Trade("B", pd.Timestamp("2024-04-02"), 1, pd.Timestamp("2024-09-02"), 1, 1, 30_000, 3, 100, "x"),
+        Trade("C", pd.Timestamp("2022-01-03"), 1, pd.Timestamp("2024-10-01"), 1, 1, 200_000, 20, 700, "x"),   # LT
+    ]
+    out = after_tax_equity(_result_with(trades, eq), TaxModel())
+    st = 10_000 * 0.156 + 30_000 * 0.208
+    lt = (200_000 - 125_000) * 0.13                        # the 1.25L exemption already applies in FY 2024-25
+    assert out.iloc[-1] == pytest.approx(1_000_000 - st - lt)
 
 
 def test_after_tax_taxes_open_gains_and_cash_income_and_adds_back_stt():

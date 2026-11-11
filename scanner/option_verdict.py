@@ -82,18 +82,20 @@ def direction(match: dict | None, n: int, strategies: list[dict], symbol: str) -
         med = s.get("median_pct")
         if med is not None:
             drift = math.log(1 + med / 100) * n / horizon
+        bench = match.get("benchmark") or "the average stock"
+        own = f" in its own history ({match.get('setup_text')})" if match.get("source") == "index" else ""
         if v == "better" and (med or 0) > 0:
             votes.append(1)
-            reasons.append(f"Similar setups beat the average stock over {horizon} days ({s.get('excess_pct'):+.2f}%, "
+            reasons.append(f"Similar setups{own} beat {bench} over {horizon} days ({s.get('excess_pct'):+.2f}%, "
                            f"t {s.get('t'):.1f}) with a median move of {med:+.1f}%.")
         elif v == "worse" and (med or 0) < 0:
             votes.append(-1)
-            reasons.append(f"Similar setups lagged the average stock over {horizon} days ({s.get('excess_pct'):+.2f}%, "
+            reasons.append(f"Similar setups{own} lagged {bench} over {horizon} days ({s.get('excess_pct'):+.2f}%, "
                            f"t {s.get('t'):.1f}) with a median move of {med:+.1f}%.")
         else:
             m = f"median {med:+.1f}%, " if med is not None else ""
-            reasons.append(f"Similar setups over {horizon} days: {m}"
-                           f"{'no different from the average stock' if v == 'same' else 'no usable direction'}.")
+            reasons.append(f"Similar setups{own} over {horizon} days: {m}"
+                           f"{'no different from ' + bench if v == 'same' else 'no usable direction'}.")
     else:
         reasons.append("No similar-setup statistics for this symbol.")
     for s in strategies or []:
