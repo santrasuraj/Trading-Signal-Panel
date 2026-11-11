@@ -17,6 +17,7 @@ export interface ScanRunRow {
 export interface ScanRun {
   scan: Scan; date: string; universe_size: number; count: number; rows: ScanRunRow[]; fields: string[]
   rules_text: string[]; elapsed_s: number
+  live?: boolean; quoted?: number; session?: string | null; note?: string
 }
 export interface HorizonStats { n: number; months: number; excess_pct: number | null; median_pct: number | null; hit_pct: number | null; t: number | null; after_cost_pct: number | null }
 export type StudyVerdict = 'edge' | 'edge_before_costs' | 'no_edge' | 'opposite' | 'no_direction' | 'too_few'
@@ -44,6 +45,8 @@ const post = <T,>(path: string, body: unknown) => fetchJson<T>(path, { method: '
 export const useScanCatalog = () => useQuery({ queryKey: ['scans', 'catalog'], queryFn: () => fetchJson<ScanCatalog>('/api/scans/catalog'), staleTime: Infinity })
 export const useSavedScans = () => useQuery({ queryKey: ['scans', 'saved'], queryFn: () => fetchJson<{ scans: SavedScan[] }>('/api/scans'), staleTime: 30_000 })
 export const useRunScan = () => useMutation({ mutationFn: (s: Scan) => post<ScanRun>('/api/scans/run', s) })
+/** The scan on today's live prices (only stocks with a live quote can match). */
+export const useRunLive = () => useMutation({ mutationFn: (s: Scan) => post<ScanRun>('/api/scans/run-live', s) })
 export const useBacktestScan = () => useMutation({ mutationFn: (s: Scan) => post<ScanBacktest>('/api/scans/backtest', s) })
 
 export function useScanStore() {

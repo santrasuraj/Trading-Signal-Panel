@@ -3,11 +3,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { FlaskConical, Play, Plus, Save, Sparkles, Trash2, X } from 'lucide-react'
+import { BellPlus, FlaskConical, Play, Plus, Save, Sparkles, Trash2, X } from 'lucide-react'
+import { useAlertMutations } from '@/api/watch'
 import { isFailure } from '@/api/client'
 import { useLiveQuotes } from '@/api/hooks'
 import {
-  OP_LABEL, VERDICT_TEXT, useAiConfigured, useBacktestScan, useRunScan, useSavedScans, useScanCatalog, useScanFromText, useScanStore,
+  OP_LABEL, VERDICT_TEXT, useAiConfigured, useBacktestScan, useRunLive, useRunScan, useSavedScans, useScanCatalog, useScanFromText, useScanStore,
   type Scan, type ScanBacktest, type ScanField, type ScanOp, type ScanRule, type ScanRun,
 } from '@/api/scans'
 import { PageHeader } from '@/components/domain'
@@ -64,7 +65,9 @@ function Results({ r, fields }: { r: ScanRun; fields: ScanField[] }) {
   const lq = useLiveQuotes(r.rows.slice(0, 100).map((x) => x.symbol))
   const label = (k: string) => fields.find((f) => f.key === k)?.label ?? k
   return (
-    <Card title={`Today: ${r.count} of ${r.universe_size} stocks match`} subtitle={`On the stored prices of ${date(r.date)} · ${r.rules_text.join(r.scan.match === 'all' ? ' AND ' : ' OR ')} · ${num(r.elapsed_s, 2)} s`} flush>
+    <Card title={r.live ? `Live: ${r.count} of ${r.universe_size} stocks match` : `Today: ${r.count} of ${r.universe_size} stocks match`}
+      subtitle={r.live ? `On today's live prices (${r.quoted ?? 0} stocks had one; refreshed every minute) · ${r.rules_text.join(r.scan.match === 'all' ? ' AND ' : ' OR ')}`
+        : `On the stored prices of ${date(r.date)} · ${r.rules_text.join(r.scan.match === 'all' ? ' AND ' : ' OR ')} · ${num(r.elapsed_s, 2)} s`} flush>
       {r.rows.length === 0 ? <EmptyState compact title="No stock matches today" /> : (
         <div className="scroll-x">
           <table className="w-full text-[13px]">
@@ -181,13 +184,28 @@ export default function Scans() {
   const saved = useSavedScans()
   const store = useScanStore()
   const runM = useRunScan()
+  const liveM = useRunLive()
+  const [live, setLive] = useState(false)
+  const alertsM = useAlertMutations()
   const btM = useBacktestScan()
   const toast = useToast()
   const [scan, setScan] = useState<Scan>(BLANK)
   const [id, setId] = useState<string | undefined>()
   const fields = cat.data?.fields ?? []
   const fail = (title: string) => (e: unknown) => toast({ tone: 'bad', title, detail: isFailure(e) ? e.message : undefined })
-  const run = (s: Scan = scan) => { runM.mutate(s, { onError: fail('Scan failed') }) }
+  const run = (s: Scan = scan) => { (live ? liveM : runM).mutate(s, { onError: fail('Scan failed') }) }
+  // live mode: re-run on today's live prices every minute while the page is open
+  useEffect(() => {
+    if (!live) return
+    liveM.mutate(scan, { onError: fail('Live scan failed') })
+    const t = window.setInterval(() => liveM.mutate(scan), 60_000)
+    return () => window.clearInterval(t)
+  }, [live, scan]) // eslint-disable-line react-hooks/exhaustive-deps
+  const result = live ? liveM.data : runM.data
+  const alertOn = (sid: string, name: string) => alertsM.create.mutate({ symbol: 'ALL', kind: 'scan_hit', ref: sid, note: name }, {
+    onSuccess: () => toast({ tone: 'good', title: `Alert set: new stocks in "${name}"`, detail: 'Checked every 5 minutes in market hours and after each scan; Telegram and a notification.' }),
+    onError: fail('Alert not saved'),
+  })
   const backtest = (s: Scan = scan) => { btM.mutate(s, { onError: fail('Backtest failed') }) }
   useEffect(() => { if (cat.data && !runM.data && !runM.isPending) run() }, [cat.data]) // eslint-disable-line react-hooks/exhaustive-deps
   const load = (s: Scan, sid?: string) => { setScan({ name: s.name, match: s.match, direction: s.direction, rules: s.rules }); setId(sid); btM.reset(); run(s) }
@@ -211,7 +229,9 @@ export default function Scans() {
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button size="sm" variant="ghost" icon={<Plus className="h-3.5 w-3.5" />} disabled={scan.rules.length >= cat.data.max_rules} onClick={() => setScan((s) => ({ ...s, rules: [...s.rules, { left: 'rsi14', op: '>', right: { value: 50 } }] }))}>Add rule</Button>
                 <div className="flex-1" />
-                <Button size="sm" icon={<Play className="h-3.5 w-3.5" />} disabled={!scan.rules.length} loading={runM.isPending} onClick={() => run()}>Run today</Button>
+                <Segmented<'close' | 'live'> size="xs" ariaLabel="Prices" value={live ? 'live' : 'close'} onChange={(v) => setLive(v === 'live')}
+                  items={[{ id: 'close', label: 'Last close', title: 'On the stored prices of the last scan' }, { id: 'live', label: 'Live prices', title: "On today's live prices, refreshed every minute" }]} />
+                <Button size="sm" icon={<Play className="h-3.5 w-3.5" />} disabled={!scan.rules.length} loading={runM.isPending || liveM.isPending} onClick={() => run()}>{live ? 'Run now' : 'Run today'}</Button>
                 <Button size="sm" variant="primary" icon={<FlaskConical className="h-3.5 w-3.5" />} disabled={!scan.rules.length} loading={btM.isPending} onClick={() => backtest()}>Backtest 8 years</Button>
                 <Button size="sm" icon={<Save className="h-3.5 w-3.5" />} disabled={!scan.rules.length} loading={store.save.isPending}
                   onClick={() => store.save.mutate({ scan, id }, { onSuccess: (s) => { setId(s.id); toast({ tone: 'good', title: `Saved: ${s.name}` }) }, onError: fail('Not saved') })}>{id ? 'Save' : 'Save as new'}</Button>
@@ -219,8 +239,8 @@ export default function Scans() {
               {btM.isPending && <p className="mt-2 text-2xs text-muted">Testing on 8 years: a few seconds (the first test after a while loads the data, ~5 s more).</p>}
             </Card>
             {btM.data && <Backtest b={btM.data} />}
-            {runM.error && !runM.data && <div className="card"><ErrorState error={runM.error} compact /></div>}
-            {runM.data && <Results r={runM.data} fields={fields} />}
+            {(live ? liveM.error : runM.error) && !result && <div className="card"><ErrorState error={(live ? liveM.error : runM.error)!} compact /></div>}
+            {result && <Results r={result} fields={fields} />}
           </div>
           <div className="space-y-3">
             <Card title="Your scans">
@@ -228,6 +248,7 @@ export default function Scans() {
                 <ul className="space-y-1">{saved.data.scans.map((s) => (
                   <li key={s.id} className={cn('flex items-center gap-1 rounded px-1.5 py-1 text-[13px] hover:bg-raised', s.id === id && 'bg-raised')}>
                     <button type="button" className="min-w-0 flex-1 truncate text-left" onClick={() => load(s, s.id)} title={s.name}>{s.name}</button>
+                    <IconButton label={`Alert me when "${s.name}" gets a new stock`} onClick={() => alertOn(s.id, s.name)}><BellPlus className="h-3.5 w-3.5" /></IconButton>
                     <IconButton label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete the scan "${s.name}"?`)) store.remove.mutate(s.id, { onSuccess: () => { if (id === s.id) setId(undefined) } }) }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
                   </li>
                 ))}</ul>

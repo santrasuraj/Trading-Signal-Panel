@@ -10,6 +10,7 @@ import { router } from '@/app/router'
 import { UiStateProvider } from '@/app/uiState'
 import { ToastProvider } from '@/components/toast'
 import { ThemeProvider } from '@/lib/theme'
+import { registerServiceWorker } from '@/lib/notify'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,6 +23,7 @@ const queryClient = new QueryClient({
   },
 })
 
+registerServiceWorker()
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

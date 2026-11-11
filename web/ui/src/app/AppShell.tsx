@@ -23,6 +23,7 @@ import { quoteStream } from '@/api/liveQuotes'
 import { useAlerts } from '@/api/watch'
 import { G_KEYS } from './nav'
 import { useUi } from './uiState'
+import { notify } from '@/lib/notify'
 
 /** Invalidate every scan-derived query when /api/status reports a new scan_id; toast scan outcomes. */
 function ScanWatcher() {
@@ -63,9 +64,7 @@ function AlertWatcher() {
   useEffect(() => quoteStream.onAlert((a) => {
     toast({ tone: 'info', title: a.text, detail: 'Price alert fired (Watchlist › Alerts to re-arm it).' })
     void qc.invalidateQueries({ queryKey: ['alerts'] })
-    try {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('Quant Desk alert', { body: a.text })
-    } catch { /* notifications unavailable */ }
+    void notify('Quant Desk alert', a.text, a.alert.symbol && a.alert.symbol !== 'ALL' ? `/chart/${a.alert.symbol}` : '/watchlist', `alert-${a.alert.id}`)
   }), [toast, qc])
   // your FYERS orders: a fill or rejection shows at once, on any page, and the Orders page / cards refresh
   useEffect(() => quoteStream.onOrder((o) => {
@@ -73,9 +72,7 @@ function AlertWatcher() {
     toast({ tone: st === 'rejected' ? 'bad' : st === 'filled' ? 'good' : 'info', title: `FYERS: ${o.text}`, detail: st === 'filled' ? 'Protect it with a stop-loss and target on the Orders page.' : undefined })
     void qc.invalidateQueries({ queryKey: ['orders'] })
     if (st === 'filled') void qc.invalidateQueries({ queryKey: ['coach'] })
-    try {
-      if ((st === 'filled' || st === 'rejected') && typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('Quant Desk order', { body: o.text })
-    } catch { /* notifications unavailable */ }
+    if (st === 'filled' || st === 'rejected') void notify('Quant Desk order', o.text, '/orders', `order-${o.order.id}-${st}`)
   }), [toast, qc])
   return null
 }

@@ -18,6 +18,7 @@ import { useToast } from '@/components/toast'
 import { Button, Card, IconButton, Segmented } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { dateTimeIST, num } from '@/lib/format'
+import { askPermission, notifyState } from '@/lib/notify'
 
 function errText(e: unknown): string {
   return isFailure(e) ? e.message : 'Something went wrong.'
@@ -129,6 +130,15 @@ export function AlertForm({ symbol: initial = '', price, onDone }: { symbol?: st
   )
 }
 
+/** Desktop notifications for fired alerts and order updates (lib/notify.ts): the browser asks once. */
+function NotifyButton() {
+  const [st, setSt] = useState(notifyState())
+  if (st === 'granted' || st === 'unsupported') return st === 'granted' ? <span className="text-2xs text-muted">Desktop notifications on</span> : null
+  return <Button size="xs" variant="subtle" icon={<BellRing className="h-3.5 w-3.5" />} disabled={st === 'denied'}
+    title={st === 'denied' ? 'Blocked in the browser: allow notifications for this site in its settings' : 'Show a desktop notification when an alert fires or an order fills'}
+    onClick={() => { void askPermission().then(setSt) }}>{st === 'denied' ? 'Notifications blocked' : 'Turn on notifications'}</Button>
+}
+
 function Alerts() {
   const q = useAlerts()
   const m = useAlertMutations()
@@ -139,7 +149,7 @@ function Alerts() {
   const lq = useLiveQuotes(active.filter((a) => a.symbol !== 'ALL').map((a) => a.symbol))
   const fail = (err: unknown) => toast({ tone: 'bad', title: 'Not changed', detail: errText(err) })
   return (
-    <Card title="Alerts" subtitle={d?.note}>
+    <Card title="Alerts" subtitle={d?.note} right={<NotifyButton />}>
       <AlertForm />
       {q.error && !d ? <div className="mt-3"><ErrorState error={q.error} compact /></div> : !d ? <div className="mt-3"><SkeletonRows rows={3} /></div> : (
         <div className="mt-3 space-y-3">
