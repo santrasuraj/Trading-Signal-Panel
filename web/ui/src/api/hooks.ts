@@ -1,9 +1,11 @@
 // TanStack Query hooks (spec 6.1 / 7). Scan-derived data never goes stale on a timer: the ScanWatcher in the shell
 // invalidates every query when /api/status reports a new scan_id. Only /api/status polls.
 
+import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
 import { api, isFailure, type ChartParams, type ScreenerParams, type TradesParams } from './client'
-import type { AppStatus, CurveRange, HoldingInput, IntradayResponse, Quote, TrackState } from './types'
+import { MAX_STREAM_SYMBOLS, quoteStream, summarize, type LiveQuote } from './liveQuotes'
+import type { AppStatus, CurveRange, HoldingInput, IntradayResponse, TrackState } from './types'
 
 export const keys = {
   status: ['status'] as const,
@@ -62,6 +64,8 @@ export const useStatus = () =>
     queryFn: api.status,
     refetchInterval: statusInterval,
     refetchIntervalInBackground: true,
+    // coming back to the tab checks for a new scan at once (the ScanWatcher then refreshes every page's data)
+    refetchOnWindowFocus: true,
     staleTime: 0,
     retry: false,
   })
@@ -86,18 +90,29 @@ export const useChart = (s: string, p: ChartParams) =>
   useQuery({ queryKey: keys.chart(s, p), queryFn: () => api.chart(s, p), staleTime: 10 * 60_000, placeholderData: keepPreviousData, enabled: !!s })
 export const useStock = (s: string) => useQuery({ queryKey: keys.stock(s), queryFn: () => api.stock(s), staleTime: Infinity, enabled: !!s })
 export const useHoldings = () => useQuery({ queryKey: keys.holdings, queryFn: api.holdings, staleTime: Infinity })
-/** Live prices while the market is open: polled every 30 s (the server caches each symbol: FYERS 30 s, Yahoo 60 s). Off while
- *  the market is shut or the tab is hidden. Returns a symbol -> quote map plus the response (source, delay). */
+/** Live prices for `symbols`, pushed by the shared event stream (api/liveQuotes.ts): FYERS live-feed ticks about a
+ *  second after the trade, REST / Yahoo every 30 s for symbols the feed doesn't carry yet. While the market is open
+ *  and until 18:00 (the day's last trades); empty when it is shut (pages then show the scan's official closes).
+ *  `live` = the market is open and at least one quote arrived; `data` = what these quotes are (source, delay, note). */
 export function useLiveQuotes(symbols: string[]) {
-  const open = useStatus().data?.clock.session === 'open'
-  const list = [...new Set(symbols)].sort().slice(0, 100)
-  const q = useQuery({
-    queryKey: keys.quotes(list.join(',')), queryFn: () => api.quotes(list), enabled: open && list.length > 0,
-    refetchInterval: 30_000, staleTime: 20_000, retry: false, placeholderData: keepPreviousData,
-  })
-  const map: Record<string, Quote> = {}
-  if (open) for (const x of q.data?.quotes ?? []) map[x.symbol] = x
-  return { live: open && !!q.data, quotes: map, data: open ? q.data : undefined }
+  const key = [...new Set(symbols)].sort().slice(0, MAX_STREAM_SYMBOLS).join(',')
+  useEffect(() => (key ? quoteStream.want(key.split(',')) : undefined), [key])
+  const version = useSyncExternalStore(quoteStream.subscribe, quoteStream.getVersion)
+  return useMemo(() => {
+    void version
+    const meta = quoteStream.getMeta()
+    const session = meta?.session
+    const map: Record<string, LiveQuote> = {}
+    if (session === 'open' || session === 'post_close') {
+      for (const s of key ? key.split(',') : []) {
+        const q = quoteStream.get(s)
+        if (q) map[s] = q
+      }
+    }
+    const got = Object.values(map)
+    const data = meta && got.length ? { ...summarize(got, meta.session), as_of: meta.as_of, session: meta.session, connected: meta.connected } : undefined
+    return { live: session === 'open' && got.length > 0, quotes: map as Record<string, LiveQuote>, data }
+  }, [key, version])
 }
 
 /** The signal track record changes only with a new scan (the ScanWatcher invalidates every query then). */

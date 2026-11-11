@@ -102,9 +102,14 @@ def direction(match: dict | None, n: int, strategies: list[dict], symbol: str) -
         for a in s.get("actions") or []:
             if a.get("symbol") != symbol:
                 continue
-            buy = a.get("action") == "BUY"
-            votes.append(1 if buy else -1)
-            reasons.append(f"{s.get('name')} (backtest: working) {'buys' if buy else 'sells'} it at the next open.")
+            if a.get("action") != "BUY":
+                # a long-only strategy's SELL only closes its own position (stop, rebalance, trend exit): it is not
+                # a forecast that the price falls, so it never counts as a bearish vote
+                reasons.append(f"{s.get('name')} (backtest: working) exits its position at the next open "
+                               "(an exit, not a bearish forecast: not counted).")
+                continue
+            votes.append(1)
+            reasons.append(f"{s.get('name')} (backtest: working) buys it at the next open.")
     bias = "none"
     if votes and all(v > 0 for v in votes):
         bias = "bullish"
@@ -209,8 +214,9 @@ def assess(c: dict, close: pd.Series, match: dict | None, strategies: list[dict]
                 f"({pick['edge_pct']:+.0f}% after costs) with a {pick['prob_profit_pct']:.0f}% chance of ending above "
                 f"the breakeven {pick['breakeven']:,.2f}.")
     else:
-        why = next((x["detail"] for x in blocking), "no candidate passes")
-        verdict, head = "NO_TRADE", f"NO TRADE: {why}."
+        first = next((x for x in blocking), None)
+        why = f"{first['name'].lower()} failed - {first['detail']}" if first else "no candidate passes"
+        verdict, head = "NO_TRADE", f"No options edge: {why}."
     exit_ = None
     if verdict in ("BUY_CALL", "BUY_PUT"):
         h = (match or {}).get("stats", {}).get(str(d["horizon"])) if d["horizon"] else None

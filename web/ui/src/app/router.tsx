@@ -6,6 +6,7 @@ import { Onboarding } from '@/pages/Onboarding'
 
 // Every page is its own chunk: lightweight-charts and TanStack Table load only with the pages that use them.
 const Overview = lazy(() => import('@/pages/Overview'))
+const Today = lazy(() => import('@/pages/Today'))
 const Signals = lazy(() => import('@/pages/Signals'))
 const SignalTrack = lazy(() => import('@/pages/SignalTrack'))
 const Strategies = lazy(() => import('@/pages/Strategies'))
@@ -54,6 +55,7 @@ export const router = createBrowserRouter([
     errorElement: <RouteError />,
     children: [{ errorElement: <RouteError inline />, children: [
       { index: true, element: g(<Overview />) },
+      { path: 'today', element: g(<Today />) },
       { path: 'signals', element: g(<Signals />) },
       { path: 'signals/track', element: g(<SignalTrack />) },
       { path: 'strategies', element: g(<Strategies />) },

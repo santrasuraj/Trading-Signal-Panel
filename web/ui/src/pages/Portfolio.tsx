@@ -3,7 +3,9 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertOctagon, AlertTriangle, CheckCircle2, Download, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
-import { useHoldings, useImportFyers, useSaveHoldings, useStatus, useSymbols } from '@/api/hooks'
+import { useHoldings, useImportFyers, useLiveQuotes, useSaveHoldings, useStatus, useSymbols } from '@/api/hooks'
+import { liveHoldings } from '@/lib/liveHoldings'
+import { PriceStamp } from '@/components/LivePrice'
 import { isFailure } from '@/api/client'
 import type { HoldingInput, HoldingRow, HoldingsResponse } from '@/api/types'
 import { LevelPill, ResultsChip } from '@/components/badges'
@@ -191,14 +193,16 @@ export default function Portfolio() {
   const [edit, setEdit] = useState(false)
   const nav = useNavigate()
   const cols = useMemo(columns, [])
-  const h = q.data
+  const lq = useLiveQuotes(q.data?.rows.map((r) => r.symbol) ?? [])
+  const h = useMemo(() => (q.data ? liveHoldings(q.data, lq.quotes) : undefined), [q.data, lq.quotes])
   const t = h?.totals
   const running = !!st?.scan.running
+  const liveOn = Object.keys(lq.quotes).length > 0
   return (
     <div>
       <PageHeader
         title="Portfolio"
-        subtitle={<>Your own holdings (holdings.csv): stop-loss, target, trend and results alerts from each scan · {h?.as_of ? <AsOfLine a={h.as_of} /> : 'no scan yet'}</>}
+        subtitle={<>Your own holdings (holdings.csv): stop-loss, target, trend and results alerts from each scan · {h?.as_of ? <AsOfLine a={h.as_of} /> : 'no scan yet'}{liveOn && lq.data && <> · prices <PriceStamp q={Object.values(lq.quotes)[0]} session={lq.data.session} /></>}</>}
         right={h && <Button variant="primary" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEdit(true)}>Edit holdings</Button>}
       />
       {q.error && !h ? <div className="card"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div> : !h || !t ? (
@@ -216,7 +220,7 @@ export default function Portfolio() {
             <KpiTile label="Invested" value={<Money compact v={t.invested} />} />
             <KpiTile label="Value" value={<Money compact v={t.value} />} />
             <KpiTile label="P&L" value={<Money compact signed v={t.pnl} />} tone={t.pnl == null ? undefined : t.pnl >= 0 ? 'text-profit' : 'text-loss'} sub={<Pct v={t.pnl_pct} />} />
-            <KpiTile label={h.as_of ? `Day (${date(h.as_of.data_date, { year: false })})` : 'Day'} title="Move of the last scan's price day (not necessarily today)" value={<Money compact signed v={t.day_pnl} />} tone={t.day_pnl == null ? undefined : t.day_pnl >= 0 ? 'text-profit' : 'text-loss'} />
+            <KpiTile label={liveOn ? 'Today (live)' : h.as_of ? `Day (${date(h.as_of.data_date, { year: false })})` : 'Day'} title={liveOn ? "Today's move at the live prices" : "Move of the last scan's price day (not necessarily today)"}value={<Money compact signed v={t.day_pnl} />} tone={t.day_pnl == null ? undefined : t.day_pnl >= 0 ? 'text-profit' : 'text-loss'} />
             <KpiTile label="Holdings" value={t.count} />
             <KpiTile label="Danger" value={t.danger} tone={t.danger ? 'text-loss' : 'text-muted'} />
             <KpiTile label="Watch" value={t.watch} tone={t.watch ? 'text-warn' : 'text-muted'} />

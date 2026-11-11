@@ -27,6 +27,7 @@ import pandas as pd
 from ..providers import load_token
 from ..settings import IST, LOG_DIR, ist_now
 from . import data as idata
+from . import quote_hub
 from .fyers_sync import is_trading_day
 
 MAX_SYMBOLS = 100               # FYERS Standard plan WebSocket limit (all connections together)
@@ -179,7 +180,11 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     from fyers_apiv3.FyersWebsocket import data_ws
 
     fno = fno[:MAX_SYMBOLS]
-    tickers = [s if ":" in s else f"NSE:{s}-EQ" for s in symbols[:MAX_SYMBOLS - len(fno)]] + [i["ticker"] for i in fno]
+    fno_tickers = [i["ticker"] for i in fno]
+    base = [s if ":" in s else f"NSE:{s}-EQ" for s in symbols]
+    # The screen's symbols (quote_hub.subscriptions.json) come first, then F&O, then the liquid stocks.
+    tickers = quote_hub.plan_tickers(quote_hub.read_subscriptions(live_dir(root)), base, fno_tickers, MAX_SYMBOLS)
+    book = quote_hub.QuoteBook()              # every tick's latest price: the screen's live quotes
     builder = idata.TickBarBuilder(interval)
     from ..footprints import FootprintRecorder
     recorder = FootprintRecorder()            # large trades + order-book totals for Big money live (footprints.py)
@@ -190,6 +195,15 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
 
     def on_message(msg):
         if isinstance(msg, dict) and msg.get("ltp") is not None:
+            try:
+                book.on_tick(msg)
+            except Exception:                  # a quote glitch must never stop the bars
+                pass
+            if not str(msg.get("symbol") or "").endswith("-EQ") and not (fno_rec is not None and fno_rec.wants(msg.get("symbol"))):
+                with lock:                     # an index (or other non-stock) on the screen: a quote only, no bars
+                    status["ticks"] += 1
+                    status["last_tick"] = time.time()
+                return
             if fno_rec is not None and fno_rec.wants(msg.get("symbol")):
                 with lock:                     # F&O: large trades only - no bars, no stock footprints
                     try:
@@ -222,8 +236,33 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     def on_connect():
         # Also called after every reconnect (subscribe again) - and by the SDK even when it could not
         # connect at all, so only ticks, never this callback, mark the feed as live.
-        sock.subscribe(symbols=tickers, data_type="SymbolUpdate")
+        sock.subscribe(symbols=list(tickers), data_type="SymbolUpdate")
         log(f"Live: subscribing to {len(tickers)} symbols")
+
+    def resubscribe() -> None:
+        """Follow the screen: subscribe to symbols a page, holding or watchlist now needs, and drop the ones
+        that made room for them, staying within the symbol limit."""
+        nonlocal tickers
+        want = quote_hub.plan_tickers(quote_hub.read_subscriptions(live_dir(root)), base, fno_tickers, MAX_SYMBOLS)
+        add, drop = [t for t in want if t not in tickers], [t for t in tickers if t not in want]
+        if not add and not drop:
+            return
+        if drop:
+            sock.unsubscribe(symbols=drop, data_type="SymbolUpdate")
+        if add:
+            sock.subscribe(symbols=add, data_type="SymbolUpdate")
+        tickers = want
+        log(f"Live: now streaming {len(want)} symbols (+{len(add)} for the screen, -{len(drop)})")
+
+    stop_quotes = threading.Event()
+
+    def quote_writer() -> None:
+        """quotes.json about twice a second while ticks arrive: the browser's live prices."""
+        while not stop_quotes.wait(quote_hub.WRITE_EVERY_S):
+            try:
+                book.write_if_changed(live_dir(root), idata._replace)
+            except Exception:
+                pass                           # the next round tries again
 
     sock = data_ws.FyersDataSocket(access_token=f"{tok['client_id']}:{tok['access_token']}", log_path=str(LOG_DIR),
                                    litemode=False, write_to_file=False, reconnect=True, reconnect_retry=10,
@@ -233,10 +272,16 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     # never keep this process alive after the session (our own loop below keeps it alive until then).
     sock.background_flag = True
     written, write_fails = 0, 0
+    threading.Thread(target=quote_writer, name="quotes", daemon=True).start()
     try:
         sock.connect()
         while not _session_over():
             time.sleep(FLUSH_SECONDS)
+            if status["live"]:
+                try:
+                    resubscribe()
+                except Exception as e:
+                    log(f"Live: changing the subscription failed ({type(e).__name__}: {e})")
             with lock:
                 done = builder.flush()
                 forming, last = _forming(builder), status["last_tick"]
@@ -259,7 +304,12 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
             except Exception as e:
                 log(f"Live: writing footprints failed ({type(e).__name__}: {e})")
     finally:
+        stop_quotes.set()
         _stop_socket(sock)
+        try:
+            book.write_if_changed(live_dir(root), idata._replace)     # the last trade of the day stays on screen
+        except Exception:
+            pass
         now = ist_now().replace(tzinfo=None)
         with lock:
             # end of session (or stopped early): close the bars whose time is over, keep everything in the store

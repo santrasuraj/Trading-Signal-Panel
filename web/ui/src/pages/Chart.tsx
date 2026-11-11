@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, Layers, PanelRightClose, PanelRightOpen, Radio, Ruler, Search, SlidersHorizontal } from 'lucide-react'
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Layers, PanelRightClose, PanelRightOpen, Ruler, Search, SlidersHorizontal } from 'lucide-react'
 import { useChart, useLiveQuotes, useStock, useSymbols } from '@/api/hooks'
 import { useLevels, type LvChartPattern } from '@/api/levels'
 import { useOutlook } from '@/api/outlook'
@@ -27,6 +27,8 @@ import { patternDrawings, patternTone } from '@/lib/patternDrawing'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 import { typingTarget, useIsMobile } from '@/lib/useMedia'
 import { EvidenceBadge, PriceAction } from '@/components/PriceAction'
+import { PriceStamp } from '@/components/LivePrice'
+import { ActionPanel } from '@/components/ActionCard'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
 type Ind = IndicatorId | 'volume'
@@ -94,10 +96,16 @@ function PatternLegend({ patterns, drawn, compact }: { patterns: LvChartPattern[
 function SidePanel({ symbol }: { symbol: string }) {
   const q = useStock(symbol)
   const s = q.data
+  const lq = useLiveQuotes([symbol])
+  const live = lq.quotes[symbol]
   if (q.error) return <ErrorState error={q.error} compact />
   if (!s) return <div className="space-y-3 p-4"><Skeleton className="h-6 w-28" /><Skeleton className="h-3 w-full" /><Skeleton className="h-24 w-full" /></div>
   const today = todayIST()
   const stock = s.kind === 'stock'
+  const px = live?.price ?? s.price
+  const hold = s.your_holding
+  const holdPnl = hold && live && hold.buy_price != null && hold.qty != null ? (live.price - hold.buy_price) * hold.qty : hold?.pnl_amount
+  const holdPct = hold && live && hold.buy_price ? (live.price / hold.buy_price - 1) * 100 : hold?.pnl_pct
   // Beside the chart (xl+) one column; stacked under the chart (md to lg) two columns, so the KV rows don't stretch
   // across the whole page.
   return (
@@ -109,11 +117,12 @@ function SidePanel({ symbol }: { symbol: string }) {
           <span className="text-2xs text-faint">{s.kind.toUpperCase()} · {date(s.data_date, { year: false })}</span>
         </div>
         <div className="mt-1 flex items-baseline gap-2">
-          <span className="num text-[22px] font-semibold"><Price v={s.price} /></span>
-          <Pct v={s.change_pct} dp={2} className="text-[13px]" />
+          <span className="num text-[22px] font-semibold"><Price v={px} /></span>
+          <Pct v={live ? live.change_pct : s.change_pct} dp={2} className="text-[13px]" />
         </div>
+        <div className="mt-0.5"><PriceStamp q={live} session={lq.data?.session} fallbackDate={s.data_date} /></div>
         <div className="mt-0.5 line-clamp-2 text-xs text-muted" title={`${s.company ?? ''}${s.industry ? ` · ${s.industry}` : ''}`}>{s.company}{s.industry ? ` · ${s.industry}` : ''}</div>
-        <div className="mt-3"><div className="mb-1 text-2xs text-muted">52-week range{s.pct_from_52w_high != null && <> · <Pct v={s.pct_from_52w_high} color={false} /> from high</>}</div><RangeBar52w low={s.low_52w} high={s.high_52w} value={s.price} /></div>
+        <div className="mt-3"><div className="mb-1 text-2xs text-muted">52-week range{s.pct_from_52w_high != null && <> · <Pct v={s.pct_from_52w_high} color={false} /> from high</>}</div><RangeBar52w low={Math.min(s.low_52w ?? px, px)} high={Math.max(s.high_52w ?? px, px)} value={px} /></div>
         {s.results_on && <div className="mt-3"><ResultsChip on={s.results_on} inDays={daysBetween(today, s.results_on)} /></div>}
       </div>
       <div className="px-4 py-2">
@@ -143,7 +152,7 @@ function SidePanel({ symbol }: { symbol: string }) {
         {s.your_holding ? (
           <div className="space-y-1 text-[13px]">
             <div className="flex justify-between"><span className="text-muted">{qty(s.your_holding.qty)} @ <Price v={s.your_holding.buy_price} /></span><LevelPill level={s.your_holding.level} /></div>
-            <div className="flex justify-between"><span className="text-muted">P&amp;L</span><span><Money v={s.your_holding.pnl_amount} signed color /> <Pct v={s.your_holding.pnl_pct} /></span></div>
+            <div className="flex justify-between"><span className="text-muted">P&amp;L{live ? ' (live)' : ''}</span><span><Money v={holdPnl} signed color /> <Pct v={holdPct} /></span></div>
             {s.your_holding.alerts.map((a) => <div key={a} className="text-xs text-warn">{a}</div>)}
           </div>
         ) : <div className="text-xs text-muted">None. <Link to="/portfolio" className="link">Add holdings</Link></div>}
@@ -177,7 +186,7 @@ export default function ChartPage() {
   const params = useMemo(() => ({ tf, range, indicators: apiIndicators(ind) }), [tf, range, ind])
   const q = useChart(symbol, params)
   const symbols = useSymbols()
-  const { setPalette, setFyersLogin } = useUi()
+  const { setPalette } = useUi()
   const nav = useNavigate()
   const ref = useRef<PriceChartHandle>(null)
   const [lvSaved, setLvSel] = useLocalStorage<string[]>('qd.chart.levels', LEVEL_DEFAULT)
@@ -272,8 +281,11 @@ export default function ChartPage() {
     if (lvOn.has('candles')) {
       for (const p of dl.patterns) {
         const bull = p.bias === 'bullish', bear = p.bias === 'bearish'
+        // green / red only for a pattern whose own test found an edge after costs; the rest are grey: a shape, not a signal
+        const proven = p.evidence?.verdict === 'edge'
         out.push({ t: p.at.slice(0, 10), position: bear ? 'aboveBar' : 'belowBar', shape: bull ? 'arrowUp' : bear ? 'arrowDown' : 'circle', kind: 'pattern',
-          tone: bull ? 'profit' : bear ? 'loss' : 'neutral', text: p.name, detail: p.what, strategy_key: null })
+          tone: proven ? (bull ? 'profit' : bear ? 'loss' : 'neutral') : 'neutral',
+          text: proven ? p.name : `${p.name} (no edge)`, detail: p.what, strategy_key: null })
       }
     }
     if (lvOn.has('chart_patterns')) {
@@ -355,16 +367,17 @@ export default function ChartPage() {
             </div>
           </Popover>
           {liveQ.data && quote && (
-            <button type="button" disabled={!liveQ.data.delayed} onClick={() => setFyersLogin(true)}
-              title={liveQ.data.delayed ? `${liveQ.data.note} Click to log in to FYERS for real-time prices.` : liveQ.data.note}
-              className={cn('inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-2xs font-medium', liveQ.data.delayed ? 'border-warn/40 text-warn hover:bg-warn/10' : 'border-profit/40 text-profit')}>
-              <Radio className="h-3.5 w-3.5" />{liveQ.data.delayed ? 'Delayed ~15 min · log in for live' : 'Live (FYERS)'} · {num(quote.price, 2)} <Pct v={quote.change_pct} dp={2} />
-            </button>
+            <span title={liveQ.data.note}
+              className={cn('inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-2xs font-medium', quote.delayed ? 'border-loss/40' : 'border-profit/40')}>
+              <PriceStamp q={quote} session={liveQ.data.session} /><span className="num text-fg">{num(quote.price, 2)}</span> <Pct v={quote.change_pct} dp={2} />
+            </span>
           )}
           <IconButton label="Save chart as PNG" onClick={screenshot} className="max-sm:hidden"><Camera className="h-4 w-4" /></IconButton>
           <IconButton label={panel ? 'Hide side panel' : 'Show side panel'} onClick={() => setPanel(!panel)} className="max-md:hidden">{panel ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}</IconButton>
         </div>
       </div>
+      {/* the one tested answer for this stock, above everything else: BUY / SELL (exit) / HOLD / NO EDGE */}
+      <ActionPanel symbol={symbol} />
       {/* The side panel sits beside the chart from xl; below that it goes under the chart, so the chart keeps the
           full width (at 800 px it was squeezed to ~370 px). self-start: the chart card hugs the chart. */}
       <div className={cn('grid gap-3', panel && 'xl:grid-cols-[minmax(0,1fr)_320px]')}>

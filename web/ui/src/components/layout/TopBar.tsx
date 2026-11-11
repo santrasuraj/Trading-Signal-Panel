@@ -9,6 +9,7 @@ import { date, num, pct } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
 import { useIsMobile } from '@/lib/useMedia'
 import { IconButton, Kbd } from '../ui'
+import { PriceStamp } from '../LivePrice'
 import { Logo } from './Rail'
 import { ScanButton } from './ScanButton'
 
@@ -104,12 +105,13 @@ export function TopBar() {
           // when not even one item fits).
           <div className="qd-ticker-box hidden min-w-0 flex-1 lg:block">
           <div className="qd-ticker flex h-5 flex-wrap items-center gap-x-3 gap-y-8 overflow-hidden">
-            {lq.live && lq.data && (
-              <span title={lq.data.note} className={cn('flex shrink-0 items-center gap-1 text-2xs font-bold uppercase tracking-[0.06em]', lq.data.delayed ? 'text-warn' : 'text-profit')}>
-                <span className={cn('h-1.5 w-1.5 rounded-full', lq.data.delayed ? 'bg-warn' : 'animate-pulse bg-profit')} />{lq.data.delayed ? 'Delayed' : 'Live'}
-              </span>
-            )}
-            <TickerItem label="Nifty" value={t.nifty} chg={t.nifty_change_pct} to="/market/factors" />
+            {/* Nifty and where its price comes from stay together: the first thing that shows */}
+            <span className="flex shrink-0 items-center gap-1.5">
+              <TickerItem label="Nifty" value={t.nifty} chg={t.nifty_change_pct} to="/market/factors" />
+              {lq.data && (lq.quotes.NIFTY50 ?? Object.values(lq.quotes)[0]) && (
+                <PriceStamp q={lq.quotes.NIFTY50 ?? Object.values(lq.quotes)[0]} session={lq.data.session} className="shrink-0" compact />
+              )}
+            </span>
             <TickerItem label="N500" value={t.nifty500} chg={t.nifty500_change_pct} to="/market/factors" />
             <TickerItem label="VIX" value={t.vix} chg={t.vix_change_pct} to="/market/breadth" />
             <Link to="/market/breadth" className="focus-ring flex shrink-0 items-baseline gap-1.5 rounded px-1 text-xs hover:bg-raised" title="Advancing : declining stocks in the universe">
@@ -120,7 +122,13 @@ export function TopBar() {
           </div>
         )}
         {!t && <div className="flex-1" />}
-        <div className="flex-1 lg:hidden" />
+        {/* below 1024 px the full strip is hidden: Nifty alone, still live */}
+        {t ? (
+          <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5 lg:hidden">
+            {lq.data && lq.quotes.NIFTY50 && <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', lq.quotes.NIFTY50.delayed ? 'bg-loss' : 'bg-profit')} title={lq.data.note} />}
+            <TickerItem label="Nifty" value={t.nifty} chg={t.nifty_change_pct} to="/market/factors" />
+          </div>
+        ) : <div className="flex-1 lg:hidden" />}
         <div className="flex items-center gap-2">
           {t && <RegimePill label={t.label} />}
           {s && <span className="hidden sm:inline-flex"><FreshnessPill s={s} /></span>}

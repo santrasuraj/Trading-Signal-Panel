@@ -229,8 +229,9 @@ def _signals(sym: str, lt: dict, d: dict | None, daily: pd.DataFrame, chain: dic
             if a.get("symbol") == sym:
                 buy = a.get("action") == "BUY"
                 stop = f"; stop {a['stop']:,.2f}" if isinstance(a.get("stop"), (int, float)) else ""
-                out.append({"source": "strategy", "bias": "bullish" if buy else "bearish",
-                            "title": f"{s.get('name')}: {a.get('action')} at the next open",
+                # a long-only strategy's SELL closes its own position: an exit, not a bearish forecast
+                out.append({"source": "strategy", "bias": "bullish" if buy else "neutral",
+                            "title": f"{s.get('name')}: {'BUY' if buy else 'exits'} at the next open",
                             "detail": f"{a.get('reason') or ''}{stop}".strip("; "), "tested": tested, "tone": tone, "when": last})
         for p in s.get("positions") or []:
             if p.get("symbol") == sym:
@@ -245,15 +246,18 @@ def _signals(sym: str, lt: dict, d: dict | None, daily: pd.DataFrame, chain: dic
                 out.append({"source": "strategy", "bias": "neutral", "title": f"Ranked #{r.get('rank')} by {s.get('name')}",
                             "detail": "in the strategy's ranking, not (yet) bought", "tested": tested, "tone": tone, "when": last})
     for p in (d or {}).get("patterns") or []:
-        txt, tone = VERDICT_TEXT.get((p.get("evidence") or {}).get("verdict"), ("untested", None))
-        out.append({"source": "pattern", "bias": p["bias"], "title": p["name"],
+        ev = (p.get("evidence") or {}).get("verdict")
+        txt, tone = VERDICT_TEXT.get(ev, ("untested", None))
+        # a pattern counts as bullish / bearish only when its own test found an edge after costs
+        out.append({"source": "pattern", "bias": p["bias"] if ev == "edge" else "neutral", "title": p["name"],
                     "detail": f"{p['what']} ({_ago(p['bars_ago'])})",
                     "tested": txt, "tone": tone, "when": str(p["at"])[:10]})
     for p in (d or {}).get("chart_patterns") or []:
-        txt, tone = VERDICT_TEXT.get((p.get("evidence") or {}).get("verdict"), ("untested", None))
+        ev = (p.get("evidence") or {}).get("verdict")
+        txt, tone = VERDICT_TEXT.get(ev, ("untested", None))
         state = f"confirmed {p.get('direction') or ''}".strip() if p["status"] == "confirmed" else "forming"
         lvl = f"breakout {p['breakout']:,.2f}" if p.get("breakout") is not None else ""
-        out.append({"source": "chart_pattern", "bias": p["bias"], "title": f"{p['name']} ({state})",
+        out.append({"source": "chart_pattern", "bias": p["bias"] if ev == "edge" else "neutral", "title": f"{p['name']} ({state})",
                     "detail": f"{lvl}{'; void beyond ' + format(p['invalidation'], ',.2f') if p.get('invalidation') is not None else ''}",
                     "tested": txt, "tone": tone, "when": p.get("end")})
     out += _trend_events(daily)
@@ -263,9 +267,8 @@ def _signals(sym: str, lt: dict, d: dict | None, daily: pd.DataFrame, chain: dic
                         "tested": "not tested (positioning, not a signal)", "tone": None, "when": str(chain["time"])[:10]})
     if fut and fut.get("buildup"):
         label = str(fut["buildup"]).replace("_", " ")
-        bias = {"long_buildup": "bullish", "short_covering": "bullish", "short_buildup": "bearish",
-                "long_unwinding": "bearish"}.get(str(fut["buildup"]), "neutral")
-        out.append({"source": "futures", "bias": bias, "title": f"Futures: {label}",
+        # positioning, never tested as a signal here: shown, but it never votes bullish or bearish
+        out.append({"source": "futures", "bias": "neutral", "title": f"Futures: {label}",
                     "detail": f"price {fut.get('chg_pct') or 0:+.1f}%, open interest {fut.get('oi_chg_pct') or 0:+.1f}%",
                     "tested": "not tested (positioning, not a signal)", "tone": None, "when": fut.get("date")})
     sig = data.intraday_signals() or {}

@@ -7,7 +7,8 @@
   results    10  no quarterly results inside the warning window 10 (a results day can move the stock either way)
 
 It ranks signals against each other; it is not a forecast and never changes an order. Comparison-only
-strategies and SELL orders get no score.
+strategies and SELL orders get no score. The grade is capped at "fair" unless the strategy's own backtest is
+working: a too-new or mixed strategy's BUY can add up to 75 points on documented evidence and agreement alone.
 """
 from __future__ import annotations
 
@@ -56,7 +57,10 @@ def strength(o: dict, s: dict, agree_keys: set[str], names: dict[str, str], trac
          "note": (f"Reports results in {o.get('results_in_days')} day(s)" if warn else "No results day soon")},
     ]
     score = int(round(sum(p["points"] for p in parts)))
-    return {"score": score, "grade": grade(score), "agree": others, "parts": parts}
+    g = grade(score)
+    if status != "working" and g in ("strong", "good"):
+        g = "fair"            # strong or good only for a strategy whose own backtest is working (too new / mixed: capped)
+    return {"score": score, "grade": g, "agree": others, "parts": parts}
 
 
 def attach(orders: list[dict], lt: dict, strategies: list[dict], track: dict[str, dict]) -> list[dict]:

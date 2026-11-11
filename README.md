@@ -31,6 +31,37 @@ that volume has actually traded.
 No demo, sample or simulated data anywhere: every price, volume, open interest and disclosure comes from NSE, FYERS
 or Yahoo. Backtests and paper trading are calculations on those real prices, and every page labels them as such.
 
+### One answer per stock: BUY · SELL · HOLD · NO EDGE
+The **Today** page (`g d`) and the top of every **Chart** page give one answer per stock, taken only from tested rules
+(`web/api/services/action_svc.py`):
+
+| Answer | When |
+|---|---|
+| **BUY** | A strategy whose own survivorship-free backtest, after costs and tax, is *working* buys it at the next open, and no working strategy exits it. The card shows the entry reference, quantity, stop-loss, the risk if stopped, the backtest's yearly return with its timing range and worst drop, and the strategy's live signal record. |
+| **SELL (exit)** | You hold it and a working strategy exits it, or your own stop-loss is hit. |
+| **HOLD** | You hold it and no exit fired. |
+| **NO EDGE** | Anything else, with how close each working strategy is to acting (its rank and next review, or "holds it in its model since …"). |
+
+Buys of strategies whose backtest is *mixed* or *too new* are shown as "unproven buy" lines, never as the answer;
+not-working strategies never appear. Results days, the F&O ban list, the regime filter and provisional (intraday)
+scans are risk chips that never change the answer. Candle and chart patterns, option positioning, F&O build-ups and
+Claude never decide it: none of them shows an edge after costs in this app's own tests. A strategy's SELL is an exit of
+its own long position, so it is never counted as a bearish forecast anywhere (options verdict, outlook).
+
+### Live prices on every page
+Prices reach every page through one event stream (`/api/stream/quotes`, Server-Sent Events): the top bar, Chart (toolbar,
+side panel, last candle), Today, Portfolio (value, P&L, today's P&L and a live stop-loss / target check between scans),
+Screener (price and 1D of the first 100 rows), Overview (VIX, movers) and Signals. Every price carries its source and
+age: **Live 10:42:17** (FYERS WebSocket, about a second behind the exchange), **FYERS** (REST, ≤30 s), a red
+**DELAYED 15 MIN** badge (Yahoo, when you are not logged in to FYERS; click it to log in), **Last trade 15:29:58**
+(after the close, until NSE's official close after ~18:00) or **Close 10 Nov**.
+
+The live service (`4_intraday_live.bat`, started at 09:14) streams up to 100 symbols on the FYERS Standard plan and
+follows the screen: the symbols on the open pages come first (`data/intraday/live/subscriptions.json`), then the F&O
+instruments for big trades, then the most liquid stocks for the 5-minute bars. It writes `quotes.json` twice a second;
+symbols it doesn't stream fall back to FYERS REST quotes (cached 30 s and shared by every tab) and then Yahoo. FYERS
+Prime (₹499/month + GST) raises the stream to 5,000 symbols.
+
 ### Fyers login, step by step
 No command to run: everything happens in Quant Desk.
 1. Click the **Fyers** chip in the top bar (or **Log in** in Settings › Fyers, or the yellow banner), then **Log in with Fyers**. The Fyers login page opens in a new tab.
@@ -406,6 +437,7 @@ scanner/
   holdings.py    holdings file, corporate-action-adjusted buy price
   lock.py        one scan at a time across processes
   intraday/      5-minute bars (Yahoo, FYERS history and live WebSocket), MIS backtests -> intraday.json
+  intraday/quote_hub.py  live quotes from the FYERS WebSocket (quotes.json) and the screen's subscriptions
   options.py     NSE option chains: parsing, Black-76 IV / greeks, PCR, max pain, OI levels, unusual activity
   options_research.py  do PCR / max pain / the straddle's expected move hold up on the stored days?
   fno.py         NSE participant-wise OI and F&O bhavcopy: FII/DII/Pro/Client positions, futures build-ups
@@ -413,6 +445,8 @@ scanner/
   levels.py      price action: pivots, swing S/R, trend, candle / chart patterns, VWAP / opening range / profile
   pattern_study.py  every candle / chart pattern tested on the point-in-time top 500 (event study, after costs)
 web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), started by 3_dashboard.bat
+  api/routers/stream.py        live prices as Server-Sent Events (one stream per tab)
+  api/services/action_svc.py   one answer per stock: BUY / SELL (exit) / HOLD / NO EDGE (Today, Chart)
 app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 intraday_sync.py intraday jobs: backfill, 15:45 archive, live feed, re-test

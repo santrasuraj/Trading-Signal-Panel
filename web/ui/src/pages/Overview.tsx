@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertOctagon, AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Info, Minus, TrendingDown, TrendingUp } from 'lucide-react'
-import { useBreadth, useOverview, usePaper, useStrategies } from '@/api/hooks'
+import { useBreadth, useLiveQuotes, useOverview, usePaper, useStrategies } from '@/api/hooks'
 import type { Alert, Change, Horizon, IndexTile, Mover, OverviewResponse, ResultsEvent, StrategySummary } from '@/api/types'
 import { EvidenceChip, HorizonChip, StatusDot, TonePill, WarnChip } from '@/components/badges'
 import { LinesChart, type LineDef } from '@/components/charts/LinesChart'
@@ -24,6 +24,7 @@ function RegimeCard({ o }: { o: OverviewResponse }) {
   const m = o.market
   const Icon = m.label === 'Bullish' ? TrendingUp : m.label === 'Bearish' ? TrendingDown : Minus
   const tone = m.label === 'Bullish' ? 'text-profit' : m.label === 'Bearish' ? 'text-loss' : 'text-warn'
+  const vix = useLiveQuotes(['INDIAVIX']).quotes.INDIAVIX
   return (
     // Beside the breadth chart (xl) both cards are about as tall, so the facts follow the advice directly: no spacer
     // pushing them to the bottom (it left an empty block in the middle of the card).
@@ -57,7 +58,7 @@ function RegimeCard({ o }: { o: OverviewResponse }) {
         </div>
         <div className="flex items-baseline justify-between text-xs">
           <span className="text-muted">India VIX</span>
-          <span className="num"><span className="text-fg">{num(m.vix)}</span> <Pct v={m.vix_change_pct} dp={2} /></span>
+          <span className="num"><span className="text-fg">{num(vix?.price ?? m.vix)}</span> <Pct v={vix ? vix.change_pct : m.vix_change_pct} dp={2} /></span>
         </div>
       </div>
     </Card>
@@ -277,6 +278,7 @@ function PulseCard({ items, pit }: { items: StrategySummary[]; pit: boolean }) {
 }
 
 function MoverList({ title, rows, kind }: { title: string; rows: Mover[]; kind: 'up' | 'down' | 'vol' }) {
+  const lq = useLiveQuotes(rows.map((m) => m.symbol))
   return (
     <Card title={title} flush>
       <ul className="divide-y divide-line/70">
@@ -284,8 +286,8 @@ function MoverList({ title, rows, kind }: { title: string; rows: Mover[]; kind: 
           <li key={m.symbol}>
             <Link to={`/chart/${m.symbol}`} className="flex items-center gap-2 px-4 py-1.5 text-[13px] hover:bg-raised">
               <span className="min-w-0 flex-1 truncate font-semibold">{m.symbol}</span>
-              <Price v={m.price} className="text-muted" />
-              <span className="w-16 text-right">{kind === 'vol' ? <span className="num text-fg">{num(m.vol_ratio, 1)}×</span> : <Pct v={m.change_pct} dp={2} />}</span>
+              <Price v={lq.quotes[m.symbol]?.price ?? m.price} className="text-muted" />
+              <span className="w-16 text-right">{kind === 'vol' ? <span className="num text-fg">{num(m.vol_ratio, 1)}×</span> : <Pct v={lq.quotes[m.symbol] ? lq.quotes[m.symbol].change_pct : m.change_pct} dp={2} />}</span>
             </Link>
           </li>
         ))}

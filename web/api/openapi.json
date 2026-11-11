@@ -3239,6 +3239,72 @@
      }
     }
    }
+  },
+  "/api/action/{symbol}": {
+   "get": {
+    "tags": [
+     "action"
+    ],
+    "summary": "Action",
+    "description": "The one tested answer for this stock, with the strategy, its backtest and live record, and risk chips.",
+    "operationId": "action_api_action__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9&_.-]{0,24}$",
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActionCard"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/today": {
+   "get": {
+    "tags": [
+     "action"
+    ],
+    "summary": "Today",
+    "description": "Every tested BUY and SELL for the next open (your holdings first), and every HOLD.",
+    "operationId": "today_api_today_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TodayResponse"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -3260,6 +3326,535 @@
      "min_position"
     ],
     "title": "AccountConfig"
+   },
+   "ActionCard": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "company": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company"
+     },
+     "industry": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Industry"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "BUY",
+       "SELL",
+       "HOLD",
+       "NO_EDGE"
+      ],
+      "title": "State"
+     },
+     "headline": {
+      "type": "string",
+      "title": "Headline"
+     },
+     "provisional": {
+      "type": "boolean",
+      "title": "Provisional"
+     },
+     "primary": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ActionOrder"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "others": {
+      "items": {
+       "$ref": "#/components/schemas/ActionOrder"
+      },
+      "type": "array",
+      "title": "Others"
+     },
+     "unproven": {
+      "items": {
+       "$ref": "#/components/schemas/ActionOrder"
+      },
+      "type": "array",
+      "title": "Unproven"
+     },
+     "exits": {
+      "items": {
+       "$ref": "#/components/schemas/ActionOrder"
+      },
+      "type": "array",
+      "title": "Exits"
+     },
+     "holding": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ActionHolding"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "near": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Near"
+     },
+     "risks": {
+      "items": {
+       "$ref": "#/components/schemas/ActionRisk"
+      },
+      "type": "array",
+      "title": "Risks"
+     },
+     "as_of": {
+      "$ref": "#/components/schemas/AsOf"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "company",
+     "industry",
+     "state",
+     "headline",
+     "provisional",
+     "primary",
+     "others",
+     "unproven",
+     "exits",
+     "holding",
+     "near",
+     "risks",
+     "as_of",
+     "note"
+    ],
+    "title": "ActionCard"
+   },
+   "ActionHistory": {
+    "properties": {
+     "sessions": {
+      "type": "integer",
+      "title": "Sessions"
+     },
+     "with_actions": {
+      "type": "integer",
+      "title": "With Actions"
+     }
+    },
+    "type": "object",
+    "required": [
+     "sessions",
+     "with_actions"
+    ],
+    "title": "ActionHistory"
+   },
+   "ActionHolding": {
+    "properties": {
+     "qty": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Qty"
+     },
+     "buy_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Buy Price"
+     },
+     "price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Price"
+     },
+     "pnl_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pnl Pct"
+     },
+     "pnl_amount": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pnl Amount"
+     },
+     "stop_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop Price"
+     },
+     "target_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target Price"
+     },
+     "level": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Level"
+     },
+     "alerts": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Alerts"
+     }
+    },
+    "type": "object",
+    "required": [
+     "qty",
+     "buy_price",
+     "price",
+     "pnl_pct",
+     "pnl_amount",
+     "stop_price",
+     "target_price",
+     "level",
+     "alerts"
+    ],
+    "title": "ActionHolding"
+   },
+   "ActionOrder": {
+    "properties": {
+     "strategy_key": {
+      "type": "string",
+      "title": "Strategy Key"
+     },
+     "strategy_name": {
+      "type": "string",
+      "title": "Strategy Name"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "working",
+       "mixed",
+       "not-working",
+       "unknown"
+      ],
+      "title": "Status"
+     },
+     "horizon": {
+      "type": "string",
+      "enum": [
+       "intraday",
+       "swing",
+       "longterm"
+      ],
+      "title": "Horizon"
+     },
+     "cagr_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cagr Pct"
+     },
+     "after_tax_cagr_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "After Tax Cagr Pct"
+     },
+     "max_dd_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Dd Pct"
+     },
+     "trades": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trades"
+     },
+     "timing_low_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Timing Low Pct"
+     },
+     "timing_high_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Timing High Pct"
+     },
+     "live_level": {
+      "type": "string",
+      "enum": [
+       "good",
+       "bad",
+       "unknown"
+      ],
+      "title": "Live Level"
+     },
+     "live_verdict": {
+      "type": "string",
+      "title": "Live Verdict"
+     },
+     "action": {
+      "type": "string",
+      "enum": [
+       "BUY",
+       "SELL"
+      ],
+      "title": "Action"
+     },
+     "price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Price"
+     },
+     "qty": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Qty"
+     },
+     "amount": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Amount"
+     },
+     "stop": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop"
+     },
+     "stop_distance_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop Distance Pct"
+     },
+     "risk_amount": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Risk Amount"
+     },
+     "reason": {
+      "type": "string",
+      "title": "Reason"
+     },
+     "provisional": {
+      "type": "boolean",
+      "title": "Provisional"
+     },
+     "below_min_position": {
+      "type": "boolean",
+      "title": "Below Min Position"
+     },
+     "strength_score": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Strength Score"
+     },
+     "strength_grade": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Strength Grade"
+     }
+    },
+    "type": "object",
+    "required": [
+     "strategy_key",
+     "strategy_name",
+     "status",
+     "horizon",
+     "cagr_pct",
+     "after_tax_cagr_pct",
+     "max_dd_pct",
+     "trades",
+     "timing_low_pct",
+     "timing_high_pct",
+     "live_level",
+     "live_verdict",
+     "action",
+     "price",
+     "qty",
+     "amount",
+     "stop",
+     "stop_distance_pct",
+     "risk_amount",
+     "reason",
+     "provisional",
+     "below_min_position",
+     "strength_score",
+     "strength_grade"
+    ],
+    "title": "ActionOrder"
+   },
+   "ActionRisk": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "results",
+       "ban",
+       "regime",
+       "provisional"
+      ],
+      "title": "Kind"
+     },
+     "text": {
+      "type": "string",
+      "title": "Text"
+     }
+    },
+    "type": "object",
+    "required": [
+     "kind",
+     "text"
+    ],
+    "title": "ActionRisk"
    },
    "AiAnalysis": {
     "properties": {
@@ -17027,6 +17622,88 @@
      "time": {
       "type": "string",
       "title": "Time"
+     },
+     "source": {
+      "type": "string",
+      "enum": [
+       "live",
+       "fyers",
+       "yahoo",
+       "close"
+      ],
+      "title": "Source",
+      "default": "close"
+     },
+     "delayed": {
+      "type": "boolean",
+      "title": "Delayed",
+      "default": false
+     },
+     "open": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Open"
+     },
+     "high": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "High"
+     },
+     "low": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Low"
+     },
+     "volume": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Volume"
+     },
+     "bid": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bid"
+     },
+     "ask": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ask"
      }
     },
     "type": "object",
@@ -17035,7 +17712,15 @@
      "price",
      "prev_close",
      "change_pct",
-     "time"
+     "time",
+     "source",
+     "delayed",
+     "open",
+     "high",
+     "low",
+     "volume",
+     "bid",
+     "ask"
     ],
     "title": "Quote"
    },
@@ -17060,6 +17745,7 @@
      "source": {
       "type": "string",
       "enum": [
+       "live",
        "fyers",
        "yahoo",
        "close"
@@ -22705,6 +23391,90 @@
      "method"
     ],
     "title": "TimingRange"
+   },
+   "TodayCounts": {
+    "properties": {
+     "buy": {
+      "type": "integer",
+      "title": "Buy"
+     },
+     "sell": {
+      "type": "integer",
+      "title": "Sell"
+     },
+     "hold": {
+      "type": "integer",
+      "title": "Hold"
+     }
+    },
+    "type": "object",
+    "required": [
+     "buy",
+     "sell",
+     "hold"
+    ],
+    "title": "TodayCounts"
+   },
+   "TodayResponse": {
+    "properties": {
+     "as_of": {
+      "$ref": "#/components/schemas/AsOf"
+     },
+     "actions": {
+      "items": {
+       "$ref": "#/components/schemas/ActionCard"
+      },
+      "type": "array",
+      "title": "Actions"
+     },
+     "holds": {
+      "items": {
+       "$ref": "#/components/schemas/ActionCard"
+      },
+      "type": "array",
+      "title": "Holds"
+     },
+     "counts": {
+      "$ref": "#/components/schemas/TodayCounts"
+     },
+     "unproven_strategies": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Unproven Strategies"
+     },
+     "history": {
+      "$ref": "#/components/schemas/ActionHistory"
+     },
+     "empty_note": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Empty Note"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "as_of",
+     "actions",
+     "holds",
+     "counts",
+     "unproven_strategies",
+     "history",
+     "empty_note",
+     "note"
+    ],
+    "title": "TodayResponse"
    },
    "TrackRecordResponse": {
     "properties": {

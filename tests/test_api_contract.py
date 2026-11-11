@@ -1378,3 +1378,36 @@ def test_intraday_job_status_is_written_atomically(tmp_path, monkeypatch):
     assert seen and all(tmp and dst == str(status) for tmp, dst in seen)
     assert json.loads(status.read_text(encoding="utf-8"))["state"] == "done"
     assert not list(tmp_path.glob("*.tmp"))
+
+
+# ------------------------------------------------------------------ one answer per stock (action_svc)
+def test_today_gives_one_tested_answer_per_stock(client):
+    d = get_ok(client, "/api/today", M.TodayResponse)
+    sig = get_ok(client, "/api/signals", M.SignalsResponse)
+    working_buys = {o["symbol"] for g in sig["groups"] if g["strategy"]["status"] == "working"
+                    and not g["strategy"]["comparison_only"] for o in g["orders"] if o["action"] == "BUY"}
+    states = {c["symbol"]: c["state"] for c in d["actions"] + d["holds"]}
+    assert all(s in ("BUY", "SELL", "HOLD") for s in states.values())
+    for c in d["actions"]:
+        assert c["primary"] is not None or c["state"] == "SELL"
+        if c["state"] == "BUY":
+            assert c["symbol"] in working_buys and c["primary"]["status"] == "working"
+            assert c["holding"] is None                       # a stock you hold is HOLD, never BUY again
+    assert d["counts"] == {"buy": sum(c["state"] == "BUY" for c in d["actions"]),
+                           "sell": sum(c["state"] == "SELL" for c in d["actions"]), "hold": len(d["holds"])}
+    assert (d["empty_note"] is None) == bool(d["actions"])
+
+
+def test_action_card_never_answers_from_an_unproven_strategy(client):
+    sig = get_ok(client, "/api/signals", M.SignalsResponse)
+    for g in sig["groups"]:
+        for o in g["orders"][:3]:
+            c = get_ok(client, f"/api/action/{o['symbol']}", M.ActionCard)
+            assert c["state"] in ("BUY", "SELL", "HOLD", "NO_EDGE")
+            if c["primary"]:
+                assert c["primary"]["status"] == "working"
+            assert all(u["status"] != "working" and u["status"] != "not-working" for u in c["unproven"])
+            if g["strategy"]["status"] == "not-working":
+                assert all(x["strategy_key"] != g["strategy"]["key"] for x in c["others"] + c["unproven"] + c["exits"])
+    unknown = get_ok(client, "/api/action/NOSUCHSTOCK", M.ActionCard)
+    assert unknown["state"] == "NO_EDGE" and unknown["primary"] is None

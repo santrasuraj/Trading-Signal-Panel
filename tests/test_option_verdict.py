@@ -63,11 +63,20 @@ def test_old_chain_gives_no_verdict():
 
 
 def test_working_strategy_order_counts_disagreement_cancels():
-    strategies = [{"status": "working", "name": "Momentum", "actions": [{"symbol": "TEST", "action": "SELL"}]}]
-    d = ov.direction(_match(True), 10, strategies, "TEST")
-    assert d["bias"] == "none"                         # bullish setups vs a working strategy's sell
+    buy = [{"status": "working", "name": "Momentum", "actions": [{"symbol": "TEST", "action": "BUY"}]}]
+    d = ov.direction(_match(False), 10, buy, "TEST")
+    assert d["bias"] == "none"                         # bearish setups vs a working strategy's buy: they disagree
+    assert ov.direction(None, 10, buy, "TEST")["bias"] == "bullish"
     d2 = ov.direction(None, 10, [{"status": "not-working", "actions": [{"symbol": "TEST", "action": "BUY"}]}], "TEST")
     assert d2["bias"] == "none"                        # a strategy that is not working never counts
+
+
+def test_a_strategy_exit_is_not_a_bearish_vote():
+    sell = [{"status": "working", "name": "Momentum", "actions": [{"symbol": "TEST", "action": "SELL"}]}]
+    d = ov.direction(_match(True), 10, sell, "TEST")
+    assert d["bias"] == "bullish"                      # a long-only strategy closing its position forecasts nothing
+    assert any("not a bearish forecast" in r for r in d["reasons"])
+    assert ov.direction(None, 10, sell, "TEST")["bias"] == "none"
 
 
 def test_score_settles_at_the_expiry_close():

@@ -132,3 +132,14 @@ def test_strength_adds_up_its_parts_and_rewards_agreement():
     assert x["score"] == 30 + 25 + 10 + 10 + 10 == sum(p["points"] for p in x["parts"]) and x["grade"] == "strong"
     assert y["score"] == 20 + 12 + 0 + 5 + 0 and y["grade"] == "fair"
     assert all(p["points"] <= p["max"] for p in x["parts"]) and sum(p["max"] for p in x["parts"]) == 100
+
+
+def test_strength_grade_is_capped_for_a_strategy_that_is_not_working():
+    from web.api.services import signal_quality as q
+    # too new: 30 evidence + 5 status + 25 agreement + 5 track + 10 results = 75, which used to read "strong"
+    strategies = [_strat("n", status="too-new", buys=["X"]), _strat("a", buys=["X"]), _strat("b", held=["X"]),
+                  _strat("c", held=["X"])]
+    orders = [_order("n", "X")]
+    q.attach(orders, {}, strategies, {})
+    s = orders[0]["strength"]
+    assert s["score"] == 75 and s["grade"] == "fair"

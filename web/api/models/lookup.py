@@ -165,18 +165,31 @@ class StockSnapshot(Model):
 
 
 # ------------------------------------------------------------------ live quotes
+QuoteSource = Literal["live", "fyers", "yahoo", "close"]
+
+
 class Quote(Model):
     symbol: str
     price: float
     prev_close: float | None = None
     change_pct: float | None = None               # vs the previous close
-    time: str                                     # quote time (FYERS), or the trading day (Yahoo / stored close)
+    time: str                                     # last trade time (FYERS), or the trading day (Yahoo / stored close)
+    # live = FYERS WebSocket tick (about a second old); fyers = FYERS REST quote (up to 30 s old);
+    # yahoo = Yahoo, ~15 minutes behind; close = a stored daily close (market not open)
+    source: QuoteSource = "close"
+    delayed: bool = False
+    open: float | None = None                     # today's open / high / low / volume (live and FYERS only)
+    high: float | None = None
+    low: float | None = None
+    volume: float | None = None
+    bid: float | None = None
+    ask: float | None = None
 
 
 class QuotesResponse(Model):
     as_of: str
     session: MarketSession
-    source: Literal["fyers", "yahoo", "close"]    # close = market not open: last stored close, no network call
+    source: QuoteSource                           # the best source in this answer (per quote: Quote.source)
     delayed: bool                                 # yahoo: ~15 minutes behind
     note: str
     quotes: list[Quote]                           # symbols with no price at all are left out

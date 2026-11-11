@@ -99,9 +99,15 @@ export interface Features {
   config_edit: boolean;                 // P2
 }
 // GET /api/quotes?symbols=  live prices between scans (FYERS real time, else Yahoo ~15 min delayed; last close when shut)
-export interface Quote { symbol: string; price: number; prev_close: number | null; change_pct: number | null; time: string }
+// live = FYERS WebSocket tick (~1 s old); fyers = FYERS REST (≤30 s); yahoo = ~15 min delayed; close = stored daily close
+export type QuoteSource = 'live' | 'fyers' | 'yahoo' | 'close'
+export interface Quote {
+  symbol: string; price: number; prev_close: number | null; change_pct: number | null; time: string;
+  source?: QuoteSource; delayed?: boolean;
+  open?: number | null; high?: number | null; low?: number | null; volume?: number | null; bid?: number | null; ask?: number | null;
+}
 export interface QuotesResponse {
-  as_of: string; session: MarketSession; source: 'fyers' | 'yahoo' | 'close'; delayed: boolean; note: string; quotes: Quote[];
+  as_of: string; session: MarketSession; source: QuoteSource; delayed: boolean; note: string; quotes: Quote[];
 }
 export interface Ticker {
   nifty: number | null; nifty_change_pct: number | null;
