@@ -13,6 +13,7 @@ const Benchmarks = lazy(() => import('@/pages/Benchmarks'))
 const Orders = lazy(() => import('@/pages/Orders'))
 const Replay = lazy(() => import('@/pages/Replay'))
 const Charts = lazy(() => import('@/pages/Charts'))
+const Sim = lazy(() => import('@/pages/Sim'))
 const Coach = lazy(() => import('@/pages/Coach'))
 const Signals = lazy(() => import('@/pages/Signals'))
 const SignalTrack = lazy(() => import('@/pages/SignalTrack'))
@@ -78,6 +79,7 @@ export const router = createBrowserRouter([
       { path: 'orders', element: g(<Orders />) },
       { path: 'replay', element: g(<Replay />) },
       { path: 'charts', element: g(<Charts />) },
+      { path: 'sim', element: g(<Sim />) },
       { path: 'coach', element: g(<Coach />) },
       { path: 'paper', element: g(<Paper />) },
       { path: 'paper/:key', element: g(<Paper />) },

@@ -4728,6 +4728,280 @@
      }
     }
    }
+  },
+  "/api/sim": {
+   "get": {
+    "tags": [
+     "sim"
+    ],
+    "summary": "Account",
+    "description": "The practice account: cash, positions marked to the live price, orders, closed trades.",
+    "operationId": "account_api_sim_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/sim/order": {
+   "post": {
+    "tags": [
+     "sim"
+    ],
+    "summary": "Order",
+    "description": "A practice order (never sent to FYERS).",
+    "operationId": "order_api_sim_order_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SimOrder"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/sim/cancel/{order_id}": {
+   "post": {
+    "tags": [
+     "sim"
+    ],
+    "summary": "Cancel",
+    "operationId": "cancel_api_sim_cancel__order_id__post",
+    "parameters": [
+     {
+      "name": "order_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{10}$",
+       "title": "Order Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/sim/close/{symbol}": {
+   "post": {
+    "tags": [
+     "sim"
+    ],
+    "summary": "Close",
+    "operationId": "close_api_sim_close__symbol__post",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 25,
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/sim/levels/{symbol}": {
+   "post": {
+    "tags": [
+     "sim"
+    ],
+    "summary": "Levels",
+    "operationId": "levels_api_sim_levels__symbol__post",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 25,
+       "title": "Symbol"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Levels"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/sim/reset": {
+   "post": {
+    "tags": [
+     "sim"
+    ],
+    "summary": "Reset",
+    "operationId": "reset_api_sim_reset_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Reset"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/depth/{symbol}": {
+   "get": {
+    "tags": [
+     "sim"
+    ],
+    "summary": "Depth",
+    "description": "Five best bids and offers from FYERS (needs today's login).",
+    "operationId": "depth_api_depth__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 25,
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -12603,6 +12877,34 @@
     ],
     "title": "Leader"
    },
+   "Levels": {
+    "properties": {
+     "stop": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop"
+     },
+     "target": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target"
+     }
+    },
+    "type": "object",
+    "title": "Levels"
+   },
    "LevelsResponse": {
     "properties": {
      "symbol": {
@@ -20132,6 +20434,25 @@
     ],
     "title": "ReplayTrade"
    },
+   "Reset": {
+    "properties": {
+     "cash": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 1000000000.0,
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cash"
+     }
+    },
+    "type": "object",
+    "title": "Reset"
+   },
    "ResultsCalendarHealth": {
     "properties": {
      "note": {
@@ -21376,6 +21697,87 @@
      "totals"
     ],
     "title": "SignalsResponse"
+   },
+   "SimOrder": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "maxLength": 25,
+      "title": "Symbol"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "BUY",
+       "SELL"
+      ],
+      "title": "Side"
+     },
+     "qty": {
+      "type": "integer",
+      "maximum": 1000000.0,
+      "minimum": 1.0,
+      "title": "Qty"
+     },
+     "type": {
+      "type": "string",
+      "enum": [
+       "MARKET",
+       "LIMIT"
+      ],
+      "title": "Type",
+      "default": "LIMIT"
+     },
+     "product": {
+      "type": "string",
+      "enum": [
+       "CNC",
+       "INTRADAY"
+      ],
+      "title": "Product",
+      "default": "CNC"
+     },
+     "limit_price": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limit Price"
+     },
+     "stop": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop"
+     },
+     "target": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "side",
+     "qty"
+    ],
+    "title": "SimOrder"
    },
    "SmDeal": {
     "properties": {

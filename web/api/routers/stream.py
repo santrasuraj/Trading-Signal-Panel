@@ -22,7 +22,7 @@ from scanner.intraday import order_feed
 
 from .. import errors
 from ..paths import P
-from ..services import clock, data, live_subs, quotes_svc
+from ..services import clock, data, live_subs, quotes_svc, sim_svc
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
 
@@ -60,6 +60,10 @@ def _check_alerts(quotes: list[dict], rules: bool = False) -> None:
         watch.notify(fired)
     except Exception:
         errors.log.exception("Checking price alerts failed")
+    try:                                   # the practice account: resting limit orders, stops and targets
+        sim_svc.on_quotes({q["symbol"]: q for q in quotes})
+    except Exception:
+        errors.log.exception("Practice account check failed")
 
 
 async def quote_events(request: Request, syms: list[str]):

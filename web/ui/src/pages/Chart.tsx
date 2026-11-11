@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, Layers, PanelRightClose, PanelRightOpen, Ruler, Search, SlidersHorizontal } from 'lucide-react'
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Crosshair, Layers, PanelRightClose, PanelRightOpen, Ruler, Search, SlidersHorizontal } from 'lucide-react'
 import { useChart, useLiveQuotes, useStock, useSymbols } from '@/api/hooks'
 import { useLevels, type LvChartPattern } from '@/api/levels'
 import { useOutlook } from '@/api/outlook'
@@ -35,6 +35,9 @@ import { heikinAshi, lineBreak, renko, type ChartType } from '@/lib/chartTypes'
 import { WatchButton, AlertButton } from '@/components/WatchButtons'
 import { useDrawings, useIntradayChart, type IntradayTf } from '@/api/watch'
 import { DrawTools } from '@/components/DrawTools'
+import { DepthLadder } from '@/components/DepthLadder'
+import { OrderTicket } from '@/components/OrderTicket'
+import type { Ticket } from '@/api/orders'
 import { levelOverlays, lineDrawings } from '@/lib/userDrawings'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
@@ -217,6 +220,27 @@ export default function ChartPage() {
   const liveQ = useLiveQuotes([symbol])
   const quote = liveQ.quotes[symbol]
   const liveTick = useMemo<LiveTick | null>(() => (quote ? { date: todayIST(), price: quote.price } : null), [quote])
+  // trade on the chart: a click opens an order ticket (practice unless real orders are on) with a limit at that price
+  const [tradeOn, setTradeOn] = useState(false)
+  const [ticket, setTicket] = useState<Ticket | null>(null)
+  const openTicket = (side: 'BUY' | 'SELL', price: number) => {
+    const px = Math.round(price * 20) / 20
+    setTicket({ symbol, side, qty: Math.max(1, Math.floor(50_000 / px)), type: 'LIMIT', product: 'CNC', limit_price: px, stop: null, target: null, source: 'chart' })
+  }
+  useEffect(() => { setTradeOn(false) }, [symbol])
+  useEffect(() => {
+    const chart = ref.current?.chart()
+    const series = ref.current?.series()
+    if (!tradeOn || !chart || !series || intraTf) return
+    const onClick = (p: { point?: { x: number; y: number } }) => {
+      const v = p.point ? series.coordinateToPrice(p.point.y) : null
+      if (v == null || !(v > 0)) return
+      const last = quote?.price ?? q.data?.bars.c[q.data.bars.c.length - 1] ?? v
+      openTicket(v <= last ? 'BUY' : 'SELL', v)
+    }
+    chart.subscribeClick(onClick)
+    return () => chart.unsubscribeClick(onClick)
+  }) // eslint-disable-line react-hooks/exhaustive-deps
   const olq = useOutlook(symbol, liveQ.live)
   const iq = useIntradayChart(symbol, intraTf ?? '5m', days, !!intraTf)
   const ol = olq.data?.symbol === symbol ? olq.data : undefined
@@ -389,6 +413,10 @@ export default function ChartPage() {
             </div>
           </Popover>
           <DrawTools symbol={symbol} chartRef={ref} price={quote?.price ?? null} enabled={!intraTf && !!d} />
+          <Button icon={<Crosshair className="h-3.5 w-3.5" />} onClick={() => setTradeOn((x) => !x)} disabled={!!intraTf || !d}
+            title="Click the chart to open an order ticket at that price (practice unless real orders are switched on)" className={cn('max-sm:px-2.5', tradeOn && 'border-accent text-accent')}>
+            <span className="max-sm:hidden">{tradeOn ? 'Trading: click a price' : 'Trade on chart'}</span>
+          </Button>
           <Popover align="right" width={260} trigger={({ toggle, open }) => <Button icon={<Layers className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Markers" title="Strategy markers" className="max-sm:px-2.5"><span className="max-sm:hidden">Markers</span>{markerSet ? ` · ${markerSet.size}` : ''}</Button>}>
             <div className="py-1">
               {available.length === 0 ? <div className="px-2.5 py-2 text-xs text-muted">No strategy traded this symbol in the recent trades. Full history needs trades.parquet (next scan).</div> : (
@@ -457,7 +485,13 @@ export default function ChartPage() {
             </div>
           )}
         </Card>
-        {panel && <Card flush className="min-w-0 self-start"><SidePanel symbol={symbol} /></Card>}
+        {panel && (
+          <div className="min-w-0 space-y-3 self-start">
+            <Card flush><SidePanel symbol={symbol} /></Card>
+            <DepthLadder symbol={symbol} onPick={openTicket} />
+          </div>
+        )}
+        {ticket && <OrderTicket open={!!ticket} onClose={() => setTicket(null)} initial={ticket} />}
       </div>
       <AiAnalyst symbol={symbol} />
       <OutlookPanel symbol={symbol} livePrice={quote?.price ?? null} />

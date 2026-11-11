@@ -1,5 +1,5 @@
 import {
-  Briefcase, CandlestickChart, LayoutGrid, History, GraduationCap, Crosshair, Gauge, Receipt, Globe2, Landmark, Layers, FlaskConical, LayoutDashboard, ListChecks, ListFilter, NotebookPen, Scale, Settings2, Star, Timer, Trophy, type LucideIcon,
+  Briefcase, CandlestickChart, LayoutGrid, Gamepad2, History, GraduationCap, Crosshair, Gauge, Receipt, Globe2, Landmark, Layers, FlaskConical, LayoutDashboard, ListChecks, ListFilter, NotebookPen, Scale, Settings2, Star, Timer, Trophy, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem { id: string; label: string; to: string; icon: LucideIcon; keys?: string; match: (p: string) => boolean; badge?: string }
@@ -16,6 +16,7 @@ export const NAV: NavItem[] = [
   { id: 'charts', label: 'Multi-chart', to: '/charts', icon: LayoutGrid, keys: 'g l', match: (p) => p === '/charts' },
   { id: 'portfolio', label: 'Portfolio', to: '/portfolio', icon: Briefcase, keys: 'g p', match: (p) => p.startsWith('/portfolio') },
   { id: 'orders', label: 'Orders', to: '/orders', icon: Receipt, keys: 'g e', match: (p) => p.startsWith('/orders') },
+  { id: 'sim', label: 'Practice', to: '/sim', icon: Gamepad2, keys: 'g u', match: (p) => p.startsWith('/sim') },
   { id: 'replay', label: 'Replay', to: '/replay', icon: History, keys: 'g y', match: (p) => p.startsWith('/replay') },
   { id: 'coach', label: 'Coach', to: '/coach', icon: GraduationCap, keys: 'g h', match: (p) => p.startsWith('/coach') },
   { id: 'paper', label: 'Paper', to: '/paper', icon: NotebookPen, keys: 'g a', match: (p) => p.startsWith('/paper') },
@@ -28,4 +29,4 @@ export const NAV: NavItem[] = [
 ]
 export const SETTINGS_NAV: NavItem = { id: 'settings', label: 'Data & Settings', to: '/settings', icon: Settings2, keys: 'g ,', match: (p) => p.startsWith('/settings') }
 
-export const G_KEYS: Record<string, string> = { o: '/', d: '/today', w: '/watchlist', x: '/scans', k: '/benchmarks', e: '/orders', l: '/charts', y: '/replay', h: '/coach', s: '/signals', t: '/strategies', c: '/chart', p: '/portfolio', m: '/market', b: '/smart-money', ',': '/settings', r: '/screener', i: '/intraday', a: '/paper', n: '/options', f: '/fno' }
+export const G_KEYS: Record<string, string> = { o: '/', d: '/today', w: '/watchlist', x: '/scans', k: '/benchmarks', e: '/orders', l: '/charts', u: '/sim', y: '/replay', h: '/coach', s: '/signals', t: '/strategies', c: '/chart', p: '/portfolio', m: '/market', b: '/smart-money', ',': '/settings', r: '/screener', i: '/intraday', a: '/paper', n: '/options', f: '/fno' }
