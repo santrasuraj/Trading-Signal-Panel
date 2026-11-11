@@ -161,6 +161,10 @@ def _run(args) -> int:
                   f"{fy.limiter.usage()['data']['calls_today']}.")
             fyers_sync.sync(fy, symbols, INTRADAY_DIR, days, log=lambda m: print(m, flush=True),
                             progress=lambda i, n, s: print(f"  {i}/{n} {s}", flush=True) if i % 10 == 0 else None)
+            one_min = int((cfg.get("intraday") or {}).get("one_minute_days", 60) or 0)
+            if one_min > 0:   # 1-minute history for the 1m chart and replays (its own bookkeeping, fyers_sync_1m.json)
+                print(f"1-minute bars for the last {one_min} days...", flush=True)
+                fyers_sync.sync(fy, symbols, INTRADAY_DIR, one_min, resolution="1", log=lambda m: print(m, flush=True))
 
     if args.live:
         _wait_for_open()

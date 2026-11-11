@@ -166,6 +166,7 @@ telegram:
 # Intraday (MIS) strategies on 5-minute bars. Data: FYERS first (history + live WebSocket), Yahoo fallback.
 intraday:
   history_days: 365          # FYERS keeps ~1 year of intraday history (Standard plan); we archive daily
+  one_minute_days: 60        # 1-minute bars kept from FYERS for the 1m chart (~150 calls a day after the archive; 0 = off)
   max_sync_calls_per_scan: 200   # a scan tops up at most this many FYERS calls; bigger backfills: 5_intraday_backfill.bat
   min_price: 100             # liquid F&O stocks only (intraday is not allowed in trade-to-trade series)
   min_turnover_cr: 100       # 20-day average traded value, Rs crore

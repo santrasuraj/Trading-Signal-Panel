@@ -4108,7 +4108,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/TextBody"
+        "$ref": "#/components/schemas/web__api__routers__scans__TextBody"
        }
       }
      },
@@ -4978,6 +4978,268 @@
        "type": "string",
        "maxLength": 25,
        "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/builder/from-text": {
+   "post": {
+    "tags": [
+     "builder"
+    ],
+    "summary": "From Text",
+    "description": "Claude turns a strategy written in plain English into a spec (it never says whether it works).",
+    "operationId": "from_text_api_builder_from_text_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/web__api__routers__builder__TextBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/builder/test": {
+   "post": {
+    "tags": [
+     "builder"
+    ],
+    "summary": "Test",
+    "description": "The spec through the same tests as a built-in strategy (8 years, survivorship-free, costs and tax).",
+    "operationId": "test_api_builder_test_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Spec"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/builder/optimise": {
+   "post": {
+    "tags": [
+     "builder"
+    ],
+    "summary": "Optimise",
+    "description": "Start a walk-forward optimisation of the exits (background; poll GET /api/builder/optimise/{id}).",
+    "operationId": "optimise_api_builder_optimise_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Spec"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/builder/optimise/{job_id}": {
+   "get": {
+    "tags": [
+     "builder"
+    ],
+    "summary": "Optimise Status",
+    "operationId": "optimise_status_api_builder_optimise__job_id__get",
+    "parameters": [
+     {
+      "name": "job_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{16}$",
+       "title": "Job Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/builder/saved": {
+   "get": {
+    "tags": [
+     "builder"
+    ],
+    "summary": "Saved",
+    "operationId": "saved_api_builder_saved_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "builder"
+    ],
+    "summary": "Save",
+    "operationId": "save_api_builder_saved_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SaveBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/builder/saved/{sid}": {
+   "delete": {
+    "tags": [
+     "builder"
+    ],
+    "summary": "Delete",
+    "operationId": "delete_api_builder_saved__sid__delete",
+    "parameters": [
+     {
+      "name": "sid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{10}$",
+       "title": "Sid"
       }
      }
     ],
@@ -20729,6 +20991,44 @@
     "type": "object",
     "title": "RuleRight"
    },
+   "SaveBody": {
+    "properties": {
+     "spec": {
+      "additionalProperties": true,
+      "type": "object",
+      "title": "Spec"
+     },
+     "id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 20
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Id"
+     },
+     "result": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Result"
+     }
+    },
+    "type": "object",
+    "required": [
+     "spec"
+    ],
+    "title": "SaveBody"
+   },
    "ScanAccepted": {
     "properties": {
      "accepted": {
@@ -25841,20 +26141,6 @@
     ],
     "title": "TelegramConfig"
    },
-   "TextBody": {
-    "properties": {
-     "text": {
-      "type": "string",
-      "maxLength": 1000,
-      "title": "Text"
-     }
-    },
-    "type": "object",
-    "required": [
-     "text"
-    ],
-    "title": "TextBody"
-   },
    "Ticker": {
     "properties": {
      "nifty": {
@@ -27286,6 +27572,34 @@
      "nifty50"
     ],
     "title": "YearlyRow"
+   },
+   "web__api__routers__builder__TextBody": {
+    "properties": {
+     "text": {
+      "type": "string",
+      "maxLength": 1500,
+      "title": "Text"
+     }
+    },
+    "type": "object",
+    "required": [
+     "text"
+    ],
+    "title": "TextBody"
+   },
+   "web__api__routers__scans__TextBody": {
+    "properties": {
+     "text": {
+      "type": "string",
+      "maxLength": 1000,
+      "title": "Text"
+     }
+    },
+    "type": "object",
+    "required": [
+     "text"
+    ],
+    "title": "TextBody"
    }
   }
  }

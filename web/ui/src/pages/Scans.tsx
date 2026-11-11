@@ -30,7 +30,7 @@ function FieldSelect({ value, onChange, fields, label }: { value: string; onChan
   )
 }
 
-function RuleRow({ r, i, fields, ops, onChange, onRemove }: {
+export function RuleRow({ r, i, fields, ops, onChange, onRemove }: {
   r: ScanRule; i: number; fields: ScanField[]; ops: ScanOp[]; onChange: (r: ScanRule) => void; onRemove: () => void
 }) {
   const byField = r.right.field != null

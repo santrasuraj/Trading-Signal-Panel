@@ -230,7 +230,7 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
         ps = pos.pop(c)
         fill = raw_px * (1 - slip_arr[t, c])
         value = ps["qty"] * fill
-        proceeds = value - costs.sell_cost(value)
+        proceeds = value - (costs.on(dates[t]) if hasattr(costs, "on") else costs).sell_cost(value)
         cash += proceeds
         pnl = proceeds - ps["cost"]
         trades.append(Trade(symbols[c], dates[ps["t"]], ps["entry"], dates[t], fill, ps["qty"], pnl,
@@ -288,7 +288,7 @@ def simulate(strategy: EventStrategy | RankStrategy, f: Factors, costs: CostMode
                 if qty < 1 or qty * fill < min_position:
                     continue
                 value = qty * fill
-                cost = value + costs.buy_cost(value)
+                cost = value + (costs.on(dates[t]) if hasattr(costs, "on") else costs).buy_cost(value)
                 if cost > cash:
                     continue
                 cash -= cost

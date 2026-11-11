@@ -34,7 +34,7 @@ from .universe import get_universe, industry_map
 LATEST_FILE = RESULTS_DIR / "latest.json"
 TIMING_CACHE = RESULTS_DIR / "timing_cache.json"
 REJECTED_CACHE = RESULTS_DIR / "rejected_cache.json"   # B4: re-test results of strategies that never trade
-ENGINE_VERSION = 8  # bump when simulation logic changes, so cached timing ranges are recomputed
+ENGINE_VERSION = 9  # bump when simulation logic changes, so cached timing ranges are recomputed
 NEEDS_INDUSTRY = {"sector_rotation"}   # strategies whose picks depend on each stock's industry
 # (4: ETF stray open prints cleaned, low-vol "most traded" among stocks only; 6: no fills on gap-filled days or
 #  at locked circuits, cash yield less a fund fee and taxed, calendar-year CAGR, Sharpe over cash, idle windows
