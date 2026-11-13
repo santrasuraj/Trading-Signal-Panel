@@ -1,20 +1,23 @@
 // Signals `/signals` (spec 3.4): orders for the next open by horizon, sized to capital/allocations, stops, risk,
 // results warnings; allocation bar with a session-only what-if; comparison-only groups collapsed. The Intraday tab
-// shows today's live signals, only from intraday strategies whose backtest shows a real edge after costs. BUY signals
+// shows today's live signals: with show_untested (config.yaml) from every intraday strategy and the live F&O OI
+// build-ups, each labelled with its backtest result (Proven / Not proven / Lost in test / Untested), with an AI trade
+// plan per symbol; otherwise only from strategies whose backtest shows a real edge after costs. BUY signals
 // carry a strength score (strongest first in their own card); the track record of past signals is /signals/track.
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ChevronDown, History, Info, ShieldCheck, SlidersHorizontal, Undo2 } from 'lucide-react'
+import { ChevronDown, History, Info, ShieldCheck, SlidersHorizontal, Sparkles, Undo2 } from 'lucide-react'
 import { useIntradaySignals, useLiveQuotes, useSignals } from '@/api/hooks'
 import { isFailure } from '@/api/client'
 import type { Horizon, IntradaySignal, Quote, SignalGroup, SignalsResponse } from '@/api/types'
+import { AiPlan } from '@/components/AiPlan'
 import { DataTable, type Col } from '@/components/DataTable'
-import { EvidenceChip, EtfChip, HorizonChip, StatusBadge, WarnChip } from '@/components/badges'
+import { EvidenceChip, EtfChip, HorizonChip, ProofBadge, StatusBadge, WarnChip } from '@/components/badges'
 import { BiasNote, OrdersTable, PageHeader, flatteredNote } from '@/components/domain'
 import { Banner, EmptyState, ErrorState, RefreshFailed, Skeleton, SkeletonRows } from '@/components/feedback'
 import { Money, Pct, Price } from '@/components/num'
-import { Button, Card, Popover, Tabs } from '@/components/ui'
+import { Button, Card, Popover, Segmented, Tabs } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { date, dateTimeIST, keepDatesTogether, money, num, pct, qty } from '@/lib/format'
 import { allocationTotal, formatAllocations, parseAllocations } from '@/lib/sizing'
@@ -158,44 +161,77 @@ function QuietStrategies({ groups }: { groups: SignalGroup[] }) {
   )
 }
 
-const INTRA_COLS: Col<IntradaySignal>[] = [
-  { id: 'sym', header: 'Symbol', value: (r) => r.symbol, cell: (r) => <Link to={`/chart/${r.symbol}`} className="font-semibold hover:underline">{r.symbol}</Link>, sticky: true, mobile: 'primary' },
-  { id: 'st', header: 'Strategy', value: (r) => r.strategy_name, cell: (r) => <span className="block max-w-[180px] truncate">{r.strategy_name}</span> },
-  { id: 'side', header: 'Side', value: (r) => r.side, cell: (r) => <span className={cn('text-2xs font-bold tracking-[0.04em]', r.side === 'LONG' ? 'text-profit' : 'text-loss')}>{r.side}</span> },
-  { id: 'state', header: 'State', value: (r) => r.state, cell: (r) => <span className={cn('text-xs', r.state === 'open' ? 'font-semibold text-fg' : 'text-muted')}>{r.state === 'open' ? 'Open' : `Closed ${r.exit_time ?? ''} (${r.reason})`}</span>, mobile: 'secondary', label: 'State' },
-  { id: 'in', header: 'In', value: (r) => r.entry_time, cell: (r) => <span className="num text-muted">{r.entry_time}</span> },
-  { id: 'entry', header: 'Entry ₹', align: 'right', value: (r) => r.entry, cell: (r) => <Price v={r.entry} /> },
-  { id: 'stop', header: 'Stop ₹', align: 'right', value: (r) => r.stop, cell: (r) => <Price v={r.stop} /> },
-  { id: 'qty', header: 'Qty', align: 'right', value: (r) => r.qty, cell: (r) => <span className="num">{r.qty}</span> },
-  { id: 'last', header: 'Last ₹', title: 'Exit price, or the latest bar while open', align: 'right', value: (r) => r.last, cell: (r) => <Price v={r.last} /> },
-  { id: 'pnl', header: 'P&L ₹', title: 'After intraday charges and slippage (open: if closed at the last price)', align: 'right', value: (r) => r.pnl, cell: (r) => <Money v={r.pnl} signed color />, mobile: 'value' },
-  { id: 'ret', header: 'Return', align: 'right', value: (r) => r.ret_pct, cell: (r) => <Pct v={r.ret_pct} dp={2} />, mobile: 'change' },
-]
+function intraCols(onPlan: (symbol: string) => void): Col<IntradaySignal>[] {
+  return [
+    { id: 'sym', header: 'Symbol', value: (r) => r.symbol, cell: (r) => <Link to={`/chart/${r.symbol}`} className="font-semibold hover:underline">{r.symbol}</Link>, sticky: true, mobile: 'primary' },
+    { id: 'st', header: 'Strategy', value: (r) => r.strategy_name, cell: (r) => (
+      <span className="block max-w-[220px]" title={r.detail ?? undefined}>
+        <span className="block truncate">{r.strategy_name}</span>
+        {r.strategy_key === 'oi_buildup' && r.detail && <span className="block truncate text-2xs text-muted">{r.detail}</span>}
+      </span>
+    ) },
+    { id: 'proof', header: 'Backtest', title: 'The strategy\'s result in the current intraday backtest', value: (r) => r.strategy_status, cell: (r) => <ProofBadge status={r.strategy_status} />, mobile: 'secondary', label: 'Backtest' },
+    { id: 'side', header: 'Side', value: (r) => r.side, cell: (r) => <span className={cn('text-2xs font-bold tracking-[0.04em]', r.side === 'LONG' ? 'text-profit' : 'text-loss')}>{r.side}</span> },
+    { id: 'state', header: 'State', value: (r) => r.state, cell: (r) => <span className={cn('text-xs', r.state === 'open' ? 'font-semibold text-fg' : 'text-muted')}>{r.state === 'open' ? 'Open' : `Closed ${r.exit_time ?? ''} (${r.reason})`}</span>, label: 'State' },
+    { id: 'in', header: 'In', value: (r) => r.entry_time, cell: (r) => <span className="num text-muted">{r.entry_time}</span> },
+    { id: 'entry', header: 'Entry ₹', align: 'right', value: (r) => r.entry, cell: (r) => <Price v={r.entry} /> },
+    { id: 'stop', header: 'Stop ₹', align: 'right', value: (r) => r.stop, cell: (r) => <Price v={r.stop} /> },
+    { id: 'target', header: 'Target ₹', title: 'Twice the risk, where the strategy sets one', align: 'right', value: (r) => r.target, cell: (r) => <Price v={r.target} /> },
+    { id: 'qty', header: 'Qty', align: 'right', value: (r) => r.qty, cell: (r) => <span className="num">{r.qty}</span> },
+    { id: 'last', header: 'Last ₹', title: 'Exit price, or the latest bar while open', align: 'right', value: (r) => r.last, cell: (r) => <Price v={r.last} /> },
+    { id: 'pnl', header: 'P&L ₹', title: 'After intraday charges and slippage (open: if closed at the last price)', align: 'right', value: (r) => r.pnl, cell: (r) => <Money v={r.pnl} signed color />, mobile: 'value' },
+    { id: 'ret', header: 'Return', align: 'right', value: (r) => r.ret_pct, cell: (r) => <Pct v={r.ret_pct} dp={2} />, mobile: 'change' },
+    { id: 'ai', header: '', value: () => null, cell: (r) => (
+      <Button size="sm" variant="ghost" icon={<Sparkles className="h-3.5 w-3.5 text-violet" />} onClick={() => onPlan(r.symbol)} title={`Claude reads ${r.symbol}'s chart and writes an IF-THEN plan`}>AI plan</Button>
+    ) },
+  ]
+}
 
-/** Today's live intraday signals (MIS, squared off the same day), only from strategies whose backtest passed. */
+/** Today's live intraday signals (MIS, squared off the same day). With show_untested (config.yaml) every strategy gives
+ * signals, each labelled with its backtest result; otherwise only strategies whose backtest passed. */
 function IntradaySignals() {
   const q = useIntradaySignals()
   const d = q.data
+  const [provenOnly, setProvenOnly] = useState(false)
+  const [planFor, setPlanFor] = useState<string | null>(null)
+  const cols = useMemo(() => intraCols(setPlanFor), [])
   if (q.error && !d) return <div className="card"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
   if (!d) return <div className="card"><SkeletonRows rows={3} /></div>
   const bars = d.source ? `${d.source}${d.delayed ? ', ~15 min delayed' : ''}` : null
+  const rows = provenOnly ? d.signals.filter((s) => s.proven) : d.signals
+  const unproven = d.signals.filter((s) => !s.proven).length
   return (
-    <Card
-      title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted" />Intraday signals today</span>}
-      subtitle={<>Only strategies whose backtest shows a real edge after costs: <span className="num">{d.proven.length} of {d.tested}</span>{d.proven.length > 0 && <> ({d.proven.map((p) => p.name).join(', ')})</>}{bars && <> · bars {bars}</>}{d.generated_at && <> · updated <span className="num">{dateTimeIST(d.generated_at)}</span></>}</>}
-      flush
-    >
-      {d.signals.length === 0 ? (
-        <EmptyState compact title={d.note}>
-          <Link to="/intraday" className="link">See each intraday strategy's backtest</Link>
-        </EmptyState>
-      ) : (
-        <>
-          <DataTable id="signals.intraday" data={d.signals} columns={INTRA_COLS} rowKey={(r) => `${r.strategy_key}${r.symbol}${r.entry_time}`} exportName="intraday-signals" />
-          <p className="border-t border-line px-4 py-2 text-2xs text-faint">{d.note} Intraday positions are squared off the same day (15:00 for F&O stocks). You decide and place every trade yourself.</p>
-        </>
-      )}
-    </Card>
+    <div className="space-y-3">
+      <Card
+        title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted" />Intraday signals today</span>}
+        subtitle={<>{d.show_untested ? 'Every intraday strategy, each labelled with its backtest result' : 'Only strategies whose backtest shows a real edge after costs'}: <span className="num">{d.proven.length} of {d.tested}</span> proven{d.proven.length > 0 && <> ({d.proven.map((p) => p.name).join(', ')})</>}{bars && <> · bars {bars}</>}{d.generated_at && <> · updated <span className="num">{dateTimeIST(d.generated_at)}</span></>}</>}
+        right={d.show_untested && d.signals.length > 0 ? (
+          <Segmented<'all' | 'proven'> size="xs" ariaLabel="Which signals" value={provenOnly ? 'proven' : 'all'} onChange={(v) => setProvenOnly(v === 'proven')}
+            items={[{ id: 'all', label: `All (${d.signals.length})` }, { id: 'proven', label: `Proven only (${d.signals.length - unproven})` }]} />
+        ) : undefined}
+        flush
+      >
+        {d.show_untested && unproven > 0 && !provenOnly && (
+          <div className="border-b border-line px-4 py-2">
+            <Banner tone="warn">
+              <span className="font-medium">{unproven} of {d.signals.length} signals come from strategies the backtest has not proven</span>{' '}
+              <span className="text-muted">(Not proven, Lost in test, Untested). Treat them as ideas to check on the chart, not proven trades. Most individual intraday traders in India lose money (SEBI).</span>
+            </Banner>
+          </div>
+        )}
+        {rows.length === 0 ? (
+          <EmptyState compact title={provenOnly && d.signals.length ? 'No signals from proven strategies today.' : d.note}>
+            <Link to="/intraday" className="link">See each intraday strategy's backtest</Link>
+          </EmptyState>
+        ) : (
+          <>
+            <DataTable id="signals.intraday" data={rows} columns={cols} rowKey={(r) => `${r.strategy_key}${r.symbol}${r.entry_time}`} exportName="intraday-signals" />
+            <p className="border-t border-line px-4 py-2 text-2xs text-faint">{d.note} Intraday positions are squared off the same day (15:00 for F&O stocks). You decide and place every trade yourself.</p>
+          </>
+        )}
+      </Card>
+      {planFor && <AiPlan symbol={planFor} onClose={() => setPlanFor(null)} />}
+    </div>
   )
 }
 
@@ -279,7 +315,7 @@ export default function Signals() {
                 { id: 'all', label: 'All', count: count('longterm') + count('swing') },
                 { id: 'longterm', label: HORIZON.longterm.label, count: count('longterm') },
                 { id: 'swing', label: HORIZON.swing.label, count: count('swing') },
-                { id: 'intraday', label: <span title="Same-day signals, only from intraday strategies whose backtest shows a real edge after costs">Intraday</span>, count: intra?.signals.length ?? 0 },
+                { id: 'intraday', label: <span title={intra?.show_untested ? 'Same-day signals from every intraday strategy and live F&O build-ups, each labelled with its backtest result' : 'Same-day signals, only from intraday strategies whose backtest shows a real edge after costs'}>Intraday</span>, count: intra?.signals.length ?? 0 },
               ]}
             />
           </div>

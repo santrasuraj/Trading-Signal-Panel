@@ -72,6 +72,36 @@ def test_analysis_sends_the_data_and_the_fallback_opt_in(client, monkeypatch):
     assert again["cached"] and len(seen) == 1                 # the same question on the same data: not billed twice
 
 
+PLAN = {"bias": "neutral", "summary": "Range day so far.", "levels": [{"price": 100.0, "label": "PDL", "kind": "support"}],
+        "setups": [{"name": "Sweep of PDL", "side": "LONG", "entry_low": 100.0, "entry_high": 100.2,
+                    "conditions": ["5-min close back above 100"], "stop": 99.5, "target_1": 101.0, "target_2": 101.5,
+                    "invalidation": "A close below 99.5"}],
+        "no_trade_if": "Price stays between the levels.", "risk_note": "Risk a small share; most traders lose."}
+
+
+def test_plan_asks_for_structured_json_and_returns_the_parsed_plan(client, monkeypatch):
+    import json
+    seen = []
+    monkeypatch.setattr(ai_svc, "_get_client", lambda: fake_client(_msg(text=json.dumps(PLAN)), seen))
+    r = client.post("/api/ai/plan", json={"symbol": "NIFTY50"}, headers=GUARD)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["plan"]["setups"][0]["target_2"] == 101.5 and not out["refused"] and not out["cached"]
+    kw = seen[0]
+    assert kw["output_config"]["format"]["type"] == "json_schema" and kw["fallbacks"] == "default"
+    assert kw["output_config"]["format"]["schema"]["required"] == ["bias", "summary", "levels", "setups", "no_trade_if",
+                                                                   "risk_note"]
+    assert '"today":' in kw["messages"][0]["content"] and "IF-THEN" in kw["system"][0]["text"]
+    again = client.post("/api/ai/plan", json={"symbol": "NIFTY50"}, headers=GUARD).json()
+    assert again["cached"] and len(seen) == 1
+
+
+def test_unreadable_plan_is_none_not_an_error(client, monkeypatch):
+    monkeypatch.setattr(ai_svc, "_get_client", lambda: fake_client(_msg(text="not json"), []))
+    out = client.post("/api/ai/plan", json={"symbol": "NIFTY50"}, headers=GUARD).json()
+    assert out["plan"] is None and not out["refused"]
+
+
 def test_refusal_is_reported_not_shown_as_an_answer(client, monkeypatch):
     seen = []
     monkeypatch.setattr(ai_svc, "_get_client", lambda: fake_client(_msg(text="partial", stop="refusal"), seen))

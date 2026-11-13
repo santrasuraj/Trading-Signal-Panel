@@ -3,7 +3,7 @@
 import {
   Activity, Ban, CalendarRange, CheckCircle2, CircleDashed, Clock, FlaskConical, PowerOff, Timer, XCircle, type LucideIcon,
 } from 'lucide-react'
-import type { Evidence, Horizon, Lifecycle, StrategyStatus } from '@/api/types'
+import type { Evidence, Horizon, Lifecycle, SignalProof, StrategyStatus } from '@/api/types'
 
 export type ToneName = 'profit' | 'loss' | 'warn' | 'info' | 'accent' | 'muted' | 'faint'
 
@@ -12,6 +12,15 @@ export const STATUS: Record<StrategyStatus, { label: string; short: string; tone
   mixed: { label: 'Mixed', short: 'Mixed', tone: 'warn', icon: CircleDashed, help: 'Beat the better of Nifty 50 and the average stock in one of the last two windows (12 and 6 months) but not in the other.' },
   'not-working': { label: 'Not working', short: 'Not working', tone: 'loss', icon: XCircle, help: 'Behind Nifty 50 / the average stock over the last 12 and 6 months. Shown for comparison only; its orders are not counted.' },
   unknown: { label: 'Too new', short: 'Too new', tone: 'faint', icon: Clock, help: 'Not enough history to judge.' },
+}
+
+/** An intraday signal's strategy in the current backtest (not the daily strategies' market-relative status above). */
+export const SIGNAL_PROOF: Record<SignalProof, { label: string; tone: ToneName; icon: LucideIcon; help: string }> = {
+  working: { label: 'Proven', tone: 'profit', icon: CheckCircle2, help: 'Its backtest beat intraday costs beyond luck (Bonferroni-corrected, 40+ sessions).' },
+  mixed: { label: 'Not proven', tone: 'warn', icon: CircleDashed, help: 'Positive in the backtest, but it could be luck: an idea to check, not a proven trade.' },
+  unknown: { label: 'Not proven', tone: 'faint', icon: Clock, help: 'Too few backtest days to tell.' },
+  'not-working': { label: 'Lost in test', tone: 'loss', icon: XCircle, help: 'Lost money in the backtest after intraday costs.' },
+  untested: { label: 'Untested', tone: 'warn', icon: FlaskConical, help: 'Not backtested yet: a new strategy (tested at the next 15:45 run), or live F&O open interest, which has no history to test.' },
 }
 
 /** 'working' (it beat the market) but still lost money over 12 or 6 months: amber, not a green tick. */

@@ -447,6 +447,118 @@ def niftybees_eod_momentum(d: Day, p: dict) -> list[Trade]:
     return [t] if t else []
 
 
+# ---------------------------------------------------------------------------- new era: liquidity sweeps and retests
+# Price-action / "smart money" setups as taught by Indian trading channels (13 Nov 2026). No peer-reviewed evidence:
+# they are backtested here like every other strategy and their signals are labelled with that result.
+SWEEP_STOP_BUFFER = 0.0005           # 0.05% beyond the sweep's extreme
+
+
+def _one_sweep(d: Day, side: int, level: float, start: int, last: int, p: dict) -> Trade | None:
+    """The first sweep of `level` from `start`: price trades through it (where the stop-losses sit), closes back on the
+    original side within `reclaim_bars` (the trap), then a later bar comes back to the level and closes on the right
+    side (the retest). Entry at the next bar's open, stop just beyond the sweep's extreme, target `rr` x the risk.
+    side +1: a sweep BELOW a support level, then long; side -1: a sweep ABOVE a resistance level, then short.
+    A close beyond the level for longer than `reclaim_bars` (a real break) or a new extreme before the retest (the
+    trap failed) cancels the setup for the day."""
+    tol = float(p.get("tol_pct", 0.05)) / 100
+    reclaim_bars, retest_bars = int(p.get("reclaim_bars", 6)), int(p.get("retest_bars", 12))
+    rr, max_risk = float(p.get("rr", 2.0)), float(p.get("max_risk_pct", 1.5)) / 100
+    for i in range(start, last):
+        if math.isnan(d.l[i]):
+            continue
+        if not (d.l[i] < level if side > 0 else d.h[i] > level):
+            continue
+        extreme, reclaim = (d.l[i] if side > 0 else d.h[i]), None
+        for k in range(i, min(i + reclaim_bars, last)):
+            if math.isnan(d.c[k]):
+                continue
+            extreme = min(extreme, d.l[k]) if side > 0 else max(extreme, d.h[k])
+            if d.c[k] > level if side > 0 else d.c[k] < level:
+                reclaim = k
+                break
+        if reclaim is None:
+            return None                                  # accepted beyond the level: a breakout, not a trap
+        for k in range(reclaim + 1, min(reclaim + 1 + retest_bars, last)):
+            if math.isnan(d.c[k]):
+                continue
+            if d.l[k] < extreme if side > 0 else d.h[k] > extreme:
+                return None                              # a new extreme beyond the sweep: the trap failed
+            touch = d.l[k] <= level * (1 + tol) if side > 0 else d.h[k] >= level * (1 - tol)
+            hold = d.c[k] > level if side > 0 else d.c[k] < level
+            if touch and hold:
+                nxt = _first_valid(d.o, k + 1, d.flat_slot)
+                if nxt is None or nxt > last:
+                    return None
+                px = float(d.o[nxt])
+                stop = extreme * (1 - SWEEP_STOP_BUFFER) if side > 0 else extreme * (1 + SWEEP_STOP_BUFFER)
+                risk = abs(px - stop)
+                if not (0.001 <= risk / px <= max_risk):
+                    return None                          # too tight for 5-minute bars, or too wide to size
+                return _trade(d, side, nxt, px, stop, px + side * rr * risk, priority=d.ctx.get("relvol", 1.0))
+        return None                                      # no retest in time: the move left without us
+    return None
+
+
+def _sweep_retest(d: Day, support: float, resistance: float, start: int, p: dict) -> list[Trade]:
+    last = min(int(p.get("last_entry_slot", S_1430)), d.flat_slot - 1)
+    out = [t for side, lvl in ((+1, support), (-1, resistance))
+           if lvl is not None and lvl > 0 and not math.isnan(lvl)
+           for t in [_one_sweep(d, side, float(lvl), start, last, p)] if t is not None]
+    return sorted(out, key=lambda t: t.entry_slot)[:1]  # one trade a day: whichever side set up first
+
+
+def sweep_pdhl(d: Day, p: dict) -> list[Trade]:
+    """Liquidity sweep + retest at yesterday's low (long) or high (short), from the open until 14:30."""
+    return _sweep_retest(d, d.prev_low, d.prev_high, 0, p)
+
+
+def sweep_or15(d: Day, p: dict) -> list[Trade]:
+    """Liquidity sweep + retest at the 09:15-09:30 low (long) or high (short), from 09:30 until 14:30."""
+    if np.isnan(d.h[:OR15_END]).all():
+        return []
+    return _sweep_retest(d, float(np.nanmin(d.l[:OR15_END])), float(np.nanmax(d.h[:OR15_END])), OR15_END, p)
+
+
+def orb_retest_vwap(d: Day, p: dict) -> list[Trade]:
+    """A 5-minute close beyond the 09:15-09:30 range on the same side of VWAP, then a retest of the range edge that
+    holds (and stays on that side of VWAP): entry at the next open, stop beyond the retest bar, target `rr` x the risk.
+    A close back inside the range before the retest = a failed breakout: no trade."""
+    if np.isnan(d.h[:OR15_END]).all():
+        return []
+    orh, orl = float(np.nanmax(d.h[:OR15_END])), float(np.nanmin(d.l[:OR15_END]))
+    vw = d.vwap()
+    tol = float(p.get("tol_pct", 0.05)) / 100
+    retest_bars, rr = int(p.get("retest_bars", 12)), float(p.get("rr", 2.0))
+    max_risk = float(p.get("max_risk_pct", 1.5)) / 100
+    last = min(int(p.get("last_entry_slot", S_1430)), d.flat_slot - 1)
+    for i in range(OR15_END, last):
+        if math.isnan(d.c[i]) or math.isnan(vw[i]):
+            continue
+        side = +1 if d.c[i] > orh and d.c[i] > vw[i] else -1 if d.c[i] < orl and d.c[i] < vw[i] else 0
+        if side == 0:
+            continue
+        level = orh if side > 0 else orl
+        for k in range(i + 1, min(i + 1 + retest_bars, last)):
+            if math.isnan(d.c[k]):
+                continue
+            if d.c[k] < level if side > 0 else d.c[k] > level:
+                return []                                # closed back inside the range: a failed breakout
+            touch = d.l[k] <= level * (1 + tol) if side > 0 else d.h[k] >= level * (1 - tol)
+            if touch and (d.c[k] > vw[k] if side > 0 else d.c[k] < vw[k]):
+                nxt = _first_valid(d.o, k + 1, d.flat_slot)
+                if nxt is None or nxt > last:
+                    return []
+                px = float(d.o[nxt])
+                stop = d.l[k] * (1 - SWEEP_STOP_BUFFER) if side > 0 else d.h[k] * (1 + SWEEP_STOP_BUFFER)
+                risk = abs(px - stop)
+                if not (0.001 <= risk / px <= max_risk):
+                    return []
+                t = _trade(d, side, nxt, px, stop, px + side * rr * risk, priority=d.ctx.get("relvol", 1.0))
+                return [t] if t else []
+        return []                                        # broke out but never came back to retest
+    return []
+
+
 def _check_registered(key: str, p: dict) -> None:
     for name, allowed in PRE_REGISTERED.get(key, {}).items():
         v = p.get(name, allowed[0])
@@ -512,6 +624,20 @@ def build_intraday_strategies(cfg: dict) -> list[IntradayStrategy]:
          "exit at 15:15 (Gao, Han, Li & Zhou 2018, US index). The cheapest intraday trade there is (~0.05% "
          "round trip), but the documented edge (~0.02-0.03% a trade) is smaller than that cost.",
          niftybees_eod_momentum, "liquid", 1),
+        # new era (13 Nov 2026): price-action / liquidity setups from Indian trading channels - tested like the rest
+        ("sweep_pdhl", "Liquidity sweep + retest (yesterday's high / low)", "EXPERIMENTAL",
+         "NEW ERA. Price trades through yesterday's low (or high), where traders' stop-losses sit, closes back inside "
+         "within 30 minutes (the trap), then comes back to retest the level and holds: enter on the next bar, stop just "
+         "beyond the sweep's extreme, target twice the risk. Popular with Indian price-action ('smart money') traders; "
+         "no peer-reviewed evidence.", sweep_pdhl, "liquid", 5),
+        ("sweep_or15", "Liquidity sweep + retest (opening range)", "EXPERIMENTAL",
+         "NEW ERA. The same trap-and-retest at the 09:15-09:30 high or low, from 09:30: a sweep through the opening "
+         "range's edge, a close back inside, a retest that holds; stop beyond the sweep, target twice the risk.",
+         sweep_or15, "liquid", 5),
+        ("orb_retest_vwap", "Opening-range break-and-retest with VWAP", "EXPERIMENTAL",
+         "NEW ERA. A 5-minute close beyond the 09:15-09:30 range on the same side of VWAP, then a pullback that "
+         "retests the range edge and holds: enter on the next bar, stop beyond the retest bar, target twice the risk. "
+         "A close back inside the range cancels it (failed breakout).", orb_retest_vwap, "liquid", 5),
     ]
     lev = float((cfg.get("intraday") or {}).get("leverage", 2.0))
     hooks = {

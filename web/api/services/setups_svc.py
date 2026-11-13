@@ -53,14 +53,16 @@ def _source() -> tuple[pd.DataFrame, int, str, str, tuple | None]:
     key = ("store", months[-1], str(man.get("months", {}).get(months[-1])))
     hit = _cache.get("store_frame")
     if hit and hit[0] == key:
-        return hit[1], 5, "last_session", hit[2], key
+        return hit[1], 5, ("delayed" if hit[2] == today.isoformat() else "last_session"), hit[2], key
     df = store.load("5m", start=today - timedelta(days=10))
     if df.empty:
         return df, 5, "none", today.isoformat(), None
     last = df["ts"].dt.normalize().max()
     df = df[df["ts"].dt.normalize() == last].reset_index(drop=True)
     _cache["store_frame"] = (key, df, last.date().isoformat())
-    return df, 5, "last_session", last.date().isoformat(), key
+    # today's session in the store = the 5-minute signals job's Yahoo bars (no FYERS live feed): live, ~15 min late
+    mode = "delayed" if last.date() == today else "last_session"
+    return df, 5, mode, last.date().isoformat(), key
 
 
 def events() -> dict:
@@ -104,6 +106,8 @@ def view(kinds: list[str] | None = None, scope: str = "all", limit: int = 200) -
     counts = {k: sum(1 for e in base["events"] if e["kind"] == k) for k in setups.KINDS}
     notes = {
         "live": f"Live: today's {base['interval']} bars from the FYERS feed, completed bars only.",
+        "delayed": "Today's 5-minute bars from Yahoo (~15 min delayed), stored by the 5-minute signals job - log in "
+                   "to FYERS (1_login.bat) for real-time bars.",
         "last_session": f"The live service isn't running today: this is the last stored session ({base['day']}), "
                         "5-minute bars. Live setups need the day's FYERS login and the 09:14 live service.",
         "none": "No intraday bars yet: live setups need the day's FYERS login and the 09:14 live service.",

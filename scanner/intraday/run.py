@@ -354,25 +354,102 @@ def _write_json(path, obj: dict) -> None:
     idata._replace(tmp, path)
 
 
+OI_KEY, OI_NAME = "oi_buildup", "F&O OI build-up (live)"
+OI_MAX_SIGNALS = 10
+OI_MAX_AGE_MIN = 20                  # a live OI snapshot older than this (the 5-minute job stopped) gives no signals
+
+
+def _status_note(status: str) -> str:
+    return {"working": "proven: beat costs beyond luck in the backtest",
+            "mixed": "not proven: positive in the backtest, but it could be luck",
+            "unknown": "not proven: too few backtest days to tell",
+            "not-working": "LOST money in the backtest after costs",
+            "untested": "untested: no backtest yet"}.get(status, status)
+
+
+def oi_buildup_signals(days_today: dict[str, Day], live_oi: dict | None, now, capital: float, risk_pct: float,
+                       leverage: float, costs: IntradayCosts) -> list[dict]:
+    """Live F&O positioning as signals: a LONG build-up (open interest up >= MIN_OI_PCT while the price is up) above
+    VWAP is a LONG; a SHORT build-up (OI up, price down) below VWAP is a SHORT. Entry = the last price, stop = the day's
+    low (high) so far, target twice the risk; the biggest OI changes first. There is no intraday OI history, so this is
+    never backtested - it is labelled 'untested'. `days_today`: today's Day per symbol (scanner bars)."""
+    from .. import fno_intraday as fi
+    v = live_oi or {}
+    if str(v.get("trade_date") or "")[:10] != now.date().isoformat():
+        return []
+    try:
+        fetched = pd.Timestamp(v.get("fetched_at") or v.get("nse_time"))
+        if fetched.tzinfo is None:
+            fetched = fetched.tz_localize(now.tzinfo)
+        if (pd.Timestamp(now) - fetched).total_seconds() > OI_MAX_AGE_MIN * 60:
+            return []
+    except (TypeError, ValueError):
+        return []
+    out = []
+    for r in v.get("rows") or []:
+        d = days_today.get(str(r.get("symbol")))
+        if d is None or d.prev_close <= 0:
+            continue
+        valid = np.flatnonzero(~np.isnan(d.c))
+        if not len(valid):
+            continue
+        li = int(valid[-1])
+        px = float(d.c[li])
+        chg = (px / d.prev_close - 1) * 100
+        kind = fi.classify(chg, r.get("oi_chg_pct"))
+        if kind not in ("long_buildup", "short_buildup"):
+            continue
+        side = 1 if kind == "long_buildup" else -1
+        vw = float(d.vwap()[li])
+        if (px < vw) if side > 0 else (px > vw):
+            continue                                     # price and positioning disagree: no signal
+        stop = float(np.nanmin(d.l[:li + 1])) if side > 0 else float(np.nanmax(d.h[:li + 1]))
+        risk = abs(px - stop)
+        if not (0.002 <= risk / px <= 0.03):
+            continue
+        qty = int(min(capital * risk_pct / 100 / risk, capital * leverage / 5 / px))
+        if qty < 1:
+            continue
+        out.append({
+            "strategy_key": OI_KEY, "strategy_name": OI_NAME, "symbol": d.symbol, "side": "LONG" if side > 0 else "SHORT",
+            "entry_time": _hhmm(min(li + 1, SLOTS - 1)), "entry": round(px, 2), "stop": round(stop, 2),
+            "target": round(px + side * 2 * risk, 2), "qty": qty, "amount": round(qty * px, 0), "state": "open",
+            "exit_time": None, "exit": None, "last": round(px, 2), "reason": "open", "pnl": 0.0, "ret_pct": 0.0,
+            "strategy_status": "untested", "proven": False,
+            "detail": (f"{'Long' if side > 0 else 'Short'} build-up: open interest {r['oi_chg_pct']:+.1f}%, price "
+                       f"{chg:+.2f}%, {'above' if side > 0 else 'below'} VWAP"),
+            "_rank": abs(float(r.get("oi_chg_pct") or 0))})
+    out.sort(key=lambda x: -x["_rank"])
+    for x in out:
+        x.pop("_rank")
+    return out[:OI_MAX_SIGNALS]
+
+
 def run_intraday_signals(cfg: dict, frames: dict | None = None, log=print, now=None) -> dict:
-    """Today's live intraday signals, ONLY from strategies whose last backtest (intraday.json) showed a real
-    edge after costs: status 'working' = a positive average day beyond luck (Bonferroni-corrected) over 40+
-    sessions. A strategy that loses money or can't be told from luck never produces a signal here.
-    Each signal is what a proven strategy does on today's bars so far (FYERS live feed, else Yahoo ~15 min
-    delayed): an open position (entered, not stopped or squared off by the last bar) or a closed one.
+    """Today's live intraday signals. With intraday.show_untested: true (config.yaml) EVERY strategy gives signals and each
+    one carries its last backtest result (intraday.json): 'working' = a positive average day beyond luck
+    (Bonferroni-corrected) over 40+ sessions = proven; 'mixed' / 'unknown' = not proven; 'not-working' = lost money;
+    'untested' = not in the backtest yet (new strategies, live OI build-ups). With show_untested: false only proven
+    strategies give signals (the original rule).
+    Each signal is what a strategy does on today's bars so far (FYERS live feed, else Yahoo ~15 min delayed): an open
+    position (entered, not stopped or squared off by the last bar) or a closed one. Live F&O OI build-ups
+    (data/fno/live_oi.json, refreshed by the same 5-minute job) are added as their own 'untested' signals.
     Cheap enough to repeat every few minutes: no FYERS history calls, only today's bars are fetched.
     Writes data/results/intraday_signals.json."""
     t0 = time.perf_counter()
     now = now or ist_now()
+    ic = cfg.get("intraday") or {}
+    show_untested = bool(ic.get("show_untested", False))       # config.yaml switches it on; off = the original rule
     bt = load_intraday() or {}
     tested = bt.get("strategies") or []
+    status_of = {s["key"]: str(s.get("status") or "unknown") for s in tested if s.get("key")}
     proven = [s for s in tested if s.get("status") == "working"]
     out = {"generated_at": now.isoformat(timespec="seconds"), "backtest_at": bt.get("generated_at"),
            "tested": len(tested), "proven": [{"key": s["key"], "name": s.get("name") or s["key"]} for s in proven],
-           "signals": [], "source": None, "bars_to": None, "note": ""}
-    if not bt:
+           "show_untested": show_untested, "signals": [], "source": None, "bars_to": None, "note": ""}
+    if not show_untested and not bt:
         out["note"] = "The intraday backtest has not run yet, so no strategy is proven: no signals."
-    elif not proven:
+    elif not show_untested and not proven:
         out["note"] = (f"No intraday strategy has a proven edge after costs ({len(tested)} tested): no signals. "
                        "A strategy gives signals here only once its backtest shows a profit beyond luck.")
     elif not fyers_sync.is_trading_day(now.date()) or (now.hour, now.minute) < (9, 20):
@@ -396,9 +473,9 @@ def run_intraday_signals(cfg: dict, frames: dict | None = None, log=print, now=N
             costs = IntradayCosts.from_config(ic.get("costs"))
             capital = float((cfg.get("account") or {}).get("capital", 500000))
             live_slot = ((now.hour * 60 + now.minute) - 555) // 5
-            keys = {s["key"] for s in proven}
             for s in build_intraday_strategies(cfg):
-                if s.key not in keys:
+                status = status_of.get(s.key, "untested")
+                if not show_untested and status != "working":
                     continue
                 live_days = [d for sym, ds in days.items() for d in ds if d.date == today
                              and (s.universe != "top30" or sym in top30.get(d.date, info["etfs"]))]
@@ -417,14 +494,28 @@ def run_intraday_signals(cfg: dict, frames: dict | None = None, log=print, now=N
                         "state": "open" if is_open else "closed", "exit_time": None if is_open else _hhmm(t.exit_slot),
                         "exit": None if is_open else round(float(t.exit_px), 2), "last": round(float(t.exit_px), 2),
                         "reason": "open" if is_open else t.reason, "pnl": round(float(t.pnl), 0),
-                        "ret_pct": round(float(t.ret_pct), 3)})
-            out["signals"].sort(key=lambda x: (x["state"] != "open", x["entry_time"]))
+                        "ret_pct": round(float(t.ret_pct), 3), "target": None,
+                        "strategy_status": status, "proven": status == "working", "detail": _status_note(status)})
+            if show_untested:
+                from .. import fno_intraday as fi
+                days_today = {sym: d for sym, ds in days.items() for d in ds if d.date == today}
+                out["signals"] += oi_buildup_signals(days_today, fi.load(), now, capital, float(ic.get("risk_pct", 0.5)),
+                                                     float(ic.get("leverage", 2.0)), costs)
+            out["signals"].sort(key=lambda x: (x["state"] != "open", not x["proven"], x["entry_time"]))
             out["source"] = ", ".join(sorted(todays["source"].astype(str).unique()))
             out["bars_to"] = todays["ts"].max().isoformat()
-            names = ", ".join(s["name"] for s in out["proven"])
             n = len(out["signals"])
-            out["note"] = (f"{n} signal{'s' if n != 1 else ''} today from {names}." if n
-                           else f"No setups today so far from {names}.")
+            n_proven = sum(1 for x in out["signals"] if x["proven"])
+            if not show_untested:
+                names = ", ".join(s["name"] for s in out["proven"])
+                out["note"] = (f"{n} signal{'s' if n != 1 else ''} today from {names}." if n
+                               else f"No setups today so far from {names}.")
+            elif n:
+                out["note"] = (f"{n} signal{'s' if n != 1 else ''} today: {n_proven} from proven strategies, {n - n_proven} "
+                               "from strategies the backtest has not proven (each is labelled) - treat those as ideas "
+                               "to check, not proven trades.")
+            else:
+                out["note"] = "No setups today so far from any intraday strategy."
     out["elapsed_s"] = round(time.perf_counter() - t0, 1)
     _write_json(SIGNALS_FILE, out)
     log(f"Intraday signals: {out['note']}")

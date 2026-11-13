@@ -148,6 +148,19 @@ def start_live() -> dict:
     return {"accepted": True, "running": True, "message": "Fetching NSE's live open interest and prices..."}
 
 
+def refresh_live_now() -> str | None:
+    """The live build-ups fetched right here (the 5-minute intraday signals job, intraday_sync.py --signals), so they
+    stay current all session without the F&O page open or a FYERS login (prices: FYERS when logged in, else Yahoo).
+    Returns the error, or None."""
+    import time
+    with _live_lock:
+        if _live_running():
+            return "a live fetch is already running"
+        _live["last"] = time.monotonic()
+    _live_worker()
+    return _live["error"]
+
+
 def _live_worker() -> None:
     from scanner import fno_intraday as fi
     from . import quotes_svc

@@ -2,10 +2,10 @@
 // text and (where meaningful) an icon, so colour never carries meaning alone (spec 4.1).
 
 import { AlertTriangle, CalendarClock, Hourglass } from 'lucide-react'
-import type { Evidence, HoldingLevel, Horizon, IntradayStrategy, Lifecycle, Side, SignalStrength, StrategyStatus, Tone } from '@/api/types'
+import type { Evidence, HoldingLevel, Horizon, IntradayStrategy, Lifecycle, Side, SignalProof, SignalStrength, StrategyStatus, Tone } from '@/api/types'
 import { cn } from '@/lib/csv'
 import { daysUntil, date } from '@/lib/format'
-import { EVIDENCE, EVIDENCE_ICON, FELL_LESS, HORIZON, LIFECYCLE, STATUS, TONE_DOT, TONE_TEXT, TONE_TINT } from '@/lib/vocab'
+import { EVIDENCE, EVIDENCE_ICON, FELL_LESS, HORIZON, LIFECYCLE, SIGNAL_PROOF, STATUS, TONE_DOT, TONE_TEXT, TONE_TINT } from '@/lib/vocab'
 import { Tip } from './ui'
 
 const pill = 'inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-2xs font-medium leading-none'
@@ -18,6 +18,18 @@ export function StatusBadge({ status, short, className, lost }: { status: Strate
     <span title={m.help} className={cn(pill, TONE_TINT[m.tone], TONE_TEXT[m.tone], className)}>
       <Icon className="h-3 w-3" strokeWidth={2.25} />
       {short ? m.short : m.label}
+    </span>
+  )
+}
+
+/** An intraday signal's backtest label: Proven / Not proven / Lost in test / Untested. */
+export function ProofBadge({ status }: { status: SignalProof }) {
+  const m = SIGNAL_PROOF[status] ?? SIGNAL_PROOF.untested
+  const Icon = m.icon
+  return (
+    <span title={m.help} className={cn(pill, TONE_TINT[m.tone], TONE_TEXT[m.tone])}>
+      <Icon className="h-3 w-3" strokeWidth={2.25} />
+      {m.label}
     </span>
   )
 }

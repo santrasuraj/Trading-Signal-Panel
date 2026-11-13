@@ -31,6 +31,53 @@ class AiAnalysis(Model):
     note: str
 
 
+class AiPlanRequest(Model):
+    symbol: str = Field(min_length=1, max_length=20)
+
+
+class AiPlanLevel(Model):
+    price: float
+    label: str
+    kind: Literal["support", "resistance", "liquidity", "pivot"]
+
+
+class AiPlanSetup(Model):
+    name: str
+    side: Literal["LONG", "SHORT"]
+    entry_low: float
+    entry_high: float
+    conditions: list[str]                         # what to wait for on 5-minute closes before entering
+    stop: float
+    target_1: float                               # about twice the risk
+    target_2: float                               # about three times the risk (or the next level)
+    invalidation: str
+
+
+class AiPlanBody(Model):
+    bias: Literal["long", "short", "neutral"]
+    summary: str
+    levels: list[AiPlanLevel]
+    setups: list[AiPlanSetup]                     # at most two; empty = no clean setup
+    no_trade_if: str
+    risk_note: str
+
+
+class AiPlan(Model):
+    symbol: str
+    plan: AiPlanBody | None = None                # None when the model declined or the answer could not be read
+    refused: bool
+    stop_reason: str | None = None
+    model: str
+    session: ISODate | None = None                # the 5-minute session the plan read
+    bars_source: str | None = None                # 'live' (FYERS feed) or 'stored' (FYERS / Yahoo bars)
+    generated_at: ISODateTime
+    cached: bool                                  # the same bars and signals within 5 minutes
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    note: str
+
+
 class AiStatus(Model):
     configured: bool                              # ANTHROPIC_API_KEY is set in .env (the key itself never leaves the server)
     model: str

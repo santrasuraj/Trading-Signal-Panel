@@ -15,11 +15,12 @@ import threading
 import time
 
 import anthropic
+import pandas as pd
 from dotenv import dotenv_values
 
 from ..errors import ApiException, feature_unavailable
 from ..paths import P
-from ..util import now_ist
+from ..util import now_ist, today_ist
 from . import data, levels_svc, outlook_svc
 
 MODEL = "claude-opus-5-5"
@@ -113,32 +114,23 @@ def context(symbol: str) -> dict:
             "snapshot": snap, "outlook": {**o, "big_money": big}, "price_action": _trim_levels(levels_svc.levels_for(sym))}
 
 
-def analyze(symbol: str, question: str | None) -> dict:
-    sym = symbol.strip().upper()
-    q = (question or "").strip() or None
-    ctx = context(sym)
-    key = (sym, q, ctx["outlook"]["date"], ctx["outlook"]["close"], json.dumps(ctx["outlook"]["derivatives"]["verdict"] or {},
-                                                                              sort_keys=True, default=str)[:4000])
-    hit = _cache.get(key)
-    if hit and time.monotonic() - hit[0] < CACHE_S:
-        return {**hit[1], "cached": True}
+def _stream(system: str, user: str, output_config: dict):
+    """One Claude call (one at a time across the analyst and the planner): Claude Opus 5.5, adaptive thinking, the
+    server-side refusal fallback, the system prompt cached. Anthropic's errors become the API's own errors."""
     client = _get_client()
     if not _lock.acquire(blocking=False):
         raise ApiException("SCAN_BUSY", "An AI analysis is already running.", "Wait for it to finish (about a minute).",
                            {"started": "?", "by": "ai", "pid": None})
     try:
-        user = ("<snapshot>\n" + json.dumps(ctx, default=str, separators=(",", ":")) + "\n</snapshot>\n\n"
-                + (f"The reader asks: {q}" if q else "Explain what this data says about this stock now and what "
-                                                    "usually happens next in a setup like this."))
         try:
             with client.beta.messages.stream(
                 model=MODEL, max_tokens=MAX_TOKENS,
                 betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-                thinking={"type": "adaptive"}, output_config={"effort": EFFORT},
-                system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
+                thinking={"type": "adaptive"}, output_config=output_config,
+                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": user}],
             ) as stream:
-                msg = stream.get_final_message()
+                return stream.get_final_message()
         except anthropic.AuthenticationError:
             raise ApiException("FEATURE_UNAVAILABLE", "The Anthropic API key in .env was rejected.",
                                "Create a new key at console.anthropic.com (keys start with sk-ant-api) and put it in .env.",
@@ -153,16 +145,138 @@ def analyze(symbol: str, question: str | None) -> dict:
             raise ApiException("INTERNAL", f"The Anthropic API answered {e.status_code}.", str(e.message)[:300])
         except anthropic.APIConnectionError:
             raise ApiException("INTERNAL", "Can't reach the Anthropic API.", "Check the internet connection.")
-        refused = msg.stop_reason == "refusal"
-        text = None if refused else "".join(b.text for b in msg.content if getattr(b, "type", None) == "text").strip() or None
-        u = msg.usage
-        out = {"symbol": sym, "question": q, "answer": text, "refused": refused, "stop_reason": msg.stop_reason,
-               "model": getattr(msg, "model", MODEL), "data_date": ctx["outlook"]["date"],
-               "generated_at": now_ist().isoformat(timespec="seconds"), "cached": False,
-               "input_tokens": getattr(u, "input_tokens", None), "output_tokens": getattr(u, "output_tokens", None),
-               "cache_read_tokens": getattr(u, "cache_read_input_tokens", None), "note": NOTE}
-        if not refused:
-            _cache[key] = (time.monotonic(), out)
-        return out
     finally:
         _lock.release()
+
+
+def _text(msg) -> str | None:
+    return "".join(b.text for b in msg.content if getattr(b, "type", None) == "text").strip() or None
+
+
+def _usage(msg) -> dict:
+    u = msg.usage
+    return {"input_tokens": getattr(u, "input_tokens", None), "output_tokens": getattr(u, "output_tokens", None),
+            "cache_read_tokens": getattr(u, "cache_read_input_tokens", None)}
+
+
+def analyze(symbol: str, question: str | None) -> dict:
+    sym = symbol.strip().upper()
+    q = (question or "").strip() or None
+    ctx = context(sym)
+    key = (sym, q, ctx["outlook"]["date"], ctx["outlook"]["close"], json.dumps(ctx["outlook"]["derivatives"]["verdict"] or {},
+                                                                              sort_keys=True, default=str)[:4000])
+    hit = _cache.get(key)
+    if hit and time.monotonic() - hit[0] < CACHE_S:
+        return {**hit[1], "cached": True}
+    user = ("<snapshot>\n" + json.dumps(ctx, default=str, separators=(",", ":")) + "\n</snapshot>\n\n"
+            + (f"The reader asks: {q}" if q else "Explain what this data says about this stock now and what "
+                                                "usually happens next in a setup like this."))
+    msg = _stream(SYSTEM, user, {"effort": EFFORT})
+    refused = msg.stop_reason == "refusal"
+    out = {"symbol": sym, "question": q, "answer": None if refused else _text(msg), "refused": refused,
+           "stop_reason": msg.stop_reason, "model": getattr(msg, "model", MODEL), "data_date": ctx["outlook"]["date"],
+           "generated_at": now_ist().isoformat(timespec="seconds"), "cached": False, **_usage(msg), "note": NOTE}
+    if not refused:
+        _cache[key] = (time.monotonic(), out)
+    return out
+
+
+# ------------------------------------------------------------------ AI trade plan (chart reading)
+PLAN_CACHE_S = 5 * 60                 # intraday: a new 5-minute bar is new data
+PLAN_BARS = 40                        # the last 40 five-minute bars of the latest session
+PLAN_NOTE = ("Written by Claude (Anthropic) from this app's own data - levels, today's 5-minute bars and the scanner's "
+             "signals. It has no news and no live feed of its own and can be wrong. A plan to check, not a forecast "
+             "and not investment advice: you decide and place every trade yourself.")
+
+PLAN_SYSTEM = """You are the intraday trade planner inside Quant Desk, a personal research tool for one investor \
+trading Indian stocks (NSE). Each request gives a JSON snapshot of ONE stock or index: its daily setup and levels, \
+intraday price-action levels (previous day high / low / close, opening range, VWAP, pivots), the latest 5-minute bars \
+(time, open, high, low, close, volume) and today's signals from the app's intraday strategies, each labelled with its \
+backtest result.
+
+Write a price-action plan the way many Indian intraday traders read a chart - key levels, where stop-losses are \
+likely to sit (liquidity), and IF-THEN conditions on 5-minute closes - but honestly:
+- Use only the snapshot. Every price you give must come from it or be computed from it. Never invent levels, news, \
+results dates or anything else.
+- Nobody knows the next move. Give conditional setups ("if price sweeps X and a 5-minute candle closes back above it, \
+then ..."), never certainties. If nothing is clean, return no setups and say why in no_trade_if.
+- At most two setups. Each has an entry zone, the exact conditions to wait for, a stop beyond the level that proves \
+it wrong, target_1 at about twice the risk and target_2 at about three times (or the next level if that is nearer), \
+and what cancels it.
+- A strategy labelled untested, not proven or losing is an idea, not evidence; never call a setup proven unless its \
+strategy is labelled working (proven).
+- If the bars are not from today, or are delayed, say so in the summary.
+- risk_note: one or two sentences on sizing (risk a small fixed share of capital to the stop), intraday costs, and \
+that most individual intraday and F&O traders in India lose money (SEBI's studies).
+Plain English, short sentences, prices in rupees."""
+
+_LEVEL = {"type": "object", "additionalProperties": False, "required": ["price", "label", "kind"],
+          "properties": {"price": {"type": "number"}, "label": {"type": "string"},
+                         "kind": {"type": "string", "enum": ["support", "resistance", "liquidity", "pivot"]}}}
+_SETUP = {"type": "object", "additionalProperties": False,
+          "required": ["name", "side", "entry_low", "entry_high", "conditions", "stop", "target_1", "target_2",
+                       "invalidation"],
+          "properties": {"name": {"type": "string"}, "side": {"type": "string", "enum": ["LONG", "SHORT"]},
+                         "entry_low": {"type": "number"}, "entry_high": {"type": "number"},
+                         "conditions": {"type": "array", "items": {"type": "string"}},
+                         "stop": {"type": "number"}, "target_1": {"type": "number"}, "target_2": {"type": "number"},
+                         "invalidation": {"type": "string"}}}
+PLAN_SCHEMA = {"type": "object", "additionalProperties": False,
+               "required": ["bias", "summary", "levels", "setups", "no_trade_if", "risk_note"],
+               "properties": {"bias": {"type": "string", "enum": ["long", "short", "neutral"]},
+                              "summary": {"type": "string"}, "levels": {"type": "array", "items": _LEVEL},
+                              "setups": {"type": "array", "items": _SETUP},
+                              "no_trade_if": {"type": "string"}, "risk_note": {"type": "string"}}}
+
+
+def _today_for(sym: str) -> dict:
+    """The latest session's last PLAN_BARS 5-minute bars (live feed, else stored - Yahoo when FYERS isn't logged in)
+    and today's intraday signals for the symbol."""
+    bars, source = levels_svc._intraday_bars(sym)
+    session, rows = None, []
+    if bars is not None and len(bars):
+        b = bars.sort_values("ts")
+        last = pd.Timestamp(b["ts"].max()).normalize()
+        day = b[b["ts"] >= last].tail(PLAN_BARS)
+        session = last.date().isoformat()
+        rows = [[pd.Timestamp(r.ts).strftime("%H:%M"), round(float(r.open), 2), round(float(r.high), 2),
+                 round(float(r.low), 2), round(float(r.close), 2), int(r.volume) if pd.notna(r.volume) else None]
+                for r in day.itertuples()]
+    sig = data.intraday_signals() or {}
+    mine = [{k: x.get(k) for k in ("strategy_name", "strategy_status", "side", "state", "entry_time", "entry", "stop",
+                                   "target", "last", "detail")}
+            for x in sig.get("signals") or [] if x.get("symbol") == sym
+            and str(sig.get("generated_at") or "")[:10] == today_ist().isoformat()]
+    return {"session": session, "is_today": session == today_ist().isoformat(), "bars_source": source,
+            "bars_5m": {"columns": ["time", "open", "high", "low", "close", "volume"], "rows": rows},
+            "signals": mine}
+
+
+def plan(symbol: str) -> dict:
+    """POST /api/ai/plan: Claude reads the symbol's levels, the latest 5-minute bars and today's signals and returns an
+    IF-THEN intraday plan as structured JSON (PLAN_SCHEMA): bias, key levels, up to two setups with entry zone,
+    conditions, stop, two targets and what cancels it. Cached for 5 minutes on the same bars and signals."""
+    sym = symbol.strip().upper()
+    ctx = {**context(sym), "today": _today_for(sym)}
+    t = ctx["today"]
+    key = ("plan", sym, t["session"], json.dumps(t["bars_5m"]["rows"][-1:], default=str),
+           json.dumps(t["signals"], sort_keys=True, default=str)[:4000])
+    hit = _cache.get(key)
+    if hit and time.monotonic() - hit[0] < PLAN_CACHE_S:
+        return {**hit[1], "cached": True}
+    user = ("<snapshot>\n" + json.dumps(ctx, default=str, separators=(",", ":")) + "\n</snapshot>\n\n"
+            f"Write today's intraday plan for {sym}.")
+    msg = _stream(PLAN_SYSTEM, user, {"effort": EFFORT, "format": {"type": "json_schema", "schema": PLAN_SCHEMA}})
+    refused = msg.stop_reason == "refusal"
+    body = None
+    if not refused and msg.stop_reason != "max_tokens":
+        try:
+            body = json.loads(_text(msg) or "")
+        except ValueError:
+            body = None
+    out = {"symbol": sym, "plan": body, "refused": refused, "stop_reason": msg.stop_reason,
+           "model": getattr(msg, "model", MODEL), "session": t["session"], "bars_source": t["bars_source"],
+           "generated_at": now_ist().isoformat(timespec="seconds"), "cached": False, **_usage(msg), "note": PLAN_NOTE}
+    if body is not None:
+        _cache[key] = (time.monotonic(), out)
+    return out

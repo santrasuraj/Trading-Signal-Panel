@@ -21,7 +21,7 @@ interface SetupEvent {
   price: number; change_pct: number | null; value_cr: number | null; detail: string; mine: boolean
 }
 interface SetupsResponse {
-  mode: 'live' | 'last_session' | 'none'; day: string; interval: string; symbols: number; last_bar: string | null; as_of: string
+  mode: 'live' | 'delayed' | 'last_session' | 'none'; day: string; interval: string; symbols: number; last_bar: string | null; as_of: string
   counts: Record<string, number>; total: number; events: SetupEvent[]; labels: Record<string, string>; note: string
 }
 type Group = 'all' | 'bull' | 'bear' | 'breaks' | 'vwap' | 'volume'
@@ -39,7 +39,7 @@ export default function Setups() {
   const q = useQuery({
     queryKey: ['setups', group, scope],
     queryFn: () => fetchJson<SetupsResponse>(`/api/setups?scope=${scope}&limit=300${kinds ? `&kinds=${kinds.join(',')}` : ''}`),
-    refetchInterval: (query) => (query.state.data?.mode === 'live' ? 15_000 : false),
+    refetchInterval: (query) => (query.state.data?.mode === 'live' ? 15_000 : query.state.data?.mode === 'delayed' ? 60_000 : false),
   })
   const d = q.data
   const seen = useRef<Set<string> | null>(null)
@@ -56,7 +56,7 @@ export default function Setups() {
   return (
     <div>
       <PageHeader title="Live setups"
-        subtitle={d ? `${d.mode === 'live' ? 'Live' : d.mode === 'last_session' ? `Session of ${d.day}` : 'No bars yet'} · ${d.symbols} stocks · ${d.interval} bars · ${d.total} events${d.last_bar ? ` · last bar ${d.last_bar.slice(11, 16)}` : ''}` : 'Gaps, breakouts, VWAP crosses and volume spikes as they happen'}
+        subtitle={d ? `${d.mode === 'live' ? 'Live' : d.mode === 'delayed' ? 'Live, ~15 min delayed' : d.mode === 'last_session' ? `Session of ${d.day}` : 'No bars yet'} · ${d.symbols} stocks · ${d.interval} bars · ${d.total} events${d.last_bar ? ` · last bar ${d.last_bar.slice(11, 16)}` : ''}` : 'Gaps, breakouts, VWAP crosses and volume spikes as they happen'}
         right={<>
           <Segmented<Group> ariaLabel="Event group" value={group} onChange={setGroup} items={[{ id: 'all', label: 'All' }, { id: 'bull', label: 'Up' }, { id: 'bear', label: 'Down' }, { id: 'breaks', label: 'Breakouts' }, { id: 'vwap', label: 'VWAP' }, { id: 'volume', label: 'Volume' }]} />
           <Segmented<'all' | 'mine'> ariaLabel="Stocks" value={scope} onChange={setScope} items={[{ id: 'all', label: 'All stocks' }, { id: 'mine', label: 'Watchlist + holdings' }]} />

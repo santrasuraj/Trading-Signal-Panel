@@ -118,29 +118,40 @@ def count() -> int:
 
 
 def signals_payload() -> dict:
-    """GET /api/intraday/signals. Only strategies that are 'working' in the CURRENT backtest may give signals;
-    data/results/intraday_signals.json (scanner/intraday/run.run_intraday_signals) is served only when it is
-    from today and was computed against that backtest, so a strategy that has since failed never shows."""
+    """GET /api/intraday/signals. data/results/intraday_signals.json (scanner/intraday/run.run_intraday_signals) from
+    today. Every signal is re-labelled with its strategy's result in the CURRENT backtest ('working' = proven), so a
+    strategy that has since failed shows as such. With intraday.show_untested: false (the job's setting, kept in the
+    file) only proven strategies' signals are served - the original rule."""
     bt = data.intraday() or {}
     tested = bt.get("strategies") or []
+    status_of = {str(s.get("key")): str(s.get("status") or "unknown") for s in tested}
     proven = [{"key": str(s.get("key")), "name": str(s.get("name") or s.get("key"))}
               for s in tested if s.get("status") == "working"]
+    f = data.intraday_signals() or {}
+    show_untested = bool(f.get("show_untested", False))
     out = {"generated_at": None, "backtest_at": bt.get("generated_at"), "tested": len(tested), "proven": proven,
-           "signals": [], "source": None, "delayed": False, "bars_to": None}
-    if not bt:
+           "show_untested": show_untested, "signals": [], "source": None, "delayed": False, "bars_to": None}
+    if not show_untested and not bt:
         return {**out, "note": "The intraday backtest has not run yet, so no strategy is proven: no signals."}
-    if not proven:
+    if not show_untested and not proven:
         return {**out, "note": f"No intraday strategy has a proven edge after costs ({len(tested)} tested): no signals. "
                                "A strategy gives signals here only once its backtest shows a profit beyond luck."}
-    f = data.intraday_signals() or {}
-    fresh = (str(f.get("generated_at") or "")[:10] == today_ist().isoformat()
-             and f.get("backtest_at") == bt.get("generated_at"))
-    if not fresh:
+    # proven-only: a file computed against another backtest could carry a strategy that has since failed. Showing all,
+    # every signal is re-labelled from the current backtest below.
+    if (str(f.get("generated_at") or "")[:10] != today_ist().isoformat()
+            or (not show_untested and f.get("backtest_at") != bt.get("generated_at"))):
         return {**out, "note": "Signals have not been computed today yet: the intraday signals task refreshes them "
                                "every 5 minutes in market hours (or run intraday_sync.py --signals)."}
-    keys = {p["key"] for p in proven}
+    sigs = []
+    for x in f.get("signals") or []:
+        key = str(x.get("strategy_key"))
+        st = status_of.get(key) or str(x.get("strategy_status") or "untested")
+        if st not in ("working", "mixed", "unknown", "not-working", "untested"):
+            st = "untested"
+        if not show_untested and st != "working":
+            continue
+        sigs.append({**x, "strategy_status": st, "proven": st == "working"})
     source = f.get("source") or None
     return {**out, "generated_at": f.get("generated_at"), "source": source,
-            "delayed": "yahoo" in (source or ""), "bars_to": f.get("bars_to"),
-            "signals": [x for x in f.get("signals") or [] if x.get("strategy_key") in keys],
+            "delayed": "yahoo" in (source or ""), "bars_to": f.get("bars_to"), "signals": sigs,
             "note": str(f.get("note") or "")}

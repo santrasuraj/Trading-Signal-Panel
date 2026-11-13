@@ -558,15 +558,18 @@ export interface IntradayStrategy {
   };
   equity: TimeSeries;                        // rupees
 }
-// Live intraday signals (GET /api/intraday/signals): only from strategies that are 'working' in the current backtest
+// Live intraday signals (GET /api/intraday/signals): with show_untested, from every strategy, each labelled with its
+// result in the current backtest ('working' = proven); without it, only from proven strategies
+export type SignalProof = 'working' | 'mixed' | 'unknown' | 'not-working' | 'untested'
 export interface IntradaySignal {
   strategy_key: string; strategy_name: string; symbol: string; side: 'LONG' | 'SHORT'; entry_time: string; entry: number;
   stop: number | null; qty: number; amount: number; state: 'open' | 'closed'; exit_time: string | null; exit: number | null;
   last: number; reason: string; pnl: number; ret_pct: number;
+  target: number | null; strategy_status: SignalProof; proven: boolean; detail: string | null;
 }
 export interface IntradaySignalsResponse {
   generated_at: ISODateTime | null; backtest_at: ISODateTime | null; tested: number;
-  proven: { key: string; name: string }[]; signals: IntradaySignal[];
+  proven: { key: string; name: string }[]; show_untested: boolean; signals: IntradaySignal[];
   source: string | null; delayed: boolean; bars_to: string | null; note: string;
 }
 // Background re-run of the intraday backtest (web/api/services/intraday_job.run_status)

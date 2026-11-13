@@ -204,6 +204,14 @@ def _run(args) -> int:
             return 2
 
     if args.signals:
+        if live.market_open_now():
+            # live F&O build-ups from NSE's free feed every run: no FYERS login and no open browser page needed
+            try:
+                from web.api.services import fno_svc
+                err = fno_svc.refresh_live_now()
+                print(f"Live F&O build-ups: {err or 'updated from NSE'}", flush=True)
+            except Exception as e:
+                print(f"Live F&O build-ups: {type(e).__name__}: {e}", flush=True)
         run_intraday_signals(cfg, frames=frames, log=lambda m: print(m, flush=True))
         try:   # RSI / moving-average / live scan alerts on the live service's quotes (scanner/rule_alerts.py)
             from scanner import rule_alerts

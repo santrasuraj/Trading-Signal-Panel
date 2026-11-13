@@ -3289,6 +3289,48 @@
     }
    }
   },
+  "/api/ai/plan": {
+   "post": {
+    "tags": [
+     "ai"
+    ],
+    "summary": "Plan",
+    "description": "Claude reads the symbol's levels, the latest 5-minute bars and today's signals and writes an IF-THEN intraday\nplan (entry zone, conditions, stop, two targets). Roughly Rs 5-10 per plan on the Anthropic account.",
+    "operationId": "plan_api_ai_plan_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AiPlanRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AiPlan"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/ai/forecasts": {
    "get": {
     "tags": [
@@ -8298,6 +8340,280 @@
      "symbols"
     ],
     "title": "AiPendingBatch"
+   },
+   "AiPlan": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "plan": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/AiPlanBody"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "refused": {
+      "type": "boolean",
+      "title": "Refused"
+     },
+     "stop_reason": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop Reason"
+     },
+     "model": {
+      "type": "string",
+      "title": "Model"
+     },
+     "session": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Session"
+     },
+     "bars_source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bars Source"
+     },
+     "generated_at": {
+      "type": "string",
+      "title": "Generated At"
+     },
+     "cached": {
+      "type": "boolean",
+      "title": "Cached"
+     },
+     "input_tokens": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Input Tokens"
+     },
+     "output_tokens": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Output Tokens"
+     },
+     "cache_read_tokens": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cache Read Tokens"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "plan",
+     "refused",
+     "stop_reason",
+     "model",
+     "session",
+     "bars_source",
+     "generated_at",
+     "cached",
+     "input_tokens",
+     "output_tokens",
+     "cache_read_tokens",
+     "note"
+    ],
+    "title": "AiPlan"
+   },
+   "AiPlanBody": {
+    "properties": {
+     "bias": {
+      "type": "string",
+      "enum": [
+       "long",
+       "short",
+       "neutral"
+      ],
+      "title": "Bias"
+     },
+     "summary": {
+      "type": "string",
+      "title": "Summary"
+     },
+     "levels": {
+      "items": {
+       "$ref": "#/components/schemas/AiPlanLevel"
+      },
+      "type": "array",
+      "title": "Levels"
+     },
+     "setups": {
+      "items": {
+       "$ref": "#/components/schemas/AiPlanSetup"
+      },
+      "type": "array",
+      "title": "Setups"
+     },
+     "no_trade_if": {
+      "type": "string",
+      "title": "No Trade If"
+     },
+     "risk_note": {
+      "type": "string",
+      "title": "Risk Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "bias",
+     "summary",
+     "levels",
+     "setups",
+     "no_trade_if",
+     "risk_note"
+    ],
+    "title": "AiPlanBody"
+   },
+   "AiPlanLevel": {
+    "properties": {
+     "price": {
+      "type": "number",
+      "title": "Price"
+     },
+     "label": {
+      "type": "string",
+      "title": "Label"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "support",
+       "resistance",
+       "liquidity",
+       "pivot"
+      ],
+      "title": "Kind"
+     }
+    },
+    "type": "object",
+    "required": [
+     "price",
+     "label",
+     "kind"
+    ],
+    "title": "AiPlanLevel"
+   },
+   "AiPlanRequest": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "maxLength": 20,
+      "minLength": 1,
+      "title": "Symbol"
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol"
+    ],
+    "title": "AiPlanRequest"
+   },
+   "AiPlanSetup": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "side": {
+      "type": "string",
+      "enum": [
+       "LONG",
+       "SHORT"
+      ],
+      "title": "Side"
+     },
+     "entry_low": {
+      "type": "number",
+      "title": "Entry Low"
+     },
+     "entry_high": {
+      "type": "number",
+      "title": "Entry High"
+     },
+     "conditions": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Conditions"
+     },
+     "stop": {
+      "type": "number",
+      "title": "Stop"
+     },
+     "target_1": {
+      "type": "number",
+      "title": "Target 1"
+     },
+     "target_2": {
+      "type": "number",
+      "title": "Target 2"
+     },
+     "invalidation": {
+      "type": "string",
+      "title": "Invalidation"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name",
+     "side",
+     "entry_low",
+     "entry_high",
+     "conditions",
+     "stop",
+     "target_1",
+     "target_2",
+     "invalidation"
+    ],
+    "title": "AiPlanSetup"
    },
    "AiPriceRange": {
     "properties": {
@@ -14695,6 +15011,45 @@
      "ret_pct": {
       "type": "number",
       "title": "Ret Pct"
+     },
+     "target": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target"
+     },
+     "strategy_status": {
+      "type": "string",
+      "enum": [
+       "working",
+       "mixed",
+       "unknown",
+       "not-working",
+       "untested"
+      ],
+      "title": "Strategy Status",
+      "default": "working"
+     },
+     "proven": {
+      "type": "boolean",
+      "title": "Proven",
+      "default": true
+     },
+     "detail": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detail"
      }
     },
     "type": "object",
@@ -14714,7 +15069,11 @@
      "last",
      "reason",
      "pnl",
-     "ret_pct"
+     "ret_pct",
+     "target",
+     "strategy_status",
+     "proven",
+     "detail"
     ],
     "title": "IntradaySignal"
    },
@@ -14752,6 +15111,11 @@
       },
       "type": "array",
       "title": "Proven"
+     },
+     "show_untested": {
+      "type": "boolean",
+      "title": "Show Untested",
+      "default": false
      },
      "signals": {
       "items": {
@@ -14797,6 +15161,7 @@
      "backtest_at",
      "tested",
      "proven",
+     "show_untested",
      "signals",
      "source",
      "delayed",

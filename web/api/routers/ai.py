@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from ..models.ai import AiAnalysis, AiAnalyzeRequest, AiForecast, AiForecastReport, AiForecastRequest, AiStatus
+from ..models.ai import (AiAnalysis, AiAnalyzeRequest, AiForecast, AiForecastReport, AiForecastRequest, AiPlan,
+                         AiPlanRequest, AiStatus)
 from ..services import ai_svc, forecast_svc
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -18,6 +19,13 @@ def status():
 @router.post("/analyze", response_model=AiAnalysis)
 def analyze(body: AiAnalyzeRequest):
     return ai_svc.analyze(body.symbol, body.question)
+
+
+@router.post("/plan", response_model=AiPlan)
+def plan(body: AiPlanRequest):
+    """Claude reads the symbol's levels, the latest 5-minute bars and today's signals and writes an IF-THEN intraday
+    plan (entry zone, conditions, stop, two targets). Roughly Rs 5-10 per plan on the Anthropic account."""
+    return ai_svc.plan(body.symbol)
 
 
 @router.get("/forecasts", response_model=AiForecastReport)

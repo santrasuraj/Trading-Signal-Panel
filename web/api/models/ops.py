@@ -343,6 +343,12 @@ class IntradaySignal(Model):
     reason: str
     pnl: float                                    # rupees after charges (open: if closed at `last`)
     ret_pct: float
+    target: float | None = None                   # set by strategies with a fixed target (live OI build-ups)
+    # the strategy's result in the current backtest: working = proven; mixed / unknown = not proven;
+    # not-working = lost money; untested = not backtested (new strategies, live OI build-ups)
+    strategy_status: Literal["working", "mixed", "unknown", "not-working", "untested"] = "working"
+    proven: bool = True
+    detail: str | None = None                     # why this signal (e.g. the OI change) or what its label means
 
 
 class IntradayProven(Model):
@@ -354,7 +360,8 @@ class IntradaySignalsResponse(Model):
     generated_at: ISODateTime | None = None       # when the signals were last computed
     backtest_at: ISODateTime | None = None        # the backtest that decided which strategies are proven
     tested: int
-    proven: list[IntradayProven]                  # only these strategies may produce signals
+    proven: list[IntradayProven]                  # the strategies whose backtest shows a real edge after costs
+    show_untested: bool = False                   # intraday.show_untested: signals from every strategy, each labelled
     signals: list[IntradaySignal]
     source: str | None = None                     # today's bars: "fyers_ws" real time, "yahoo" ~15 min delayed
     delayed: bool
