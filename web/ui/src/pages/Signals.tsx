@@ -12,6 +12,8 @@ import { useIntradaySignals, useLiveQuotes, useSignals } from '@/api/hooks'
 import { isFailure } from '@/api/client'
 import type { Horizon, IntradaySignal, Quote, SignalGroup, SignalsResponse } from '@/api/types'
 import { AiPlan } from '@/components/AiPlan'
+import { isBuy, useIndexOptions } from '@/api/indexOptions'
+import { IndexOptions } from '@/components/IndexOptions'
 import { DataTable, type Col } from '@/components/DataTable'
 import { EvidenceChip, EtfChip, HorizonChip, ProofBadge, StatusBadge, WarnChip } from '@/components/badges'
 import { BiasNote, OrdersTable, PageHeader, flatteredNote } from '@/components/domain'
@@ -245,7 +247,7 @@ function IntradaySignals() {
 
 export default function Signals() {
   const [sp, setSp] = useSearchParams()
-  const horizon = (sp.get('horizon') as Horizon | null) ?? 'all'
+  const horizon = (sp.get('horizon') as Horizon | 'options' | null) ?? 'all'
   const allocParam = sp.get('allocations') ?? ''
   const [draft, setDraft] = useState<Record<string, number>>(() => parseAllocations(allocParam))
   useEffect(() => {
@@ -259,6 +261,9 @@ export default function Signals() {
   const q = useSignals({ allocations: allocParam || undefined })
   const intra = useIntradaySignals().data
   const intraday = horizon === 'intraday'
+  const optionsTab = horizon === 'options'
+  const special = intraday || optionsTab           // tabs with their own card instead of the strategies' orders
+  const idx = useIndexOptions().data
   // a stale or mistyped ?allocations= (e.g. a strategy key that no longer exists) must not lock the page
   const resetWhatIf = () => { setDraft({}); setSp((p) => { const n = new URLSearchParams(p); n.delete('allocations'); return n }, { replace: true }) }
   const d = q.data
@@ -316,7 +321,7 @@ export default function Signals() {
             <Banner tone="info" icon={<Info className="h-4 w-4 text-info" />}>{d.regime.note}</Banner>
           )}
           <div className="border-b border-line">
-            <Tabs<'all' | Horizon>
+            <Tabs<'all' | Horizon | 'options'>
               value={horizon}
               onChange={(h) => setSp((p) => { const n = new URLSearchParams(p); if (h === 'all') n.delete('horizon'); else n.set('horizon', h); return n })}
               items={[
@@ -324,19 +329,21 @@ export default function Signals() {
                 { id: 'longterm', label: HORIZON.longterm.label, count: count('longterm') },
                 { id: 'swing', label: HORIZON.swing.label, count: count('swing') },
                 { id: 'intraday', label: <span title={intra?.show_untested ? 'Same-day signals from every intraday strategy and live F&O build-ups, each labelled with its backtest result' : 'Same-day signals, only from intraday strategies whose backtest shows a real edge after costs'}>Intraday</span>, count: intra?.signals.length ?? 0 },
+                { id: 'options', label: <span title="Daily options verdict for every NSE index: BUY CALL / BUY PUT / NO TRADE">Index options</span>, count: idx?.rows.filter((r) => isBuy(r.verdict)).length ?? 0 },
               ]}
             />
           </div>
           {intraday && <IntradaySignals />}
+          {optionsTab && <IndexOptions />}
           {/* the cross-strategy ranking only says something new when the buys come from two or more strategies;
               with one, it repeated that strategy's own table */}
-          {!intraday && ranked.length > 1 && new Set(ranked.map((o) => o.strategy_key)).size > 1 && (
+          {!special &&ranked.length > 1 && new Set(ranked.map((o) => o.strategy_key)).size > 1 && (
             <Card title="Strongest buy signals" subtitle="Every buy signal today, strongest first. Hover a score for its parts: evidence, backtest, agreement between strategies, live record, results day." flush>
               <OrdersTable id="signals.ranked" orders={ranked} showStrategy live={live} />
             </Card>
           )}
-          {!intraday && main.length === 0 && <div className="card px-4 py-6 text-center text-[13px] text-muted">No active strategies in this horizon.</div>}
-          {!intraday && lq.data && main.some((g) => g.orders.length) && (
+          {!special &&main.length === 0 && <div className="card px-4 py-6 text-center text-[13px] text-muted">No active strategies in this horizon.</div>}
+          {!special &&lq.data && main.some((g) => g.orders.length) && (
             <p className="px-1 text-2xs text-muted">
               <span className={cn('mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle', lq.data.delayed ? 'bg-warn' : 'bg-profit')} />
               {lq.data.note} Updated <span className="num">{dateTimeIST(lq.data.as_of)}</span>.
@@ -344,9 +351,9 @@ export default function Signals() {
             </p>
           )}
           {main.filter((g) => g.orders.length > 0).map((g) => <Group key={g.strategy.key} g={g} live={live} />)}
-          {!intraday && main.some((g) => g.orders.length === 0) && <QuietStrategies groups={main.filter((g) => g.orders.length === 0)} />}
+          {!special &&main.some((g) => g.orders.length === 0) && <QuietStrategies groups={main.filter((g) => g.orders.length === 0)} />}
 
-          {!intraday && <div className="card num flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-[13px]">
+          {!special &&<div className="card num flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-[13px]">
             <span className="eyebrow">Totals</span>
             <span><span className="text-muted">Buys </span>{totals.buy} · <Money v={totals.buyAmt} /></span>
             <span><span className="text-muted">Sells </span>{totals.sell}{totals.sell > 0 && <> · {totals.sellUnknown ? <span className="text-faint" title="Some sells cannot be sized (you don't hold them and the model weight is unknown)">≥ <Money v={totals.sellAmt} /></span> : <Money v={totals.sellAmt} />}</>}</span>

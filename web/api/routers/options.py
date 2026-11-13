@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from ..models.options import (OptBigTradesResponse, OptChainResponse, OptHistoryResponse, OptRefreshAccepted,
-                              OptRefreshRequest, OptResearchResponse, OptStatus)
+from ..models.options import (OptBigTradesResponse, OptChainResponse, OptHistoryResponse, OptIndicesResponse,
+                              OptRefreshAccepted, OptRefreshRequest, OptResearchResponse, OptStatus)
 from ..services import options_svc as svc
 
 router = APIRouter(prefix="/api/options", tags=["options"])
@@ -29,6 +29,12 @@ def chain(symbol: str, expiry: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\
 def history(symbol: str, expiry: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")):
     """The chain's day so far: spot, max pain, PCR, ATM IV, straddle and the top OI levels per stored chain."""
     return svc.history(symbol, expiry)
+
+
+@router.get("/indices", response_model=OptIndicesResponse)
+def indices():
+    """Files only: every NSE index's nearest two option expiries with the scan's latest verdict (Signals page)."""
+    return svc.indices()
 
 
 @router.get("/bigtrades", response_model=OptBigTradesResponse)

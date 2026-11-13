@@ -191,7 +191,9 @@ intraday:
 # by the 09:12 scheduled task (intraday_sync.py --options) - open interest, PCR, max pain, implied volatility,
 # expected move. Positioning, not signals: nothing here has been backtested yet.
 options:
-  underlyings: [NIFTY, BANKNIFTY]   # index or F&O stock symbols, e.g. [NIFTY, BANKNIFTY, FINNIFTY, RELIANCE]
+  # index or F&O stock symbols; every NSE index with options is here (Signals page, Index options tab). SENSEX and
+  # BANKEX trade on BSE, which this app has no data source for.
+  underlyings: [NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50]
   expiries: 2                       # the nearest expiries of each
   interval_seconds: 60              # NSE updates its chain every few minutes; an unchanged chain is not stored twice
   risk_free_pct: 6.5                # for implied volatility (about the 91-day T-bill yield)

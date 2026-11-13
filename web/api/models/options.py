@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Literal
 
 from .common import ISODate, ISODateTime, Model
+from .outlook import OvTrack
 
 OptBuildup = Literal["long_buildup", "short_buildup", "short_covering", "long_unwinding"]
 OptRunState = Literal["idle", "running", "done", "failed"]
@@ -227,6 +228,46 @@ class OptBigTradesResponse(Model):
     instruments: list[OptBigInstrument]
     recent: list[OptBigTrade]                     # newest first
     thresholds: dict[str, float]                  # future_print_cr, option_print_lakh
+    note: str
+
+
+class OptIndexPick(Model):
+    side: Literal["ce", "pe"]
+    strike: float | None = None
+    premium: float | None = None
+    breakeven: float | None = None
+
+
+class OptIndexRow(Model):
+    """One NSE index option expiry: the stored chain's summary and the scan's latest verdict for it."""
+    symbol: str                                   # NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50
+    name: str                                     # NSE's index name, e.g. Nifty Bank
+    expiry: ISODate
+    days_to_expiry: float | None = None
+    spot: float | None = None
+    chain_time: ISODateTime
+    stale: bool
+    atm: float | None = None
+    atm_call: float | None = None                 # last traded price at the ATM strike
+    atm_put: float | None = None
+    atm_iv_pct: float | None = None
+    expected_move_pct: float | None = None        # ATM straddle / spot: the move the market prices to expiry
+    range_low: float | None = None
+    range_high: float | None = None
+    pcr_oi: float | None = None                   # reference only: not shown to predict
+    max_pain: float | None = None                 # reference only: not shown to predict
+    verdict: Literal["BUY_CALL", "BUY_PUT", "NO_TRADE", "NO_DATA"] | None = None   # None = not journalled yet
+    verdict_day: ISODate | None = None
+    headline: str | None = None                   # the verdict in one sentence (with the first failed check)
+    bias: Literal["bullish", "bearish", "none"] | None = None
+    pick: OptIndexPick | None = None
+
+
+class OptIndicesResponse(Model):
+    generated_at: ISODateTime
+    rows: list[OptIndexRow]
+    missing: list[str]                            # configured indices with no stored chain yet
+    track: OvTrack                                # the index verdicts' record so far
     note: str
 
 

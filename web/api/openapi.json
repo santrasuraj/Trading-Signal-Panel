@@ -2649,6 +2649,28 @@
     }
    }
   },
+  "/api/options/indices": {
+   "get": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Indices",
+    "description": "Files only: every NSE index's nearest two option expiries with the scan's latest verdict (Signals page).",
+    "operationId": "indices_api_options_indices_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OptIndicesResponse"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/options/bigtrades": {
    "get": {
     "tags": [
@@ -19511,6 +19533,333 @@
      "resistance"
     ],
     "title": "OptHistoryResponse"
+   },
+   "OptIndexPick": {
+    "properties": {
+     "side": {
+      "type": "string",
+      "enum": [
+       "ce",
+       "pe"
+      ],
+      "title": "Side"
+     },
+     "strike": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Strike"
+     },
+     "premium": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Premium"
+     },
+     "breakeven": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Breakeven"
+     }
+    },
+    "type": "object",
+    "required": [
+     "side",
+     "strike",
+     "premium",
+     "breakeven"
+    ],
+    "title": "OptIndexPick"
+   },
+   "OptIndexRow": {
+    "properties": {
+     "symbol": {
+      "type": "string",
+      "title": "Symbol"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "expiry": {
+      "type": "string",
+      "title": "Expiry"
+     },
+     "days_to_expiry": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Days To Expiry"
+     },
+     "spot": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Spot"
+     },
+     "chain_time": {
+      "type": "string",
+      "title": "Chain Time"
+     },
+     "stale": {
+      "type": "boolean",
+      "title": "Stale"
+     },
+     "atm": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Atm"
+     },
+     "atm_call": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Atm Call"
+     },
+     "atm_put": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Atm Put"
+     },
+     "atm_iv_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Atm Iv Pct"
+     },
+     "expected_move_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Expected Move Pct"
+     },
+     "range_low": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Range Low"
+     },
+     "range_high": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Range High"
+     },
+     "pcr_oi": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pcr Oi"
+     },
+     "max_pain": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Pain"
+     },
+     "verdict": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "BUY_CALL",
+         "BUY_PUT",
+         "NO_TRADE",
+         "NO_DATA"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Verdict"
+     },
+     "verdict_day": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Verdict Day"
+     },
+     "headline": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Headline"
+     },
+     "bias": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "bullish",
+         "bearish",
+         "none"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bias"
+     },
+     "pick": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OptIndexPick"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": "object",
+    "required": [
+     "symbol",
+     "name",
+     "expiry",
+     "days_to_expiry",
+     "spot",
+     "chain_time",
+     "stale",
+     "atm",
+     "atm_call",
+     "atm_put",
+     "atm_iv_pct",
+     "expected_move_pct",
+     "range_low",
+     "range_high",
+     "pcr_oi",
+     "max_pain",
+     "verdict",
+     "verdict_day",
+     "headline",
+     "bias",
+     "pick"
+    ],
+    "title": "OptIndexRow",
+    "description": "One NSE index option expiry: the stored chain's summary and the scan's latest verdict for it."
+   },
+   "OptIndicesResponse": {
+    "properties": {
+     "generated_at": {
+      "type": "string",
+      "title": "Generated At"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/OptIndexRow"
+      },
+      "type": "array",
+      "title": "Rows"
+     },
+     "missing": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Missing"
+     },
+     "track": {
+      "$ref": "#/components/schemas/OvTrack"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "generated_at",
+     "rows",
+     "missing",
+     "track",
+     "note"
+    ],
+    "title": "OptIndicesResponse"
    },
    "OptLastRefresh": {
     "properties": {

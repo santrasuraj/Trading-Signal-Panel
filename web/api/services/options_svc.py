@@ -116,6 +116,59 @@ def chain(symbol: str, expiry: str | None, window: int) -> dict:
             "rows": rows, "note": NOTE}
 
 
+INDEX_NOTE = ("The scan's daily options verdict for each NSE index (scanner/option_verdict.py): BUY CALL or BUY PUT only "
+              "when the index's own tested setup points one way AND an option is worth more than it costs on the "
+              "index's history; otherwise NO TRADE - the usual answer. Not yet proven on options: every verdict is "
+              "scored at expiry against NSE's official close. PCR and max pain are shown for reference only - no test "
+              "here shows they predict. 93% of individual F&O traders lost money over three years (SEBI, 2024).")
+_journal = register(FileCache(lambda p: json.loads(p.read_text(encoding="utf-8")), missing=[]))
+
+
+def indices() -> dict:
+    """GET /api/options/indices: for every index in options.underlyings, its nearest two stored expiries with the
+    chain's summary (spot, ATM premiums, implied volatility, expected move, PCR, max pain) and the scan's latest
+    journalled verdict for that expiry, plus the index verdicts' record so far."""
+    from scanner import option_verdict as ov
+    journal = _journal.get(P.results / ov.JOURNAL_FILE.name) or []
+    latest_of: dict[tuple, dict] = {}
+    for r in journal:
+        k = (r.get("symbol"), r.get("expiry"))
+        if r.get("symbol") in ov.INDEX_COLUMN and (k not in latest_of or str(r.get("day")) >= str(latest_of[k].get("day"))):
+            latest_of[k] = r
+    rows, missing = [], []
+    for sym in [s for s in _cfg()["underlyings"] if s in opt.INDICES]:
+        mine = [c for c in _refs() if c.get("symbol") == sym][:2]
+        if not mine:
+            missing.append(sym)
+        for ref in mine:
+            try:
+                a = chain(sym, ref["expiry"], 15)
+            except ApiException:
+                continue
+            s = a["summary"]
+            atm_row = next((r for r in a["rows"] if r.get("atm")), {})
+            j = latest_of.get((sym, ref["expiry"]))
+            pick = ({"side": j["side"], "strike": j.get("strike"), "premium": j.get("premium"),
+                     "breakeven": j.get("breakeven")} if j and j.get("side") else None)
+            rows.append({"symbol": sym, "name": ov.INDEX_COLUMN.get(sym, sym), "expiry": ref["expiry"],
+                         "days_to_expiry": a["days_to_expiry"], "spot": a["spot"], "chain_time": a["time"],
+                         "stale": a["stale"], "atm": a["atm"],
+                         "atm_call": num((atm_row.get("ce") or {}).get("ltp"), 2),
+                         "atm_put": num((atm_row.get("pe") or {}).get("ltp"), 2),
+                         "atm_iv_pct": s.get("atm_iv_pct"), "expected_move_pct": s.get("expected_move_pct"),
+                         "range_low": s.get("range_low"), "range_high": s.get("range_high"),
+                         "pcr_oi": s.get("pcr_oi"), "max_pain": s.get("max_pain"),
+                         "verdict": j["verdict"] if j else None, "verdict_day": j.get("day") if j else None,
+                         "headline": j.get("headline") if j else None, "bias": j.get("bias") if j else None,
+                         "pick": pick})
+    mine = [r for r in journal if r.get("symbol") in ov.INDEX_COLUMN]
+    from . import data
+    closes = data.store_close()
+    track = ov.track(ov.score(mine, {c: closes[c] for c in closes.columns} if closes is not None else {}))
+    return {"generated_at": now_ist().isoformat(timespec="seconds"), "rows": rows, "missing": missing,
+            "track": track, "note": INDEX_NOTE}
+
+
 BIG_NOTE = ("Every single futures / options trade above the size thresholds, from the FYERS live feed (needs today's FYERS "
             "login and the 09:14 live service). Side = the likely initiator: at the ask a buyer lifted the offer, at the "
             "bid a seller hit it. Who traded, and whether it opened or closed a position, is never known live.")

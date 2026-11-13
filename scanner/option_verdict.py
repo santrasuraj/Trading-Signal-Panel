@@ -38,6 +38,10 @@ COST_PCT = 3.0               # brokerage (Rs 20 x 2 per lot), exchange, SEBI, st
 EXERCISE_STT_PCT = 0.125     # STT on the settlement value of an option held to expiry in the money
 STRIKES_OUT = 2
 STORE_SYMBOL = {"NIFTY": "NIFTY50"}      # option underlying -> the price-store column that settles it
+# index underlyings -> their column in NSE's daily index file (data/nse/index_history.parquet, kept by the scan since
+# Aug 2018): the index's own history gives the direction (scanner/index_study.py) and the official close settles it
+INDEX_COLUMN = {"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank", "FINNIFTY": "Nifty Financial Services",
+                "MIDCPNIFTY": "Nifty Midcap Select", "NIFTYNXT50": "Nifty Next 50"}
 NOTE = ("A verdict needs a tested direction and an option that this stock's own history says is worth more than it "
         "costs; otherwise NO TRADE. Not yet tested on options: each verdict is journalled and scored at expiry. "
         "Options can lose 100% of the premium. Research, not advice: you decide.")
@@ -250,7 +254,8 @@ def record(verdicts: list[dict], day: str) -> int:
         rid = f"{v['symbol']}|{v['expiry']}|{day}"
         rows[rid] = {"id": rid, "day": day, "recorded_at": ist_now().isoformat(timespec="seconds"),
                      "symbol": v["symbol"], "store_symbol": v.get("store_symbol"), "expiry": v["expiry"],
-                     "spot": v.get("spot"), "verdict": v["verdict"],
+                     "spot": v.get("spot"), "verdict": v["verdict"], "headline": v.get("headline"),
+                     "bias": (v.get("direction") or {}).get("bias"),
                      "side": (v.get("pick") or {}).get("side"), "strike": (v.get("pick") or {}).get("strike"),
                      "premium": (v.get("pick") or {}).get("premium"), "breakeven": (v.get("pick") or {}).get("breakeven"),
                      "atm_call": {"strike": kc, "premium": pc}, "atm_put": {"strike": kp, "premium": pp}}
@@ -269,12 +274,40 @@ def _payoff(side: str | None, k, prem, s_exp) -> float | None:
     return (pay * (1 - EXERCISE_STT_PCT / 100) - prem * (1 + COST_PCT / 100)) / (prem * (1 + COST_PCT / 100)) * 100
 
 
-def score(rows: list[dict], closes: dict[str, pd.Series], today: date | None = None) -> list[dict]:
-    """Outcome of each expired verdict (settled at the store's close on the expiry day, or the last one before it)."""
+def load_index_history() -> pd.DataFrame | None:
+    """NSE's daily closes of every index (dates x index names), as the scan keeps them."""
+    from .nse import INDEX_HISTORY
+    try:
+        return pd.read_parquet(INDEX_HISTORY)
+    except Exception:
+        return None
+
+
+def index_close(underlying: str, ih: pd.DataFrame | None, store_close: pd.DataFrame | None = None) -> pd.Series | None:
+    """An index underlying's daily closes: NSE's index history, with any newer close of the price store on top (the
+    store has NIFTY50 only); None when neither has it."""
+    col = INDEX_COLUMN.get(underlying)
+    s = ih[col].dropna().astype(float) if ih is not None and col in ih.columns else pd.Series(dtype=float)
+    st = STORE_SYMBOL.get(underlying)
+    if store_close is not None and st in store_close.columns:
+        top = store_close[st].dropna().astype(float)
+        s = top if s.empty else pd.concat([s, top[top.index > s.index[-1]]])
+    return s if len(s) else None
+
+
+def score(rows: list[dict], closes: dict[str, pd.Series], today: date | None = None,
+          index_closes: dict[str, pd.Series] | None = None) -> list[dict]:
+    """Outcome of each expired verdict (settled at the store's close on the expiry day, or the last one before it; an
+    index the store doesn't have settles at NSE's official index close)."""
     today = today or ist_today()
     out = []
     for r in rows:
         s = closes.get(r.get("store_symbol") or STORE_SYMBOL.get(r["symbol"], r["symbol"]))
+        if s is None and r["symbol"] in INDEX_COLUMN:
+            if index_closes is None:
+                ih = load_index_history()
+                index_closes = {u: x for u in INDEX_COLUMN for x in [index_close(u, ih)] if x is not None}
+            s = index_closes.get(r["symbol"])
         exp = pd.Timestamp(r["expiry"])
         done = s is not None and exp.date() < today and len(s.loc[:exp].dropna())
         s_exp = float(s.loc[:exp].dropna().iloc[-1]) if done else None
@@ -310,15 +343,34 @@ def record_stored_chains(frames: dict[str, pd.DataFrame], latest: dict, log=prin
             and str(x.get("expiry", "")) >= day]
     if not refs:
         return 0
+    from . import index_study
     close = frames["close"]
-    uni = [s for s in close.columns if s in set(latest.get("symbols") or close.columns)]
-    member = pd.DataFrame(np.broadcast_to(close.columns.isin(uni), close.shape), index=close.index, columns=close.columns)
-    feats = ol.features({k: frames[k] for k in ("open", "high", "low", "close", "volume")}, member)
-    out = []
+    feats, ih, out = None, None, []
     for ref in refs:
-        sym = STORE_SYMBOL.get(ref["symbol"], ref["symbol"])
-        if sym not in close.columns:
-            continue
+        under = ref["symbol"]
+        if under in INDEX_COLUMN:
+            # an index: direction from its own history (the same study the Chart page's verdict uses), not the stocks'
+            if ih is None:
+                ih = load_index_history()
+            s = index_close(under, ih, close)
+            if s is None:
+                log(f"Options verdict: {under} skipped (no index history)")
+                continue
+            sym = STORE_SYMBOL.get(under, INDEX_COLUMN[under])
+            m = index_study.match_for(s, INDEX_COLUMN[under])
+        else:
+            sym = STORE_SYMBOL.get(under, under)
+            if sym not in close.columns:
+                continue
+            if feats is None:
+                uni = [c for c in close.columns if c in set(latest.get("symbols") or close.columns)]
+                member = pd.DataFrame(np.broadcast_to(close.columns.isin(uni), close.shape), index=close.index,
+                                      columns=close.columns)
+                feats = ol.features({k: frames[k] for k in ("open", "high", "low", "close", "volume")}, member)
+            s = close[sym].dropna()
+            codes = {k: (None if not np.isfinite(feats[k].at[s.index[-1], sym]) else int(feats[k].at[s.index[-1], sym]))
+                     for k in ol.FEATURES}
+            m = ol.match(study, codes) if study else None
         try:
             snaps = pd.read_parquet(opt.snap_file(date.fromisoformat(ref["day"]), ref["symbol"], date.fromisoformat(ref["expiry"])))
             cur, when = opt.chain_at(snaps)
@@ -328,10 +380,6 @@ def record_stored_chains(frames: dict[str, pd.DataFrame], latest: dict, log=prin
         except Exception as e:     # a damaged snapshot file: skip that chain
             log(f"Options verdict: {ref['symbol']} {ref['expiry']} skipped ({type(e).__name__})")
             continue
-        s = close[sym].dropna()
-        codes = {k: (None if not np.isfinite(feats[k].at[s.index[-1], sym]) else int(feats[k].at[s.index[-1], sym]))
-                 for k in ol.FEATURES}
-        m = ol.match(study, codes) if study else None
         v = assess(a, s, m, latest.get("strategies") or [], sym, last_day=s.index[-1].date().isoformat())
         out.append({**v, "store_symbol": sym})
     n = record(out, day)

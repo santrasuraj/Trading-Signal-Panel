@@ -117,6 +117,12 @@ or *likely luck*. On 11 Nov 2026: momentum leaders "could be luck" (deflated 66%
   and the FYERS tick-to-screen latency measured in your browser.
 - **Options direction for an index from the index itself** (`scanner/index_study.py`): NIFTY's options verdict uses
   NIFTY's own history of today's setup (trend vs the 50 / 200-day average, RSI band), not a study measured on stocks.
+- **Index options for every NSE index** (Signals page, Index options tab; `GET /api/options/indices`): NIFTY, BANKNIFTY,
+  FINNIFTY, MIDCPNIFTY and NIFTYNXT50 (`options.underlyings` in config.yaml), the nearest two expiries of each with the
+  scan's daily verdict (BUY CALL / BUY PUT / NO TRADE and why), ATM call and put prices, implied volatility, the move
+  the options price, and PCR / max pain for reference. Each index's direction comes from its own NSE history
+  (data/nse/index_history.parquet, since Aug 2018) and every verdict settles at NSE's official index close. SENSEX and
+  BANKEX trade on BSE, which the app has no data source for.
 - **Dated capital-gains tax**: gains realised before 23 Jul 2024 are taxed at the old 15% / 10% (+ cess, Rs 1 lakh LTCG
   exemption), later ones at 20% / 12.5% (`tax: dated: 0` in config.yaml uses today's rates for every year).
 - **Scans in plain English** (Scans page, needs `ANTHROPIC_API_KEY` in `.env`): Claude turns the idea into the builder's
