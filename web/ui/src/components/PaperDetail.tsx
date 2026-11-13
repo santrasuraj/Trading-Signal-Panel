@@ -76,10 +76,10 @@ export function PaperDetailView({ k }: { k: string }) {
       {/* five fixed columns from md: auto-fit wrapped it 4 + 1 at 800 px */}
       <KpiStrip gridClass="md:grid-cols-5">
         <KpiTile label="Paper value" value={<Money compact v={s.equity} />} sub={<Pct v={s.return_pct} />} />
-        <KpiTile label="Nifty 500" value={pct(s.n500_pct)} sub={`same days · Nifty 50 ${pct(s.nifty_pct)}`} />
+        <KpiTile label="Nifty 500" value={pct(s.n500_pct)} sub={`same days · Nifty\u00A050\u00A0${pct(s.nifty_pct)}`} />
         <KpiTile label="Backtest expected" value={pct(s.expected_pct)} sub={s.expected_range_pct ? <>range <span className="whitespace-nowrap">{pct(s.expected_range_pct[0])} to {pct(s.expected_range_pct[1])}</span></> : null} />
         <KpiTile label="Worst drop" value={<Risk v={s.max_dd_pct} />} />
-        <KpiTile label="Charges + slippage" value={<Money compact v={s.fees + s.slippage} />} sub={`${s.trades} closed · ${s.open} open · ${s.pending} pending`} />
+        <KpiTile label="Charges + slippage" value={<Money compact v={s.fees + s.slippage} />} sub={`${s.trades}\u00A0closed · ${s.open}\u00A0open · ${s.pending}\u00A0pending`} />
       </KpiStrip>
       <Card title="Verdict" right={<TonePill tone={s.level}>{verdictLabel(s, minDays)}</TonePill>}>
         <p className="text-[13px] leading-6 text-fg">{s.verdict}</p>

@@ -45,7 +45,7 @@ function Kpis({ d }: { d: Detail }) {
       <KpiTile label="Volatility" value={pct(f.vol_pct, { signed: false })} sub="annualised" />
       <KpiTile label="Win rate" value={pct(f.win_rate, { signed: false })} sub={<><span className="text-profit">{pct(f.avg_win_pct)}</span> / <span className="text-loss">{pct(f.avg_loss_pct)}</span></>} />
       <KpiTile label="Profit factor" value={ratio(f.profit_factor)} sub={`avg trade ${pct(f.expectancy_pct)}`} title={`Expectancy (average trade) ${pct(f.expectancy_pct)}`} />
-      <KpiTile label="Exposure" value={pct(f.exposure_pct, { signed: false, dp: 0 })} sub={`${f.trades} trades · ${num(f.avg_days, 0)} d avg`} title={`${f.trades} trades, average hold ${num(f.avg_days, 0)} days`} />
+      <KpiTile label="Exposure" value={pct(f.exposure_pct, { signed: false, dp: 0 })} sub={`${f.trades}\u00A0trades · ${num(f.avg_days, 0)}\u00A0d\u00A0avg`} title={`${f.trades} trades, average hold ${num(f.avg_days, 0)} days`} />
     </KpiStrip>
   )
 }
