@@ -145,3 +145,81 @@ def previous_day(store: dict[str, pd.DataFrame], day) -> dict[str, dict]:
             out[str(s)] = {"close": float(pc[s]), "high_52w": float(hi[s]) if pd.notna(hi.get(s)) else None,
                            "low_52w": float(lo[s]) if pd.notna(lo.get(s)) else None}
     return out
+
+
+# ---- Telegram: new setups while the market is open (called by the live service every couple of minutes) ----------
+SENT_NAME = "setups_sent_{d:%Y%m%d}.json"
+MAX_PER_MESSAGE = 12
+_prev_cache: dict = {}
+
+
+def _mine() -> set[str]:
+    from .. import watch
+    out = {s for lst in watch.watchlists()["lists"] for s in lst["symbols"]}
+    try:
+        from ..holdings import load_holdings
+        out |= {str(s).upper() for s in load_holdings()["symbol"]}
+    except Exception:
+        pass
+    return out
+
+
+def message_lines(events: list[dict]) -> list[str]:
+    return [f"{e['symbol']}: {e['label']} at Rs {e['price']:,.2f}"
+            + (f" ({e['change_pct']:+.1f}% today)" if e.get("change_pct") is not None else "") + f" - {e['detail']}"
+            for e in events]
+
+
+def telegram_new(root, day, settings: dict, send=None, store=None, log=print) -> int:
+    """Send the setups that appeared since the last call (once each), per your settings. Returns how many were sent."""
+    import json as _json
+    from ..settings import DATA_DIR
+    from .live import live_file, live_file_1m
+    s = settings.get("setups") or {}
+    if not s.get("on"):
+        return 0
+    bars, step = None, 5
+    for p, st in ((live_file_1m(root, day), 1), (live_file(root, day), 5)):
+        if p.exists():
+            try:
+                bars, step = pd.read_parquet(p), st
+                break
+            except Exception:
+                continue
+    if bars is None or bars.empty:
+        return 0
+    if "flags" in bars.columns:
+        bars = bars[(bars["flags"] & 16) == 0]
+    if s.get("scope", "mine") == "mine":
+        mine = _mine()
+        bars = bars[bars["symbol"].astype(str).isin(mine)]
+        if bars.empty:
+            return 0
+    key = str(day)
+    if _prev_cache.get("day") != key:
+        if store is None:
+            from ..store import PanelStore
+            store = PanelStore().load()
+        _prev_cache.update(day=key, prev=previous_day(store, pd.Timestamp(day)))
+    kinds = set(s.get("kinds") or KINDS)
+    events = [e for e in detect(bars, step, _prev_cache["prev"]) if e["kind"] in kinds]
+    sent_path = DATA_DIR / "intraday" / "live" / SENT_NAME.format(d=pd.Timestamp(day))
+    try:
+        sent = set(_json.loads(sent_path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        sent = set()
+    new = [e for e in reversed(events) if f"{e['symbol']}|{e['kind']}|{e['time']}" not in sent]   # oldest first
+    if not new:
+        return 0
+    if send is None:
+        from ..alerts import send_telegram as send
+    batch = new[-MAX_PER_MESSAGE:]
+    head = f"Live setups ({len(new)} new{', latest ' + str(MAX_PER_MESSAGE) if len(new) > MAX_PER_MESSAGE else ''}):"
+    ok, detail = send("\n".join([head] + message_lines(batch) + ["Facts about the tape, not tested signals."]))
+    if ok:
+        sent |= {f"{e['symbol']}|{e['kind']}|{e['time']}" for e in new}
+        sent_path.parent.mkdir(parents=True, exist_ok=True)
+        sent_path.write_text(_json.dumps(sorted(sent)), encoding="utf-8")
+    else:
+        log(f"Live setups: Telegram not sent ({detail})")
+    return len(batch) if ok else 0

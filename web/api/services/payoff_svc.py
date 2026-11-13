@@ -163,3 +163,68 @@ def build(symbol: str, expiry: str | None, legs_in: list[dict], days: float = 0.
             "days_to_expiry": c["days_to_expiry"], "atm_iv_pct": round(atm_iv * 100, 2), "legs": out_legs,
             "days": days, "iv_shift": iv_shift, "as_of": now_ist().isoformat(timespec="seconds"), **res,
             "note": "Margin not included: an option you sell needs SPAN + exposure margin from your broker."}
+
+
+# ---- your real F&O positions (FYERS) in the builder -----------------------------------------------------------------
+import re as _re
+from datetime import date as _date
+
+_MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), 1)}
+_MONTHLY = _re.compile(r"^(?P<u>[A-Z&-]+?)(?P<yy>\d{2})(?P<mon>JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)"
+                       r"(?:(?P<fut>FUT)|(?P<k>\d+(?:\.\d+)?)(?P<t>CE|PE))$")
+_WEEKLY = _re.compile(r"^(?P<u>[A-Z&-]+?)(?P<yy>\d{2})(?P<m>[1-9OND])(?P<dd>\d{2})(?P<k>\d+(?:\.\d+)?)(?P<t>CE|PE)$")
+
+
+def parse_fno_symbol(sym: str) -> dict | None:
+    """A FYERS derivative symbol: NSE:NIFTY26NOV25200CE (monthly), NSE:NIFTY2611725200CE (weekly: year, month 1-9 /
+    O / N / D, day), NSE:BANKNIFTY26DECFUT. Returns underlying, kind CE / PE / FUT, strike, and the expiry (a date
+    for weekly contracts, (year, month) for monthly ones, whose day is the month's last expiry)."""
+    s = str(sym).upper().removeprefix("NSE:").removeprefix("NFO:")
+    m = _WEEKLY.match(s)
+    if m:
+        mon = {"O": 10, "N": 11, "D": 12}.get(m["m"]) or int(m["m"])
+        try:
+            exp = _date(2000 + int(m["yy"]), mon, int(m["dd"]))
+        except ValueError:
+            return None
+        return {"underlying": m["u"], "kind": m["t"], "strike": float(m["k"]), "expiry": exp.isoformat(), "monthly": None}
+    m = _MONTHLY.match(s)
+    if m:
+        return {"underlying": m["u"], "kind": "FUT" if m["fut"] else m["t"], "strike": float(m["k"]) if m["k"] else None,
+                "expiry": None, "monthly": (2000 + int(m["yy"]), _MONTHS[m["mon"]])}
+    return None
+
+
+def my_positions() -> dict:
+    """Open F&O positions on your FYERS account, grouped by underlying and expiry, as builder legs."""
+    from . import orders_svc
+    try:
+        b = orders_svc.broker()
+    except ApiException as e:
+        return {"logged_in": False, "groups": [], "note": e.message}
+    pos = b.positions()
+    if pos.get("s") != "ok":
+        return {"logged_in": True, "groups": [], "note": f"FYERS: {pos.get('message')}"}
+    stored = {(r["symbol"], r["expiry"]) for r in options_svc._refs()}
+    exps_by_sym: dict[str, list[str]] = {}
+    for sym, e in stored:
+        exps_by_sym.setdefault(sym, []).append(e)
+    groups: dict[tuple, dict] = {}
+    for x in pos.get("netPositions") or []:
+        qty = int(float(x.get("netQty") or 0))
+        p = parse_fno_symbol(x.get("symbol", ""))
+        if not qty or not p:
+            continue
+        exp = p["expiry"]
+        if exp is None and p["monthly"]:
+            y, mo = p["monthly"]
+            same = sorted(e for e in exps_by_sym.get(p["underlying"], []) if e.startswith(f"{y}-{mo:02d}"))
+            exp = same[-1] if same else f"{y}-{mo:02d}"
+        g = groups.setdefault((p["underlying"], exp), {"symbol": p["underlying"], "expiry": exp,
+                                                         "stored": (p["underlying"], exp) in stored, "legs": []})
+        g["legs"].append({"kind": p["kind"], "side": "buy" if qty > 0 else "sell", "strike": p["strike"], "qty": abs(qty),
+                          "price": orders_svc._num(x.get("netAvg")), "ltp": orders_svc._num(x.get("ltp")),
+                          "pl": orders_svc._num(x.get("pl")), "fyers_symbol": x.get("symbol")})
+    return {"logged_in": True, "groups": list(groups.values()),
+            "note": "Your open F&O positions from FYERS (read only). A group can be analysed when its option chain is "
+                    "stored (Options page)."}

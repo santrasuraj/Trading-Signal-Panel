@@ -36,6 +36,7 @@ from .fyers_sync import is_trading_day
 
 MAX_SYMBOLS = 100               # FYERS Standard plan WebSocket limit (all connections together)
 FLUSH_SECONDS = 5
+SETUP_CHECK_S = 120         # live setups on Telegram: checked every 2 minutes
 SESSION_END = (15, 31)
 LOGIN_POLL_SECONDS = 60
 STALE_SECONDS = 120             # no tick for this long during the session = the live feed is not working
@@ -323,8 +324,20 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
             osock = order_feed.start_socket(tok, feed, log, LOG_DIR)
         except Exception as e:                              # orders still show on the page's own poll
             log(f"Order updates: could not start the FYERS order socket ({type(e).__name__}: {e})")
+        last_setups = 0.0
         while not _session_over():
             time.sleep(FLUSH_SECONDS)
+            if time.monotonic() - last_setups >= SETUP_CHECK_S:     # live setups on Telegram, if switched on
+                last_setups = time.monotonic()
+                try:
+                    from .. import notify_settings
+                    from . import setups
+                    cfg = notify_settings.read()
+                    if (cfg.get("setups") or {}).get("on"):
+                        threading.Thread(target=setups.telegram_new, args=(root, ist_now().date(), cfg),
+                                         kwargs={"log": log}, name="setups-telegram", daemon=True).start()
+                except Exception as e:
+                    log(f"Live setups: {type(e).__name__}: {e}")
             try:
                 order_feed.keep_subscribed(osock, feed)
             except Exception:

@@ -9,7 +9,7 @@ from .action import ActionCard
 from .common import Model
 
 AlertKind = Literal["above", "below", "change_above", "change_below", "line_above", "line_below", "rsi_above",
-                    "rsi_below", "sma_above", "sma_below", "scan_hit", "pattern"]
+                    "rsi_below", "sma_above", "sma_below", "scan_hit", "pattern", "formula_above", "formula_below"]
 
 
 class LinePoint(Model):

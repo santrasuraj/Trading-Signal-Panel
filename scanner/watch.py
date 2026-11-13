@@ -33,7 +33,8 @@ WATCH_FILE_NAME = "watchlists.json"
 ALERTS_FILE_NAME = "alerts.json"
 FIRED_FILE_NAME = "alerts_fired.jsonl"
 PRICE_KINDS = ("above", "below", "change_above", "change_below", "line_above", "line_below")   # every live quote
-RULE_KINDS = ("rsi_above", "rsi_below", "sma_above", "sma_below", "scan_hit", "pattern")       # rule_alerts.py
+RULE_KINDS = ("rsi_above", "rsi_below", "sma_above", "sma_below", "scan_hit", "pattern",        # rule_alerts.py
+              "formula_above", "formula_below")                                                  # your formulas
 KINDS = PRICE_KINDS + RULE_KINDS
 SMA_PERIODS = (10, 20, 50, 100, 200)
 ALL = "ALL"                                    # the "symbol" of a scan alert (any stock)
@@ -183,6 +184,13 @@ def add_alert(symbol: str, kind: str, value: float = 0.0, note: str = "", a: dic
         if not ref:
             raise ValueError("Pick a saved scan.")
         extra = {"ref": str(ref)[:40], "seen": clean_symbols(seen or [])}
+    elif kind in ("formula_above", "formula_below"):
+        from . import formula
+        f = next((x for x in formula.saved() if x["id"] == ref), None)
+        if f is None:
+            raise ValueError("Pick one of your saved formulas.")
+        extra = {"ref": f["id"], "expr": f["expr"]}
+        note = note or f["name"]
     a = {"id": uuid.uuid4().hex[:12], "symbol": sym, "kind": kind, "value": round(value, 2), "note": str(note or "")[:120],
          "created": ist_now().isoformat(timespec="seconds"), "active": True, "fired_at": None, "fired_price": None,
          "source": None, **extra}
@@ -246,7 +254,9 @@ def describe(a: dict) -> str:
             "rsi_above": f"{s} RSI(14) at or above {v:g}", "rsi_below": f"{s} RSI(14) at or below {v:g}",
             "sma_above": f"{s} above its {int(v)}-day average", "sma_below": f"{s} below its {int(v)}-day average",
             "scan_hit": f"scan '{a.get('note') or a.get('ref')}' has a new stock",
-            "pattern": f"{s}: a candle pattern with a tested edge"}.get(k, f"{s} {k} {v}")
+            "pattern": f"{s}: a candle pattern with a tested edge",
+            "formula_above": f"{s} {a.get('note') or 'your formula'} at or above {v:g}",
+            "formula_below": f"{s} {a.get('note') or 'your formula'} at or below {v:g}"}.get(k, f"{s} {k} {v}")
 
 
 def fire(check) -> list[dict]:

@@ -5,7 +5,8 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { NotebookPen, Star } from 'lucide-react'
+import { Download, NotebookPen, Star } from 'lucide-react'
+import { downloadCsv } from '@/lib/exporting'
 import { fetchJson, isFailure } from '@/api/client'
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { EmptyState, ErrorState, SkeletonKpis } from '@/components/feedback'
@@ -112,7 +113,11 @@ export default function Journal() {
   return (
     <div>
       <PageHeader title="Trade journal" subtitle={d ? `${d.counts.real} real · ${d.counts.practice} practice · ${d.counts.replay} replay trades` : 'Every trade, your notes, and what works for you'}
-        right={<Segmented<Source> ariaLabel="Source" value={source} onChange={setSource} items={[{ id: 'all', label: 'All' }, { id: 'real', label: 'Real' }, { id: 'practice', label: 'Practice' }, { id: 'replay', label: 'Replay' }]} />} />
+        right={<>
+          <Segmented<Source> ariaLabel="Source" value={source} onChange={setSource} items={[{ id: 'all', label: 'All' }, { id: 'real', label: 'Real' }, { id: 'practice', label: 'Practice' }, { id: 'replay', label: 'Replay' }]} />
+          <Button size="sm" variant="ghost" icon={<Download className="h-3.5 w-3.5" />} disabled={!d?.trades.length} onClick={() => d && downloadCsv('trade-journal.csv', d.trades.map(({ has_image, ...t }) => ({ ...t, tags: t.tags.join('; '), mistakes: t.mistakes.join('; '), screenshot: has_image })))}>CSV</Button>
+          <a className="btn-link inline-flex h-8 items-center rounded-md border border-line px-2.5 text-xs text-fg hover:bg-raised" href="/api/export/workbook.xlsx" download>All my data (Excel)</a>
+        </>} />
       {q.error ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d || !s || !o ? <SkeletonKpis n={6} /> : !o.trades ? (
         <EmptyState icon={<NotebookPen />} title="No trades yet" action={<span className="flex gap-3"><Link className="text-accent" to="/replay">Practise on Replay</Link><Link className="text-accent" to="/sim">Open the practice account</Link></span>}>
           Trades appear here from your real FYERS fills (recorded by Quant Desk), the practice account and finished replays.

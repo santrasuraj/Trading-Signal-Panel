@@ -6427,6 +6427,421 @@
      }
     }
    }
+  },
+  "/api/bot": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Bot",
+    "description": "The practice bot: strategies it forward-tests in the practice account, their record and its order log.",
+    "operationId": "bot_api_bot_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/bot/settings": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Bot Settings",
+    "description": "Switch strategies on or off for the practice bot (practice account only, never FYERS).",
+    "operationId": "bot_settings_api_bot_settings_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BotSettings"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/bot/run": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Bot Run",
+    "description": "Check now instead of waiting for the next minute (market hours only).",
+    "operationId": "bot_run_api_bot_run_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/notify-settings": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Notify Settings Get",
+    "description": "Your Telegram choices: the 08:45 morning brief and live setups (both off until you switch them on).",
+    "operationId": "notify_settings_get_api_notify_settings_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Notify Settings Put",
+    "operationId": "notify_settings_put_api_notify_settings_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/NotifySettings"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/brief": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Brief",
+    "description": "Today's morning brief (preview): market, events, your stocks, signals, stops, login.",
+    "operationId": "brief_api_brief_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/brief/send": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Brief Send",
+    "description": "Send the morning brief to your Telegram now.",
+    "operationId": "brief_send_api_brief_send_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/fundamentals-screener": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Fundamentals Screener",
+    "description": "Every stock with stored filings: P/E, growth, margin and EPS next to its price trend.",
+    "operationId": "fundamentals_screener_api_fundamentals_screener_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/results-study": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Results Study",
+    "description": "How stocks moved after their results, by the first reaction (tested since 2018), and who just reported.",
+    "operationId": "results_study_api_results_study_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/results-study/run": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Results Study Run",
+    "description": "Re-run the results reaction study (about a minute, in the background).",
+    "operationId": "results_study_run_api_results_study_run_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/rrg": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Rrg",
+    "description": "NSE sector indices on a relative rotation graph against the Nifty 50, with each quadrant's tested record.",
+    "operationId": "rrg_api_rrg_get",
+    "parameters": [
+     {
+      "name": "tf",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "weekly",
+        "daily"
+       ],
+       "type": "string",
+       "default": "weekly",
+       "title": "Tf"
+      }
+     },
+     {
+      "name": "tail",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 26,
+       "minimum": 2,
+       "default": 8,
+       "title": "Tail"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/volatility": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Volatility",
+    "description": "India VIX rank / percentile, realised volatility, expected moves, ATM IV per index and the VIX record.",
+    "operationId": "volatility_api_volatility_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options/my-positions": {
+   "get": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Options My Positions",
+    "description": "Your open F&O positions from FYERS (read only), grouped for the strategy builder.",
+    "operationId": "options_my_positions_api_options_my_positions_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/intraday-backtest": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Intraday Backtest",
+    "description": "Backtest an opening-range, VWAP or gap setup with your settings on the stored 5-minute bars.",
+    "operationId": "intraday_backtest_api_intraday_backtest_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/IntradaySpec"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/rebalance": {
+   "post": {
+    "tags": [
+     "desk"
+    ],
+    "summary": "Rebalance",
+    "description": "Your holdings brought to equal, equal-risk or custom weights: the trades, charges and the tax they book.",
+    "operationId": "rebalance_api_rebalance_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RebalanceBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -8176,7 +8591,9 @@
        "sma_above",
        "sma_below",
        "scan_hit",
-       "pattern"
+       "pattern",
+       "formula_above",
+       "formula_below"
       ],
       "title": "Kind"
      },
@@ -9464,6 +9881,28 @@
     ],
     "title": "BmTested",
     "description": "How the delivery spike did on 8 years of the point-in-time top 500, 10 days later vs the average stock."
+   },
+   "BotSettings": {
+    "properties": {
+     "enabled": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "maxItems": 5,
+      "title": "Enabled",
+      "default": []
+     },
+     "capital": {
+      "type": "number",
+      "maximum": 1000000000.0,
+      "minimum": 10000.0,
+      "title": "Capital",
+      "default": 100000
+     }
+    },
+    "type": "object",
+    "title": "BotSettings"
    },
    "BreadthResponse": {
     "properties": {
@@ -10756,7 +11195,9 @@
        "sma_above",
        "sma_below",
        "scan_hit",
-       "pattern"
+       "pattern",
+       "formula_above",
+       "formula_below"
       ],
       "title": "Kind"
      },
@@ -14364,6 +14805,109 @@
     ],
     "title": "IntradaySignalsResponse"
    },
+   "IntradaySpec": {
+    "properties": {
+     "template": {
+      "type": "string",
+      "enum": [
+       "orb",
+       "vwap",
+       "gap"
+      ],
+      "title": "Template",
+      "default": "orb"
+     },
+     "direction": {
+      "type": "string",
+      "enum": [
+       "long",
+       "short",
+       "both"
+      ],
+      "title": "Direction",
+      "default": "both"
+     },
+     "or_minutes": {
+      "type": "integer",
+      "enum": [
+       15,
+       30,
+       60
+      ],
+      "title": "Or Minutes",
+      "default": 15
+     },
+     "stop": {
+      "type": "string",
+      "enum": [
+       "range",
+       "atr"
+      ],
+      "title": "Stop",
+      "default": "range"
+     },
+     "atr_frac": {
+      "type": "number",
+      "maximum": 3.0,
+      "exclusiveMinimum": 0.0,
+      "title": "Atr Frac",
+      "default": 0.5
+     },
+     "target_r": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 10.0,
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target R",
+      "default": 2.0
+     },
+     "cutoff_min": {
+      "type": "integer",
+      "maximum": 900.0,
+      "minimum": 570.0,
+      "title": "Cutoff Min",
+      "default": 780
+     },
+     "gap_pct": {
+      "type": "number",
+      "maximum": 20.0,
+      "exclusiveMinimum": 0.0,
+      "title": "Gap Pct",
+      "default": 2.0
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fade",
+       "go"
+      ],
+      "title": "Mode",
+      "default": "fade"
+     },
+     "max_trades": {
+      "type": "integer",
+      "maximum": 10.0,
+      "minimum": 1.0,
+      "title": "Max Trades",
+      "default": 3
+     },
+     "risk_pct": {
+      "type": "number",
+      "maximum": 3.0,
+      "exclusiveMinimum": 0.0,
+      "title": "Risk Pct",
+      "default": 0.5
+     }
+    },
+    "type": "object",
+    "title": "IntradaySpec"
+   },
    "IntradayStrategy": {
     "properties": {
      "key": {
@@ -16620,6 +17164,33 @@
      "volume_spikes"
     ],
     "title": "MoversResponse"
+   },
+   "NotifySettings": {
+    "properties": {
+     "brief": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Brief"
+     },
+     "setups": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/SetupNotify"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": "object",
+    "title": "NotifySettings"
    },
    "NseHealth": {
     "properties": {
@@ -21633,7 +22204,9 @@
        "sma_above",
        "sma_below",
        "scan_hit",
-       "pattern"
+       "pattern",
+       "formula_above",
+       "formula_below"
       ],
       "title": "Kind"
      },
@@ -22192,6 +22765,50 @@
      "avg_ret_pct"
     ],
     "title": "ReasonRow"
+   },
+   "RebalanceBody": {
+    "properties": {
+     "mode": {
+      "type": "string",
+      "enum": [
+       "equal",
+       "equal_risk",
+       "custom"
+      ],
+      "title": "Mode",
+      "default": "equal"
+     },
+     "add_cash": {
+      "type": "number",
+      "maximum": 1000000000.0,
+      "minimum": -1000000000.0,
+      "title": "Add Cash",
+      "default": 0.0
+     },
+     "custom": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "number"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Custom"
+     },
+     "min_trade": {
+      "type": "number",
+      "maximum": 10000000.0,
+      "minimum": 0.0,
+      "title": "Min Trade",
+      "default": 2000.0
+     }
+    },
+    "type": "object",
+    "title": "RebalanceBody"
    },
    "RegimeInfo": {
     "properties": {
@@ -23558,6 +24175,53 @@
      "v"
     ],
     "title": "Series"
+   },
+   "SetupNotify": {
+    "properties": {
+     "on": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "On"
+     },
+     "scope": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "mine",
+         "all"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Scope"
+     },
+     "kinds": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 20
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kinds"
+     }
+    },
+    "type": "object",
+    "title": "SetupNotify"
    },
    "SignalGroup": {
     "properties": {

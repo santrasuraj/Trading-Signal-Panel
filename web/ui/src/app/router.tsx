@@ -23,6 +23,13 @@ const OptionBuilder = lazy(() => import('@/pages/OptionBuilder'))
 const Setups = lazy(() => import('@/pages/Setups'))
 const Journal = lazy(() => import('@/pages/Journal'))
 const OptionsBacktest = lazy(() => import('@/pages/OptionsBacktest'))
+const Bot = lazy(() => import('@/pages/Bot'))
+const Companies = lazy(() => import('@/pages/Companies'))
+const ResultsReaction = lazy(() => import('@/pages/ResultsReaction'))
+const Rotation = lazy(() => import('@/pages/Rotation'))
+const Volatility = lazy(() => import('@/pages/Volatility'))
+const IntradayBacktest = lazy(() => import('@/pages/IntradayBacktest'))
+const Rebalance = lazy(() => import('@/pages/Rebalance'))
 const Coach = lazy(() => import('@/pages/Coach'))
 const Signals = lazy(() => import('@/pages/Signals'))
 const SignalTrack = lazy(() => import('@/pages/SignalTrack'))
@@ -98,6 +105,13 @@ export const router = createBrowserRouter([
       { path: 'setups', element: g(<Setups />) },
       { path: 'journal', element: g(<Journal />) },
       { path: 'options-backtest', element: g(<OptionsBacktest />) },
+      { path: 'bot', element: g(<Bot />) },
+      { path: 'companies', element: g(<Companies />) },
+      { path: 'results-reaction', element: g(<ResultsReaction />) },
+      { path: 'rotation', element: g(<Rotation />) },
+      { path: 'volatility', element: g(<Volatility />) },
+      { path: 'intraday-backtest', element: g(<IntradayBacktest />) },
+      { path: 'rebalance', element: g(<Rebalance />) },
       { path: 'coach', element: g(<Coach />) },
       { path: 'paper', element: g(<Paper />) },
       { path: 'paper/:key', element: g(<Paper />) },

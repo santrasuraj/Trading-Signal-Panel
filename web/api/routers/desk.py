@@ -8,7 +8,7 @@ from pydantic import Field
 
 from ..errors import SafeJSONResponse
 from ..models.common import Model
-from ..services import calendar_svc, fund_svc, journal_svc, layouts_svc, optbt_svc, payoff_svc, risk_svc, setups_svc, tax_svc
+from ..services import bot_svc, brief_svc, calendar_svc, export_svc, fund_svc, ibt_svc, journal_svc, layouts_svc, optbt_svc, payoff_svc, rebalance_svc, results_svc, risk_svc, rrg_svc, setups_svc, tax_svc, vol_svc
 
 router = APIRouter(prefix="/api", tags=["desk"])
 
@@ -256,3 +256,142 @@ def formula_series(symbol: str = Path(..., max_length=25), expr: str = Query(...
         v = v[v.index >= v.index[-1] - __import__("pandas").Timedelta(days=days)]
     return {"symbol": symbol.upper(), "t": [d.date().isoformat() for d in v.index],
             "v": [None if x != x else round(float(x), 4) for x in v.to_numpy()]}
+
+
+class BotSettings(Model):
+    enabled: list[str] = Field([], max_length=5)
+    capital: float = Field(100_000, ge=10_000, le=1e9)
+
+
+@router.get("/bot", response_model=None, response_class=SafeJSONResponse)
+def bot():
+    """The practice bot: strategies it forward-tests in the practice account, their record and its order log."""
+    return bot_svc.view()
+
+
+@router.post("/bot/settings", response_model=None, response_class=SafeJSONResponse)
+def bot_settings(body: BotSettings):
+    """Switch strategies on or off for the practice bot (practice account only, never FYERS)."""
+    return bot_svc.settings(body.enabled, body.capital)
+
+
+@router.post("/bot/run", response_model=None, response_class=SafeJSONResponse)
+def bot_run():
+    """Check now instead of waiting for the next minute (market hours only)."""
+    return {**bot_svc.reconcile(force=True), "view": bot_svc.view()}
+
+
+class SetupNotify(Model):
+    on: bool | None = None
+    scope: Literal["mine", "all"] | None = None
+    kinds: list[str] | None = Field(None, max_length=20)
+
+
+class NotifySettings(Model):
+    brief: bool | None = None
+    setups: SetupNotify | None = None
+
+
+@router.get("/notify-settings", response_model=None, response_class=SafeJSONResponse)
+def notify_settings_get():
+    """Your Telegram choices: the 08:45 morning brief and live setups (both off until you switch them on)."""
+    from scanner import notify_settings
+    from scanner.settings import env
+    return {**notify_settings.read(), "telegram": bool(env("TELEGRAM_BOT_TOKEN") and env("TELEGRAM_CHAT_ID"))}
+
+
+@router.put("/notify-settings", response_model=None, response_class=SafeJSONResponse)
+def notify_settings_put(body: NotifySettings):
+    from scanner import notify_settings
+    return notify_settings.write(body.model_dump(exclude_none=True))
+
+
+@router.get("/brief", response_model=None, response_class=SafeJSONResponse)
+def brief():
+    """Today's morning brief (preview): market, events, your stocks, signals, stops, login."""
+    return brief_svc.build()
+
+
+@router.post("/brief/send", response_model=None, response_class=SafeJSONResponse)
+def brief_send():
+    """Send the morning brief to your Telegram now."""
+    return brief_svc.send()
+
+
+@router.get("/fundamentals-screener", response_model=None, response_class=SafeJSONResponse)
+def fundamentals_screener():
+    """Every stock with stored filings: P/E, growth, margin and EPS next to its price trend."""
+    return fund_svc.screener()
+
+
+@router.get("/results-study", response_model=None, response_class=SafeJSONResponse)
+def results_study():
+    """How stocks moved after their results, by the first reaction (tested since 2018), and who just reported."""
+    return results_svc.view()
+
+
+@router.post("/results-study/run", response_model=None, response_class=SafeJSONResponse)
+def results_study_run():
+    """Re-run the results reaction study (about a minute, in the background)."""
+    return results_svc.start()
+
+
+@router.get("/rrg", response_model=None, response_class=SafeJSONResponse)
+def rrg(tf: Literal["weekly", "daily"] = "weekly", tail: int = Query(8, ge=2, le=26)):
+    """NSE sector indices on a relative rotation graph against the Nifty 50, with each quadrant's tested record."""
+    return rrg_svc.view(tf, tail)
+
+
+@router.get("/volatility", response_model=None, response_class=SafeJSONResponse)
+def volatility():
+    """India VIX rank / percentile, realised volatility, expected moves, ATM IV per index and the VIX record."""
+    return vol_svc.view()
+
+
+@router.get("/options/my-positions", response_model=None, response_class=SafeJSONResponse)
+def options_my_positions():
+    """Your open F&O positions from FYERS (read only), grouped for the strategy builder."""
+    return payoff_svc.my_positions()
+
+
+class IntradaySpec(Model):
+    template: Literal["orb", "vwap", "gap"] = "orb"
+    direction: Literal["long", "short", "both"] = "both"
+    or_minutes: Literal[15, 30, 60] = 15
+    stop: Literal["range", "atr"] = "range"
+    atr_frac: float = Field(0.5, gt=0, le=3)
+    target_r: float | None = Field(2.0, gt=0, le=10)
+    cutoff_min: int = Field(13 * 60, ge=9 * 60 + 30, le=15 * 60)
+    gap_pct: float = Field(2.0, gt=0, le=20)
+    mode: Literal["fade", "go"] = "fade"
+    max_trades: int = Field(3, ge=1, le=10)
+    risk_pct: float = Field(0.5, gt=0, le=3)
+
+
+@router.post("/intraday-backtest", response_model=None, response_class=SafeJSONResponse)
+def intraday_backtest(body: IntradaySpec):
+    """Backtest an opening-range, VWAP or gap setup with your settings on the stored 5-minute bars."""
+    return ibt_svc.run(body.model_dump())
+
+
+class RebalanceBody(Model):
+    mode: Literal["equal", "equal_risk", "custom"] = "equal"
+    add_cash: float = Field(0.0, ge=-1e9, le=1e9)
+    custom: dict[str, float] | None = None
+    min_trade: float = Field(2000.0, ge=0, le=1e7)
+
+
+@router.post("/rebalance", response_model=None, response_class=SafeJSONResponse)
+def rebalance(body: RebalanceBody):
+    """Your holdings brought to equal, equal-risk or custom weights: the trades, charges and the tax they book."""
+    return rebalance_svc.view(body.mode, body.add_cash, body.custom, body.min_trade)
+
+
+@router.get("/export/workbook.xlsx", include_in_schema=False)
+def export_workbook():
+    """Your data in one Excel workbook: holdings and tax lots, journal, practice trades, bot orders, risk, alerts,
+    watchlists."""
+    from fastapi.responses import Response
+    body, name = export_svc.workbook()
+    return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})

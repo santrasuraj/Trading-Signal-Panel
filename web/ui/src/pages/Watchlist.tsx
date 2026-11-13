@@ -8,6 +8,7 @@ import { BellRing, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { isFailure } from '@/api/client'
 import { useLiveQuotes, useSymbols } from '@/api/hooks'
 import { useSavedScans } from '@/api/scans'
+import { useFormulas } from '@/components/FormulaMenu'
 import { ALERT_KIND_LABEL, FORM_KINDS, alertValueText, useActions, useAlertMutations, useAlerts, useSaveWatchlists, useWatchlists, type AlertKind, type Watchlist as WL } from '@/api/watch'
 import { ActionBadge } from '@/components/ActionCard'
 import { PriceStamp } from '@/components/LivePrice'
@@ -94,15 +95,16 @@ export function AlertForm({ symbol: initial = '', price, onDone }: { symbol?: st
   const m = useAlertMutations()
   const toast = useToast()
   const v = Number(value)
-  const isScan = kind === 'scan_hit', isPattern = kind === 'pattern', isSma = kind.startsWith('sma'), isRsi = kind.startsWith('rsi')
-  const ok = isScan ? !!ref : !!symbol.trim() && (isPattern || isSma || (value.trim() !== '' && Number.isFinite(v) && (kind.startsWith('change') || (isRsi ? v > 0 && v < 100 : v > 0))))
+  const isScan = kind === 'scan_hit', isPattern = kind === 'pattern', isSma = kind.startsWith('sma'), isRsi = kind.startsWith('rsi'), isFormula = kind.startsWith('formula')
+  const formulas = useFormulas()
+  const ok = isScan ? !!ref : !!symbol.trim() && (isPattern || isSma || (isFormula ? !!ref && value.trim() !== '' && Number.isFinite(v) : value.trim() !== '' && Number.isFinite(v) && (kind.startsWith('change') || (isRsi ? v > 0 && v < 100 : v > 0))))
   const pick = (k: AlertKind) => { setKind(k); if (k.startsWith('rsi')) setValue(k === 'rsi_above' ? '70' : '30') }
   return (
     <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => {
       e.preventDefault()
       if (!ok) return
       const body = isScan ? { symbol: 'ALL', kind, ref, note: saved.data?.scans.find((x) => x.id === ref)?.name ?? '' }
-        : { symbol: symbol.trim().toUpperCase(), kind, value: isPattern ? 0 : isSma ? Number(sma) : v, note }
+        : { symbol: symbol.trim().toUpperCase(), kind, value: isPattern ? 0 : isSma ? Number(sma) : v, note, ...(isFormula ? { ref } : {}) }
       m.create.mutate(body, {
         onSuccess: (a) => { toast({ tone: 'good', title: `Alert set${a.symbol !== 'ALL' ? `: ${a.symbol}` : ''}`, detail: `${ALERT_KIND_LABEL[a.kind]} ${alertValueText(a)}` }); setNote(''); onDone?.() },
         onError: (err) => toast({ tone: 'bad', title: 'Alert not saved', detail: errText(err) }),
@@ -121,6 +123,14 @@ export function AlertForm({ symbol: initial = '', price, onDone }: { symbol?: st
           <option value="">{saved.data?.scans.length ? 'Pick a scan' : 'No saved scans yet'}</option>
           {(saved.data?.scans ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select></label>
+      ) : isFormula ? (
+        <>
+          <label className="text-2xs text-muted">Formula<select aria-label="Your formula" value={ref} onChange={(e) => setRef(e.target.value)} className="input mt-0.5 block h-8 w-48 px-2 text-[13px]">
+            <option value="">{formulas.data?.formulas.length ? 'Pick a formula' : 'Save one on the Chart page first'}</option>
+            {(formulas.data?.formulas ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select></label>
+          <label className="text-2xs text-muted">Level<input aria-label="Formula level" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} className="input num mt-0.5 block h-8 w-24 px-2 text-right text-[13px]" /></label>
+        </>
       ) : !isPattern && (
         <label className="text-2xs text-muted">{kind.startsWith('change') ? 'Change %' : isRsi ? 'RSI' : 'Price ₹'}<input aria-label="Alert level" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} className="input num mt-0.5 block h-8 w-28 px-2 text-right text-[13px]" /></label>
       )}

@@ -85,6 +85,8 @@ def create_app(warm: bool = True) -> FastAPI:
     async def lifespan(_app):
         if warm:
             threading.Thread(target=warm_up, args=(_app,), name="warm-up", daemon=True).start()
+            from .services import bot_svc
+            bot_svc.start()                       # the practice bot's once-a-minute check (practice account only)
         yield
 
     app = FastAPI(title="Quant Desk API", version=system.VERSION, docs_url="/api/docs", redoc_url=None,

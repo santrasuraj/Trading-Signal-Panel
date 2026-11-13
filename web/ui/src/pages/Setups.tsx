@@ -14,6 +14,7 @@ import { pct } from '@/lib/format'
 import { askPermission, notify } from '@/lib/notify'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 import { cn } from '@/lib/csv'
+import { SetupsTelegram } from '@/components/TelegramSettings'
 
 interface SetupEvent {
   time: string; symbol: string; company: string | null; kind: string; label: string; bullish: boolean | null
@@ -59,6 +60,7 @@ export default function Setups() {
         right={<>
           <Segmented<Group> ariaLabel="Event group" value={group} onChange={setGroup} items={[{ id: 'all', label: 'All' }, { id: 'bull', label: 'Up' }, { id: 'bear', label: 'Down' }, { id: 'breaks', label: 'Breakouts' }, { id: 'vwap', label: 'VWAP' }, { id: 'volume', label: 'Volume' }]} />
           <Segmented<'all' | 'mine'> ariaLabel="Stocks" value={scope} onChange={setScope} items={[{ id: 'all', label: 'All stocks' }, { id: 'mine', label: 'Watchlist + holdings' }]} />
+          <SetupsTelegram scope={scope} />
           <select aria-label="Desktop notifications" className="input h-8 px-2 text-[13px]" value={notifyMode}
             onChange={(e) => { const v = e.target.value as Notify; setNotifyMode(v); if (v !== 'off') void askPermission() }}>
             <option value="off">Notify: off</option><option value="mine">Notify: my stocks</option><option value="all">Notify: every event</option>

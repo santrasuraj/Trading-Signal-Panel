@@ -111,3 +111,20 @@ def test_new_indicators_and_bar_sizes():
     r30 = intraday_chart.resample(bars, "30m")
     assert r30["ts"].dt.strftime("%H:%M").iloc[:3].tolist() == ["09:15", "09:45", "10:15"]
     assert intraday_chart.resample(bars, "1h")["ts"].dt.strftime("%H:%M").iloc[1] == "10:15"
+
+
+def test_formula_alert_uses_the_live_bar(wdir, monkeypatch, tmp_path):
+    from scanner import formula
+    monkeypatch.setattr(formula, "DATA_DIR", tmp_path)
+    f = formula.save_all([{"name": "Stretch", "expr": "close / sma(close, 20)"}])[0]
+    idx = pd.bdate_range("2026-01-01", periods=60)
+    s = pd.DataFrame({"TCS": np.full(60, 100.0)}, index=idx)
+    frames = {"open": s, "high": s, "low": s, "close": s, "volume": s * 0 + 1e5}
+    watch.add_alert("TCS", "formula_above", 1.05, ref=f["id"])
+    day = date(2026, 3, 30)
+    assert rule_alerts.check_live(s, {"TCS": {"price": 101, "source": "live"}}, day, frames=frames) == []
+    fired = rule_alerts.check_live(s, {"TCS": {"price": 110, "source": "live"}}, day, frames=frames)
+    assert fired and "Stretch" in fired[0]["detail"] and "Stretch" in watch.message(fired[0])
+    with pytest.raises(ValueError):
+        watch.add_alert("TCS", "formula_below", 1, ref="nope")
+    formula.save_all([])

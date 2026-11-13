@@ -19,7 +19,8 @@ import pandas as pd
 from . import watch
 
 LOOKBACK = 320                 # daily bars used (enough for a 200-day average and a settled RSI)
-LIVE_KINDS = ("rsi_above", "rsi_below", "sma_above", "sma_below")
+LIVE_KINDS = ("rsi_above", "rsi_below", "sma_above", "sma_below", "formula_above", "formula_below")
+FIELDS = ("open", "high", "low", "close", "volume")
 
 
 def with_live(close: pd.Series, price: float | None, day: date) -> pd.Series:
@@ -47,10 +48,45 @@ def rsi14(s: pd.Series) -> float | None:
     return float(100 - 100 / (1 + up / dn))
 
 
-def live_check(a: dict, close: pd.DataFrame, quotes: dict, day: date) -> dict | None:
+def formula_value(expr: str, frames: dict, sym: str, quote: dict, day: date) -> float | None:
+    """Your formula on the stock's daily bars with today's live bar last (open / high / low / volume from the quote
+    when it has them, else the live price)."""
+    from . import formula
+    px = float(quote["price"])
+    cols = {}
+    for f in FIELDS:
+        s = frames[f][sym].dropna().iloc[-LOOKBACK:] if f in frames and sym in frames[f].columns else pd.Series(dtype=float)
+        live = {"close": px, "open": quote.get("open") or px, "high": max(quote.get("high") or px, px),
+                "low": min(quote.get("low") or px, px), "volume": quote.get("volume")}[f]
+        ts = pd.Timestamp(day)
+        if len(s) and s.index[-1] >= ts:
+            s = s.copy()
+            s.iloc[-1] = float(live) if live is not None else s.iloc[-1]
+        else:
+            s = pd.concat([s, pd.Series([float(live) if live is not None else float("nan")], index=[ts])])
+        cols[f] = s
+    idx = cols["close"].index
+    cols = {f: v.reindex(idx) for f, v in cols.items()}
+    try:
+        v = formula.evaluate(expr, cols).iloc[-1]
+    except Exception:
+        return None
+    return float(v) if v == v else None
+
+
+def live_check(a: dict, close: pd.DataFrame, quotes: dict, day: date, frames: dict | None = None) -> dict | None:
     k = a.get("kind")
     if k not in LIVE_KINDS:
         return None
+    if k in ("formula_above", "formula_below"):
+        q = quotes.get(a.get("symbol"))
+        if not frames or not q or q.get("price") is None or (q.get("source") or "live") not in watch.LIVE_SOURCES:
+            return None
+        val = formula_value(a.get("expr") or "", frames, a["symbol"], q, day)
+        thr = float(a.get("value") or 0)
+        if val is None or not (val >= thr if k == "formula_above" else val <= thr):
+            return None
+        return {"price": q["price"], "source": q.get("source"), "detail": f"{a.get('note') or 'formula'} = {val:,.3f}"}
     q = quotes.get(a.get("symbol"))
     if not q or (q.get("source") or "live") not in watch.LIVE_SOURCES or a.get("symbol") not in close.columns:
         return None
@@ -71,10 +107,11 @@ def live_check(a: dict, close: pd.DataFrame, quotes: dict, day: date) -> dict | 
     return {"price": price, "source": q.get("source"), "detail": f"{n}-day average {m:,.2f}"}
 
 
-def check_live(close: pd.DataFrame, quotes: dict, day: date | None = None) -> list[dict]:
-    """Fire the RSI / moving-average alerts the live quotes ({symbol: quote}) meet."""
+def check_live(close: pd.DataFrame, quotes: dict, day: date | None = None, frames: dict | None = None) -> list[dict]:
+    """Fire the RSI / moving-average / formula alerts the live quotes ({symbol: quote}) meet. Formula alerts need
+    the daily `frames` (open .. volume)."""
     day = day or watch.ist_now().date()
-    return watch.fire(lambda a: live_check(a, close, quotes, day))
+    return watch.fire(lambda a: live_check(a, close, quotes, day, frames))
 
 
 def check_patterns(frames: dict[str, pd.DataFrame], study: dict | None = None) -> list[dict]:
@@ -145,7 +182,7 @@ def scan_hits(frames: dict[str, pd.DataFrame], symbols: list[str], quotes: dict 
 
 def run_job(frames: dict[str, pd.DataFrame], symbols: list[str], quotes: dict, log=print) -> list[dict]:
     """The 5-minute job: RSI / average alerts and live scan hits on the live service's quotes; Telegram for any."""
-    fired = check_live(frames["close"], quotes)
+    fired = check_live(frames["close"], quotes, frames=frames)
     try:
         fired += check_scans(scan_hits(frames, symbols, quotes), source="live")
     except Exception as e:                     # a broken saved scan must not stop the other alerts

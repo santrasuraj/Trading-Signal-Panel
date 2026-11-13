@@ -67,7 +67,27 @@ def main(argv: list[str]) -> int:
             f"sent={r['sent']} ({r['detail']})")
     _log(line)
     print(line)
+    if r["trading_day"]:
+        line = brief("--dry-run" in argv)
+        if line:
+            _log(line)
+            print(line)
     return 0
+
+
+def brief(dry: bool = False) -> str | None:
+    """The morning brief on Telegram, when you switched it on (Calendar page). Never fails the reminder."""
+    try:
+        from . import notify_settings
+        if not notify_settings.read().get("brief"):
+            return None
+        from web.api.services import brief_svc
+        if dry:
+            return "morning brief (dry run):\n" + brief_svc.build()["text"]
+        r = brief_svc.send()
+        return f"{ist_now().isoformat(timespec='seconds')} morning brief: sent={r['sent']} ({r['detail']})"
+    except Exception as e:
+        return f"{ist_now().isoformat(timespec='seconds')} morning brief failed: {type(e).__name__}: {e}"
 
 
 if __name__ == "__main__":

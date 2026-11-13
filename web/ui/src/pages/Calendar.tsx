@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/domain'
 import { Banner, EmptyState, ErrorState, SkeletonRows } from '@/components/feedback'
 import { Card, Segmented } from '@/components/ui'
 import { AnnouncementsCard } from '@/components/AnnouncementsCard'
+import { BriefCard } from '@/components/TelegramSettings'
 import { date as fmtDate, money, todayIST } from '@/lib/format'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 import { cn } from '@/lib/csv'
@@ -91,6 +92,7 @@ export default function Calendar() {
         <EmptyState icon={<CalendarDays />} title="Nothing in this window">{scope === 'mine' ? 'None of your holdings or watchlist stocks has an event in this window.' : 'Try a longer window.'}</EmptyState>
       ) : (
         <div className="flex flex-col gap-3">
+          <BriefCard />
           <AnnouncementsCard days={3} limit={12} title="Latest announcements from your stocks" />
           {groups.map(([day, ev]) => (
             <Card key={day} flush title={`${fmtDate(day, { year: false })} · ${dayLabel(day, today)}`}

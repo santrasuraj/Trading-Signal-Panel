@@ -61,3 +61,35 @@ def start_refresh() -> dict:
 
     threading.Thread(target=work, name="fundamentals", daemon=True).start()
     return status()
+
+
+def screener() -> dict:
+    """Every universe stock whose filings are stored: P/E, revenue and profit growth against a year ago, margin and
+    EPS, next to its price trend from the last scan (screener.parquet)."""
+    import math
+    sc = data.screener()
+    if sc is None or sc.empty:
+        return {"rows": [], "stored": 0, "universe": 0, "note": "No scan yet."}
+    rows = []
+    for r in sc.itertuples(index=False):
+        rec = fu.load(r.symbol)
+        if not rec.get("quarters"):
+            continue
+        s = fu.summary(rec, float(r.price) if r.price == r.price else None)
+        lt = s.get("latest") or {}
+        if not lt:
+            continue
+
+        def f(x, nd=1):
+            return None if x is None or (isinstance(x, float) and math.isnan(x)) else round(float(x), nd)
+        rows.append({"symbol": r.symbol, "company": r.company, "industry": r.industry, "price": f(r.price, 2),
+                     "ret_3m": f(r.ret_3m), "ret_12m": f(r.ret_12m), "rs": f(r.rs, 0),
+                     "above_sma200": bool(r.above_sma200) if r.above_sma200 == r.above_sma200 else None,
+                     "pct_from_52w_high": f(r.pct_from_52w_high), "turnover_cr": f(r.turnover_cr),
+                     "qe": lt.get("qe"), "filed": lt.get("filed"), "revenue_cr": lt.get("revenue_cr"),
+                     "profit_cr": lt.get("profit_cr"), "sales_growth": lt.get("sales_growth"),
+                     "profit_growth": lt.get("profit_growth"), "net_margin": lt.get("net_margin"),
+                     "eps_ttm": lt.get("eps_ttm"), "pe": lt.get("pe"), "basis": s.get("basis")})
+    return {"rows": rows, "stored": len(rows), "universe": int(len(sc)),
+            "note": "From NSE's quarterly filings (consolidated when filed) and the last scan's prices. Growth is "
+                    "against the same quarter a year earlier; P/E uses the last four quarters' EPS."}

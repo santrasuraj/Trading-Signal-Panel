@@ -5,12 +5,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { fetchJson } from '@/api/client'
 import { Plus, Trash2, Layers } from 'lucide-react'
 import { deskApi, type Payoff, type PayoffLegIn } from '@/api/desk'
 import { useOptChain, useOptStatus } from '@/api/options'
+
+interface MyGroup { symbol: string; expiry: string | null; stored: boolean; legs: { kind: 'CE' | 'PE' | 'FUT'; side: 'buy' | 'sell'; strike: number | null; qty: number; price: number | null }[] }
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { EmptyState, ErrorState, Skeleton } from '@/components/feedback'
-import { Button, Card, IconButton } from '@/components/ui'
+import { Button, Card, IconButton, Popover } from '@/components/ui'
 import { date as fmtDate, money, num } from '@/lib/format'
 import { nearestIndex, PRESETS, presetLegs, type PresetId } from '@/lib/optionPresets'
 import { useLocalStorage } from '@/lib/useLocalStorage'
@@ -89,9 +92,18 @@ export default function OptionBuilder() {
 
   // a new chain (symbol / expiry): start from the chosen preset at the money
   const chainKey = `${chain.data?.symbol}-${chain.data?.expiry}`
+  // your real positions (FYERS, read only): loaded once their chain is on screen, quantities turned into lots
+  const [pending, setPending] = useState<MyGroup | null>(null)
+  const mine = useQuery({ queryKey: ['my-fno'], queryFn: () => fetchJson<{ logged_in: boolean; groups: MyGroup[]; note: string }>('/api/options/my-positions'), staleTime: 60_000, retry: false })
   useEffect(() => {
-    if (atm != null && strikes.length) { setLegs(presetLegs(preset, strikes, atm)); setDays(0) }
-  }, [chainKey]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (pending && chain.data && chain.data.symbol === pending.symbol && chain.data.expiry === pending.expiry) {
+      const lot = chain.data.lot || 1
+      setLegs(pending.legs.map((l) => ({ kind: l.kind, side: l.side, strike: l.strike, lots: Math.max(1, Math.round(l.qty / lot)), price: l.price })))
+      setDays(0); setPending(null)
+      return
+    }
+    if (!pending && atm != null && strikes.length) { setLegs(presetLegs(preset, strikes, atm)); setDays(0) }
+  }, [chainKey, pending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const body = { symbol: sym, expiry: exp, legs, days: Math.min(days, dte), iv_shift: ivShift }
   const pay = useQuery({ queryKey: ['payoff', body], queryFn: () => deskApi.payoff(body), enabled: !!sym && legs.length > 0 && legs.every((l) => l.kind === 'FUT' || l.strike != null), placeholderData: keepPreviousData, staleTime: 30_000 })
@@ -108,6 +120,19 @@ export default function OptionBuilder() {
       <PageHeader title="Option strategy builder"
         subtitle={chain.data ? `${chain.data.symbol} · expiry ${fmtDate(chain.data.expiry)} (${num(chain.data.days_to_expiry, 1)} days) · spot ${num(chain.data.spot, 2)} · lot ${chain.data.lot ?? '?'} · chain at ${chain.data.time.slice(11, 16)}` : 'Payoff of a multi-leg options position'}
         right={<>
+          <Popover align="right" width={320} trigger={({ toggle, open }) => <Button size="sm" variant="subtle" onClick={toggle} aria-expanded={open} title="Your open F&O positions from FYERS (read only)">My F&O positions</Button>}>
+            {(close) => (
+              <div className="space-y-1 p-2.5 text-xs">
+                {!mine.data ? <p className="text-muted">Loading…</p> : !mine.data.groups.length ? <p className="text-muted">{mine.data.logged_in ? 'No open F&O positions on FYERS.' : mine.data.note}</p>
+                  : mine.data.groups.map((g) => (
+                    <button key={`${g.symbol}${g.expiry}`} type="button" disabled={!g.stored} className="block w-full rounded px-2 py-1 text-left hover:bg-raised disabled:opacity-50"
+                      title={g.stored ? 'Load these legs at your average prices' : 'Fetch this option chain on the Options page first'}
+                      onClick={() => { setPending(g); setSymbol(g.symbol); setExpiry(g.expiry ?? undefined); close() }}>
+                      <b>{g.symbol}</b> {g.expiry} · {g.legs.map((l) => `${l.side === 'buy' ? '+' : '−'}${l.qty} ${l.kind === 'FUT' ? 'FUT' : `${l.strike}${l.kind}`}`).join(', ')}
+                    </button>))}
+                {mine.data && <p className="pt-1 text-2xs text-faint">{mine.data.note}</p>}
+              </div>)}
+          </Popover>
           <select aria-label="Underlying" className="input h-8 px-2 text-[13px]" value={sym} onChange={(e) => { setSymbol(e.target.value); setExpiry(undefined) }}>
             {symbols.map((s) => <option key={s}>{s}</option>)}</select>
           <select aria-label="Expiry" className="input h-8 px-2 text-[13px]" value={exp ?? ''} onChange={(e) => setExpiry(e.target.value)}>

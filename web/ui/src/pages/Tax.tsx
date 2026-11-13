@@ -2,11 +2,12 @@
 // before 31 March (web/api/services/tax_svc.py). Not tax advice: the broker's tax P&L report is the record.
 
 import { Link } from 'react-router-dom'
-import { Receipt } from 'lucide-react'
+import { Download, Receipt } from 'lucide-react'
+import { downloadCsv } from '@/lib/exporting'
 import { useTax, type Harvest, type TaxLot } from '@/api/desk'
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { Banner, EmptyState, ErrorState, SkeletonKpis } from '@/components/feedback'
-import { Card, Field } from '@/components/ui'
+import { Button, Card, Field } from '@/components/ui'
 import { date as fmtDate, money, moneyCompact, pct, qty as fmtQty, toneClass } from '@/lib/format'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 import { cn } from '@/lib/csv'
@@ -72,6 +73,10 @@ export default function Tax() {
   return (
     <div>
       <PageHeader title="Tax harvesting"
+        right={<>
+          <Button size="sm" variant="ghost" icon={<Download className="h-3.5 w-3.5" />} disabled={!d?.lots.length} onClick={() => d && downloadCsv(`tax-lots-${d.fy}.csv`, d.lots.map((x) => ({ ...x })))}>Lots CSV</Button>
+          <a className="inline-flex h-8 items-center rounded-md border border-line px-2.5 text-xs text-fg hover:bg-raised" href="/api/export/workbook.xlsx" download>All my data (Excel)</a>
+        </>}
         subtitle={d ? `Financial year ${d.fy} · sell by ${fmtDate(d.trade_by)} (${d.days_left} days) so it settles by 31 March · STCG ${d.rates.stcg_pct}% · LTCG ${d.rates.ltcg_pct}% above ${moneyCompact(d.rates.exempt)} (incl. 4% cess)` : 'Capital gains on your holdings'} />
       <Card className="mb-3" title="Gains already booked this year" subtitle={d ? (d.booked.source === 'fills'
         ? `From Quant Desk's recorded real orders (${d.booked.fills.trades} closed this year). Type your broker's tax P&L totals for the full picture.`

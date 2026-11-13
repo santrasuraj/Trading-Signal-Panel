@@ -56,7 +56,7 @@ def _check_alerts(quotes: list[dict], rules: bool = False) -> None:
         by = {q["symbol"]: q for q in quotes}
         fired = watch.evaluate(by)
         if rules and any(a.get("active") and a.get("kind") in rule_alerts.LIVE_KINDS for a in watch.alerts()):
-            fired += rule_alerts.check_live(data.store()["close"], by)
+            fired += rule_alerts.check_live(data.store()["close"], by, frames=data.store())
         watch.notify(fired)
     except Exception:
         errors.log.exception("Checking price alerts failed")
