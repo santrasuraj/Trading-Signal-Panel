@@ -160,6 +160,31 @@ def test_signals_are_served_with_their_current_backtest_label(monkeypatch):
     assert [s["strategy_key"] for s in iv.signals_payload()["signals"]] == ["vwap_trend"]   # the original rule
 
 
+def test_closed_market_shows_the_last_sessions_signals_marked_as_such(monkeypatch):
+    from datetime import date, datetime as dt
+    from web.api.services import intraday_view as iv
+    bt = {"generated_at": "2026-11-13T15:45:00+05:30", "strategies": [{"key": "orb15", "status": "not-working"}]}
+    f = {"generated_at": "2026-11-13T15:05:00+05:30", "backtest_at": bt["generated_at"], "show_untested": True,
+         "source": "yahoo", "note": "70 signals today.", "signals": [_sig("orb15")]}
+    monkeypatch.setattr(iv.data, "intraday", lambda: bt)
+    monkeypatch.setattr(iv.data, "intraday_signals", lambda: f)
+    monkeypatch.setattr(iv, "last_complete_day", lambda: date(2026, 11, 13))
+    saturday = dt(2026, 11, 14, 10, 0, tzinfo=IST)
+    monkeypatch.setattr(iv, "now_ist", lambda: saturday)
+    monkeypatch.setattr(iv, "today_ist", lambda: saturday.date())
+    out = iv.signals_payload()
+    assert out["market_closed"] and out["session"] == "2026-11-13" and len(out["signals"]) == 1
+    assert out["note"].startswith("The market is closed now")
+    monday = dt(2026, 11, 16, 10, 0, tzinfo=IST)                   # the session is open: Friday's file is old news
+    monkeypatch.setattr(iv, "now_ist", lambda: monday)
+    monkeypatch.setattr(iv, "today_ist", lambda: monday.date())
+    out = iv.signals_payload()
+    assert out["signals"] == [] and "not been computed today" in out["note"]
+    early = dt(2026, 11, 16, 9, 0, tzinfo=IST)                     # Monday before 09:20: still Friday's
+    monkeypatch.setattr(iv, "now_ist", lambda: early)
+    assert iv.signals_payload()["market_closed"]
+
+
 def test_show_untested_is_off_unless_configured_and_on_in_config_yaml():
     import yaml
     from pathlib import Path

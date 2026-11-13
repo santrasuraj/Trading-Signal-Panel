@@ -13,6 +13,7 @@ import pandas as pd
 
 from scanner import watch
 from scanner.intraday import data as idata, setups
+from scanner.intraday.fyers_sync import is_trading_day
 from scanner.intraday.live import live_file, live_file_1m
 
 from . import data
@@ -108,8 +109,11 @@ def view(kinds: list[str] | None = None, scope: str = "all", limit: int = 200) -
         "live": f"Live: today's {base['interval']} bars from the FYERS feed, completed bars only.",
         "delayed": "Today's 5-minute bars from Yahoo (~15 min delayed), stored by the 5-minute signals job - log in "
                    "to FYERS (1_login.bat) for real-time bars.",
-        "last_session": f"The live service isn't running today: this is the last stored session ({base['day']}), "
-                        "5-minute bars. Live setups need the day's FYERS login and the 09:14 live service.",
+        "last_session": (f"The market is closed today: this is the last session ({base['day']}), 5-minute bars."
+                         if not is_trading_day(today_ist()) else
+                         f"The live service isn't running today: this is the last stored session ({base['day']}), "
+                         "5-minute bars. Live setups need the day's FYERS login and the 09:14 live service, or the "
+                         "5-minute signals job's Yahoo bars (~15 min delayed)."),
         "none": "No intraday bars yet: live setups need the day's FYERS login and the 09:14 live service.",
     }
     return {**{k: base[k] for k in ("mode", "day", "interval", "symbols", "last_bar")},

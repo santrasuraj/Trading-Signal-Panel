@@ -5,8 +5,10 @@ the UI); the summary line states plainly how many strategies lost money after co
 """
 from __future__ import annotations
 
+from scanner.intraday.fyers_sync import is_trading_day, last_complete_day
+
 from . import data, intraday_job
-from ..util import num, spct, today_ist
+from ..util import now_ist, num, spct, today_ist
 
 EVIDENCE = {"STRONG", "MODERATE", "WEAK", "FOLKLORE", "EXPERIMENTAL"}
 STATUS = {"working", "mixed", "not-working", "unknown"}
@@ -136,9 +138,15 @@ def signals_payload() -> dict:
     if not show_untested and not proven:
         return {**out, "note": f"No intraday strategy has a proven edge after costs ({len(tested)} tested): no signals. "
                                "A strategy gives signals here only once its backtest shows a profit beyond luck."}
+    # Weekends, holidays and before 09:20: the last complete session's signals stay on screen, marked as such.
+    gen = str(f.get("generated_at") or "")[:10]
+    now = now_ist()
+    session_open = is_trading_day(now.date()) and (now.hour, now.minute) >= (9, 20)
+    last_session = bool(gen) and gen != today_ist().isoformat() and not session_open \
+        and gen == last_complete_day().isoformat()
     # proven-only: a file computed against another backtest could carry a strategy that has since failed. Showing all,
     # every signal is re-labelled from the current backtest below.
-    if (str(f.get("generated_at") or "")[:10] != today_ist().isoformat()
+    if ((gen != today_ist().isoformat() and not last_session)
             or (not show_untested and f.get("backtest_at") != bt.get("generated_at"))):
         return {**out, "note": "Signals have not been computed today yet: the intraday signals task refreshes them "
                                "every 5 minutes in market hours (or run intraday_sync.py --signals)."}
@@ -152,6 +160,10 @@ def signals_payload() -> dict:
             continue
         sigs.append({**x, "strategy_status": st, "proven": st == "working"})
     source = f.get("source") or None
+    note = str(f.get("note") or "")
+    if last_session:
+        note = (f"The market is closed now: these are the signals of the last session ({gen}), for review. Today's "
+                "start after 09:20 on the next trading day. " + note)
     return {**out, "generated_at": f.get("generated_at"), "source": source,
             "delayed": "yahoo" in (source or ""), "bars_to": f.get("bars_to"), "signals": sigs,
-            "note": str(f.get("note") or "")}
+            "session": gen or None, "market_closed": last_session, "note": note}

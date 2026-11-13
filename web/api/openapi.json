@@ -15150,6 +15150,22 @@
       ],
       "title": "Bars To"
      },
+     "session": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Session"
+     },
+     "market_closed": {
+      "type": "boolean",
+      "title": "Market Closed",
+      "default": false
+     },
      "note": {
       "type": "string",
       "title": "Note"
@@ -15166,6 +15182,8 @@
      "source",
      "delayed",
      "bars_to",
+     "session",
+     "market_closed",
      "note"
     ],
     "title": "IntradaySignalsResponse"

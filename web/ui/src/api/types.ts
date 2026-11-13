@@ -570,7 +570,9 @@ export interface IntradaySignal {
 export interface IntradaySignalsResponse {
   generated_at: ISODateTime | null; backtest_at: ISODateTime | null; tested: number;
   proven: { key: string; name: string }[]; show_untested: boolean; signals: IntradaySignal[];
-  source: string | null; delayed: boolean; bars_to: string | null; note: string;
+  source: string | null; delayed: boolean; bars_to: string | null;
+  session: ISODate | null; market_closed: boolean;   // weekend / holiday / before 09:20: the last session's signals
+  note: string;
 }
 // Background re-run of the intraday backtest (web/api/services/intraday_job.run_status)
 export interface IntradayRun {

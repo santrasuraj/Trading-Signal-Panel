@@ -203,7 +203,7 @@ function IntradaySignals() {
   return (
     <div className="space-y-3">
       <Card
-        title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted" />Intraday signals today</span>}
+        title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted" />{d.market_closed ? 'Intraday signals, last session' : 'Intraday signals today'}</span>}
         subtitle={<>{d.show_untested ? 'Every intraday strategy, each labelled with its backtest result' : 'Only strategies whose backtest shows a real edge after costs'}: <span className="num">{d.proven.length} of {d.tested}</span> proven{d.proven.length > 0 && <> ({d.proven.map((p) => p.name).join(', ')})</>}{bars && <> · bars {bars}</>}{d.generated_at && <> · updated <span className="num">{dateTimeIST(d.generated_at)}</span></>}</>}
         right={d.show_untested && d.signals.length > 0 ? (
           <Segmented<'all' | 'proven'> size="xs" ariaLabel="Which signals" value={provenOnly ? 'proven' : 'all'} onChange={(v) => setProvenOnly(v === 'proven')}
@@ -211,6 +211,14 @@ function IntradaySignals() {
         ) : undefined}
         flush
       >
+        {d.market_closed && d.session && (
+          <div className="border-b border-line px-4 py-2">
+            <Banner tone="info" icon={<Info className="h-4 w-4 text-info" />}>
+              <span className="font-medium">Market closed: these are the signals of {date(d.session)}</span>{' '}
+              <span className="text-muted">for review. New ones start after 09:20 on the next trading day.</span>
+            </Banner>
+          </div>
+        )}
         {d.show_untested && unproven > 0 && !provenOnly && (
           <div className="border-b border-line px-4 py-2">
             <Banner tone="warn">

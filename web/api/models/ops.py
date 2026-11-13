@@ -366,6 +366,8 @@ class IntradaySignalsResponse(Model):
     source: str | None = None                     # today's bars: "fyers_ws" real time, "yahoo" ~15 min delayed
     delayed: bool
     bars_to: str | None = None
+    session: ISODate | None = None                # the trading day these signals are from
+    market_closed: bool = False                   # weekend / holiday / before 09:20: the last session's signals
     note: str
 
 
