@@ -6906,6 +6906,104 @@
      }
     }
    }
+  },
+  "/api/autotrade": {
+   "get": {
+    "tags": [
+     "autotrade"
+    ],
+    "summary": "View",
+    "description": "Files only: the engine's settings, positions, today's trades, its speed and its record.",
+    "operationId": "view_api_autotrade_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/autotrade/settings": {
+   "post": {
+    "tags": [
+     "autotrade"
+    ],
+    "summary": "Settings",
+    "operationId": "settings_api_autotrade_settings_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AutoSettings"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/autotrade/stop": {
+   "post": {
+    "tags": [
+     "autotrade"
+    ],
+    "summary": "Stop",
+    "description": "Kill switch: the engine off and every engine position closed at the live price.",
+    "operationId": "stop_api_autotrade_stop_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/autotrade/reset": {
+   "post": {
+    "tags": [
+     "autotrade"
+    ],
+    "summary": "Reset",
+    "operationId": "reset_api_autotrade_reset_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -9220,6 +9318,134 @@
      "costs_round_trip_pct"
     ],
     "title": "AsOf"
+   },
+   "AutoSettings": {
+    "properties": {
+     "on": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "On"
+     },
+     "mode": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "all",
+         "proven"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mode"
+     },
+     "intraday": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Intraday"
+     },
+     "oi": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi"
+     },
+     "options": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Options"
+     },
+     "daily": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Daily"
+     },
+     "max_positions": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 50.0,
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Positions"
+     },
+     "max_trades_per_day": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 200.0,
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Trades Per Day"
+     },
+     "daily_loss_pct": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 20.0,
+        "minimum": 0.1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Daily Loss Pct"
+     },
+     "max_late_min": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 60.0,
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Late Min"
+     }
+    },
+    "type": "object",
+    "title": "AutoSettings"
    },
    "AutomationJob": {
     "properties": {

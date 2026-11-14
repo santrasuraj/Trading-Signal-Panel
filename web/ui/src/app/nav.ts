@@ -1,5 +1,5 @@
 import {
-  Activity, Bot, Briefcase, BookOpenCheck, Building2, CalendarDays, Clock4, Orbit, Repeat, Scale3d, CandlestickChart, Calculator, History as HistoryIcon, Radio, ShieldAlert, Spline, LayoutGrid, Gamepad2, Hammer, Grid3x3, History, GraduationCap, Crosshair, Gauge, Receipt, Globe2, Landmark, Layers, FlaskConical, LayoutDashboard, ListChecks, ListFilter, NotebookPen, Scale, Settings2, Star, Timer, Trophy, type LucideIcon,
+  Activity, Bot, Briefcase, BookOpenCheck, Building2, CalendarDays, Clock4, Orbit, Repeat, Scale3d, CandlestickChart, Calculator, History as HistoryIcon, Radio, ShieldAlert, Spline, LayoutGrid, Gamepad2, Hammer, Grid3x3, History, GraduationCap, Crosshair, Gauge, Receipt, Globe2, Landmark, Layers, FlaskConical, LayoutDashboard, ListChecks, ListFilter, NotebookPen, Scale, Settings2, Star, Timer, Trophy, Zap, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem { id: string; label: string; to: string; icon: LucideIcon; keys?: string; match: (p: string) => boolean; badge?: string }
@@ -23,6 +23,7 @@ export const NAV: NavItem[] = [
   { id: 'orders', label: 'Orders', to: '/orders', icon: Receipt, keys: 'g e', match: (p) => p.startsWith('/orders') },
   { id: 'sim', label: 'Practice', to: '/sim', icon: Gamepad2, keys: 'g u', match: (p) => p.startsWith('/sim') },
   { id: 'replay', label: 'Replay', to: '/replay', icon: History, keys: 'g y', match: (p) => p.startsWith('/replay') },
+  { id: 'autotrade', label: 'Auto-trader', to: '/autotrade', icon: Zap, match: (p) => p.startsWith('/autotrade') },
   { id: 'bot', label: 'Practice bot', to: '/bot', icon: Bot, match: (p) => p.startsWith('/bot') },
   { id: 'journal', label: 'Trade journal', to: '/journal', icon: BookOpenCheck, match: (p) => p.startsWith('/journal') },
   { id: 'coach', label: 'Coach', to: '/coach', icon: GraduationCap, keys: 'g h', match: (p) => p.startsWith('/coach') },

@@ -24,6 +24,7 @@ const Setups = lazy(() => import('@/pages/Setups'))
 const Journal = lazy(() => import('@/pages/Journal'))
 const OptionsBacktest = lazy(() => import('@/pages/OptionsBacktest'))
 const Bot = lazy(() => import('@/pages/Bot'))
+const AutoTrade = lazy(() => import('@/pages/AutoTrade'))
 const Companies = lazy(() => import('@/pages/Companies'))
 const ResultsReaction = lazy(() => import('@/pages/ResultsReaction'))
 const Rotation = lazy(() => import('@/pages/Rotation'))
@@ -106,6 +107,7 @@ export const router = createBrowserRouter([
       { path: 'journal', element: g(<Journal />) },
       { path: 'options-backtest', element: g(<OptionsBacktest />) },
       { path: 'bot', element: g(<Bot />) },
+      { path: 'autotrade', element: g(<AutoTrade />) },
       { path: 'companies', element: g(<Companies />) },
       { path: 'results-reaction', element: g(<ResultsReaction />) },
       { path: 'rotation', element: g(<Rotation />) },

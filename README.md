@@ -204,6 +204,22 @@ price you click; the **Market depth** card shows FYERS' five best bids and offer
 2 s while open) and a click on a price opens a ticket there. Personal use only: NSE's data policy does not allow
 offering simulated trading on live prices to others.
 
+### Auto-trader (practice) `/autotrade`
+A high-speed engine that takes the app's signals automatically, within about a second, in **its own practice
+account** (capital from config.yaml; `web/api/services/autotrade_svc.py`, `data/autotrade.json`). Nothing is ever
+sent to FYERS. Off until you press **Start**; it runs in the dashboard's server, so the dashboard must be open.
+- **Intraday signals** (all, or proven only) and **live OI build-ups**: entered at the live price plus slippage with
+  the signal's stop and target, which act on every price update; closed by the strategy's own exit, the stop, the
+  target or the 15:00 square-off. One position per stock, a per-trade size cap, max positions and trades a day, a
+  daily loss stop, and no entry more than a few minutes after the strategy's own entry bar.
+- **Index option BUY verdicts**: one lot from 09:20 at the stored chain's ask with exact charges, settled at expiry at
+  NSE's official close. **Daily strategies**: switches the practice bot on for the working strategies.
+- Every trade records its **speed** (signal lag behind the strategy's entry bar, reaction in ms, price age) and
+  **slippage** against the signal's price, and the page totals them per strategy next to the backtest label.
+- **Stop and close all** is the kill switch. FYERS real-time prices need today's login (`1_login.bat`); without it the
+  engine trades on Yahoo prices ~15 minutes late and says so. True HFT (microseconds, co-located at the exchange) is
+  not possible for retail traders; speed multiplies an edge, it doesn't create one.
+
 ### Strategy builder (`g j`)
 Describe a strategy in plain English (Claude turns it into rules; it never says whether they work) or build it from
 the rule editor: entry rules from the scan fields, exits by stop, target, trailing stop, holding days or exit rules,

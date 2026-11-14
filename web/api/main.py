@@ -25,8 +25,8 @@ from fastapi.routing import APIRoute
 
 from . import errors
 from .errors import ApiException, SafeJSONResponse
-from .routers import (action, ai, builder, coach, desk, fno, levels, lookup, market, ops, options, outlook, overview, portfolio, smart_money,
-                      orders, replay, research, scans, sim, strategies, stream, system, views, watch)
+from .routers import (action, ai, autotrade, builder, coach, desk, fno, levels, lookup, market, ops, options, outlook, overview,
+                      portfolio, smart_money, orders, replay, research, scans, sim, strategies, stream, system, views, watch)
 from .security import SecurityMiddleware
 from .services import fyers_svc
 
@@ -85,8 +85,9 @@ def create_app(warm: bool = True) -> FastAPI:
     async def lifespan(_app):
         if warm:
             threading.Thread(target=warm_up, args=(_app,), name="warm-up", daemon=True).start()
-            from .services import bot_svc
+            from .services import autotrade_svc, bot_svc
             bot_svc.start()                       # the practice bot's once-a-minute check (practice account only)
+            autotrade_svc.start()                 # the high-speed auto-trader's once-a-second loop (practice only)
         yield
 
     app = FastAPI(title="Quant Desk API", version=system.VERSION, docs_url="/api/docs", redoc_url=None,
@@ -94,7 +95,7 @@ def create_app(warm: bool = True) -> FastAPI:
     app.add_middleware(SecurityMiddleware)
     errors.install(app)
     for r in (system, overview, strategies, lookup, portfolio, market, ops, smart_money, options, fno, levels, outlook, ai,
-              action, watch, scans, research, orders, replay, coach, sim, builder, views, desk, stream):
+              action, watch, scans, research, orders, replay, coach, sim, builder, views, desk, autotrade, stream):
         app.include_router(r.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
