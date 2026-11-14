@@ -247,6 +247,35 @@ P50 / P95 / P99):
   pandas is no longer on the hot path, indicators are computed inside the compiled loops, and the option verdicts
   price from NSE history, not a model.
 
+### Company research from NSE's filings `/company/SYMBOL`
+What Screener.in, Tijori, Trendlyne, StockEdge and Sensibull show, built from the same public filings they start from.
+Their own pages are not copied: their terms forbid copying their data or using it as a database (Screener.in: personal,
+non-commercial viewing only; Trendlyne: no machine-readable database without written permission; StockEdge: no
+automated use).
+- **Ten-plus years of financials** (`scanner/financials.py`): profit & loss back to 2005 (NSE's own line items before
+  2019, XBRL after), balance sheets from FY2019, cash flows from FY2020, the last 12 quarters; consolidated and
+  standalone kept apart (a switch on the page). ROCE, ROE, debt/equity, margins, cash conversion, payout, 3/5/10-year
+  compounded growth, P/E and P/B on the live price. Banks get their own lines (interest earned/expended, NII,
+  cost-to-income, NPAs). Every year links to its filing; numbers are as filed (EPS not adjusted for later bonuses).
+  New screener fields (ROCE, ROE, debt/equity, operating margin, 3/5-year growth, cash conversion), point in time.
+- **Business segments**: revenue and result by segment, from the results XBRL.
+- **Peers**: the same industry (banks next to banks), with market cap, P/E, P/B, ROCE, ROE, debt, growth.
+- **Filings timeline** (`documents_svc.py`): call transcripts, investor presentations, call schedules and recordings,
+  results, board outcomes, ratings, deals and annual reports since 2004, each linking to NSE's file.
+- **Investor portfolios** (Smart money > Investor portfolios, `investors_svc.py`): each well-known investor's, fund
+  house's or institution's holdings across companies and what changed last quarter, from the shareholding filings
+  (every public holder with 1%+). Under 1% is not disclosed, so "left" can also mean "now below 1%".
+- **IV rank / IV percentile** (Volatility page and the company page, `scanner/iv_history.py`): each F&O underlying's
+  ~30-day at-the-money implied volatility from NSE's daily F&O file, against its own past year. Kept current by the
+  nightly F&O refresh; a year of history is one button (~5 minutes).
+- **Quality-value-momentum score** (`scanner/qvm.py`): our own 0-100 score - ROE and low debt, earnings and book yield,
+  6/12-month momentum - each a percentile, averaged. On the company page and the Company screener, and backtested as the
+  EXPERIMENTAL strategy "Quality-value-momentum score" (top 20, quarterly) by the same engine as every strategy.
+  Its backtest means little until every company's financials are fetched.
+- Company screener > **Fetch all companies** now also fetches the ten-year financials (about two hours the first time,
+  in the background; then only new filings). A company page fetches its own the first time it is opened.
+- Not available from public sources, so not here: broker target prices, market-share data, Pine Script.
+
 ### Strategy builder (`g j`)
 Describe a strategy in plain English (Claude turns it into rules; it never says whether they work) or build it from
 the rule editor: entry rules from the scan fields, exits by stop, target, trailing stop, holding days or exit rules,

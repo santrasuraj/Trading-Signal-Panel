@@ -7024,6 +7024,306 @@
      }
     }
    }
+  },
+  "/api/company/{symbol}": {
+   "get": {
+    "tags": [
+     "company"
+    ],
+    "summary": "Company",
+    "description": "P&L, balance sheet, cash flow, ratios, growth, segments, quarters and industry peers.",
+    "operationId": "company_api_company__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "basis",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "enum": [
+          "consolidated",
+          "standalone"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Basis"
+      }
+     },
+     {
+      "name": "refresh",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "description": "fetch from NSE now, even when stored recently",
+       "default": false,
+       "title": "Refresh"
+      },
+      "description": "fetch from NSE now, even when stored recently"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/company/{symbol}/documents": {
+   "get": {
+    "tags": [
+     "company"
+    ],
+    "summary": "Documents",
+    "description": "The company's filings timeline: call transcripts, presentations, results, annual reports... with NSE's links.",
+    "operationId": "documents_api_company__symbol__documents_get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Symbol"
+      }
+     },
+     {
+      "name": "refresh",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "title": "Refresh"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/investors": {
+   "get": {
+    "tags": [
+     "company"
+    ],
+    "summary": "Investors",
+    "description": "Big investors' portfolios from the shareholding filings (1%+ holders): famous, mf, fii, insurance, pension, ...",
+    "operationId": "investors_api_investors_get",
+    "parameters": [
+     {
+      "name": "category",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "maxLength": 12,
+       "default": "famous",
+       "title": "Category"
+      }
+     },
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "maxLength": 60,
+       "default": "",
+       "title": "Q"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/investors/{key}": {
+   "get": {
+    "tags": [
+     "company"
+    ],
+    "summary": "Investor",
+    "description": "One investor's holdings, each with the change since the previous quarter.",
+    "operationId": "investor_api_investors__key__get",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/iv-rank": {
+   "get": {
+    "tags": [
+     "company"
+    ],
+    "summary": "Iv Rank",
+    "description": "Every F&O underlying's ~30-day ATM implied volatility with its IV rank and IV percentile over the past year.",
+    "operationId": "iv_rank_api_iv_rank_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/iv-rank/{symbol}": {
+   "get": {
+    "tags": [
+     "company"
+    ],
+    "summary": "Iv Rank One",
+    "description": "One underlying's IV, rank, percentile and its past year of daily IV.",
+    "operationId": "iv_rank_one_api_iv_rank__symbol__get",
+    "parameters": [
+     {
+      "name": "symbol",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Symbol"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/iv-rank/backfill": {
+   "post": {
+    "tags": [
+     "company"
+    ],
+    "summary": "Iv Rank Backfill",
+    "description": "Fetch a year of NSE's daily F&O files in the background (~5 minutes) for a fair rank.",
+    "operationId": "iv_rank_backfill_api_iv_rank_backfill_post",
+    "responses": {
+     "202": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {

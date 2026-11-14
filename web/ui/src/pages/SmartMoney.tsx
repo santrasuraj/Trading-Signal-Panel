@@ -18,6 +18,7 @@ import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { EmptyState, ErrorState, SkeletonKpis, SkeletonRows } from '@/components/feedback'
 import { Price, Pts } from '@/components/num'
 import { BigMoneyLive } from '@/components/BigMoneyLive'
+import { InvestorPortfolios } from '@/components/InvestorPortfolios'
 import { CategoryBadge, ExitChip } from '@/components/SmartMoneyPanel'
 import { useToast } from '@/components/toast'
 import { Button, Card, Chip, IconButton, MenuItem, Popover, Segmented, SelectButton, Spinner, Switch, Tabs, Tip } from '@/components/ui'
@@ -25,7 +26,7 @@ import { cn } from '@/lib/csv'
 import { date, dateTimeIST, monthYear, num, ok, qty, relative, toneClass } from '@/lib/format'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 
-type Tab = 'live' | 'today' | 'insider' | 'accumulating' | 'exited' | 'flows'
+type Tab = 'live' | 'today' | 'insider' | 'accumulating' | 'exited' | 'investors' | 'flows'
 type HoldView = 'accumulating' | 'exiting'
 type SideFilter = 'all' | 'buy' | 'sell'
 
@@ -35,6 +36,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'insider', label: 'Insider & promoter trades' },
   { id: 'accumulating', label: 'Accumulating' },
   { id: 'exited', label: 'Exited / selling' },
+  { id: 'investors', label: 'Investor portfolios' },
   { id: 'flows', label: 'FII/DII flows' },
 ]
 
@@ -690,6 +692,7 @@ export default function SmartMoney() {
               {t === 'today' && <DealsTab symbol={symbol} filter={filter} />}
               {t === 'insider' && <InsiderTab symbol={symbol} filter={filter} />}
               {(t === 'accumulating' || t === 'exited') && <HoldingsTab key={t} view={t === 'exited' ? 'exiting' : 'accumulating'} symbol={symbol} filter={filter} />}
+              {t === 'investors' && <InvestorPortfolios />}
               {t === 'flows' && <FlowsTab />}
             </div>
           </>

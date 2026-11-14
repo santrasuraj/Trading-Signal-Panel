@@ -7,6 +7,7 @@ import { fetchJson } from '@/api/client'
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { ErrorState, SkeletonKpis } from '@/components/feedback'
 import { LinesChart } from '@/components/charts/LinesChart'
+import { IvRankTable } from '@/components/IvRank'
 import { Card } from '@/components/ui'
 import { date as fmtDate, num } from '@/lib/format'
 import { cn } from '@/lib/csv'
@@ -64,6 +65,7 @@ export default function Volatility() {
               ]} />
               <p className={cn('px-4 py-2 text-2xs', a.days < 250 ? 'text-warn' : 'text-muted')}>{a.days < 250 ? 'Less than a year stored: the percentile covers only these days. Fetch 2 years on the Options backtest page.' : level(a.percentile)}</p>
             </Card>))}</div>
+          <div className="mt-3"><IvRankTable /></div>
           <p className="mt-3 text-2xs text-faint">{d.note}</p>
         </>
       )}

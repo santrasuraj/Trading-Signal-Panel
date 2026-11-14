@@ -72,6 +72,17 @@ def _alpha_lowvol_score(f: Factors, size: int) -> pd.DataFrame:
             + 0.5 * (-f.vol_ann).where(u).rank(axis=1, pct=True))
 
 
+def _qvm(f: Factors, size: int) -> dict:
+    """Quality / value / momentum parts (scanner/qvm.py) among the day's `size` most traded stocks, point in time;
+    computed once per Factors."""
+    key = f"_qvm_{size}"
+    if key not in f.__dict__:
+        from . import financials, qvm
+        fin = financials.frames(list(f.p.close.columns), f.p.dates)
+        f.__dict__[key] = qvm.parts(f.p.close, f.momentum, fin, mask=f._stocks_only(f.turnover_rank <= size).fillna(False))
+    return f.__dict__[key]
+
+
 # Strategies that are off unless config.yaml turns them on: tested here and rejected. They are still
 # re-tested (cached) by the daily scan so the platform can show the evidence, but never produce orders.
 REJECTED_REASONS = {
@@ -136,6 +147,25 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             # "most traded" among STOCKS (that day's universe members on a point-in-time panel): heavily
             # traded ETFs (NIFTYBEES, GOLDBEES...) must not take the slots
             eligible=lambda f: (f.turnover_rank <= big) & f.vol_ann.notna(),
+            top_n=int(opt(k, "top_n", 20)), keep_rank=int(opt(k, "keep_rank", 40)),
+            rebalance=opt(k, "rebalance", "quarterly"), use_regime=opt(k, "use_regime", False),
+        ))
+
+    k = "qvm_score"
+    if enabled(k):
+        big = int(opt(k, "universe_size", 200))
+        out.append(RankStrategy(
+            key=k, name="Quality-value-momentum score", horizon="longterm", evidence="EXPERIMENTAL",
+            benchmark="Nifty200 Quality 30",
+            description=("Our own 0-100 score (scanner/qvm.py): quality (ROE, low debt), value (earnings and book "
+                         "yield) and momentum (6- and 12-month return over volatility), each a percentile among the 200 "
+                         "most traded stocks, averaged. Holds the 20 best scored, reviewed quarterly. Fundamentals from "
+                         "NSE's filings as of the day they were filed; a stock without stored filings is never picked, "
+                         "so the backtest means little until every company's financials are fetched (Company "
+                         "screener > Fetch all). Each part has published evidence (also in India); the combination "
+                         "here is ours and unproven - its backtest is the test."),
+            score=lambda f: _qvm(f, big)["score"],
+            eligible=lambda f: _qvm(f, big)["score"].notna(),
             top_n=int(opt(k, "top_n", 20)), keep_rank=int(opt(k, "keep_rank", 40)),
             rebalance=opt(k, "rebalance", "quarterly"), use_regime=opt(k, "use_regime", False),
         ))

@@ -26,6 +26,7 @@ const OptionsBacktest = lazy(() => import('@/pages/OptionsBacktest'))
 const Bot = lazy(() => import('@/pages/Bot'))
 const AutoTrade = lazy(() => import('@/pages/AutoTrade'))
 const Companies = lazy(() => import('@/pages/Companies'))
+const Company = lazy(() => import('@/pages/Company'))
 const ResultsReaction = lazy(() => import('@/pages/ResultsReaction'))
 const Rotation = lazy(() => import('@/pages/Rotation'))
 const Volatility = lazy(() => import('@/pages/Volatility'))
@@ -109,6 +110,8 @@ export const router = createBrowserRouter([
       { path: 'bot', element: g(<Bot />) },
       { path: 'autotrade', element: g(<AutoTrade />) },
       { path: 'companies', element: g(<Companies />) },
+      { path: 'company', element: g(<Company />) },
+      { path: 'company/:symbol', element: g(<Company />) },
       { path: 'results-reaction', element: g(<ResultsReaction />) },
       { path: 'rotation', element: g(<Rotation />) },
       { path: 'volatility', element: g(<Volatility />) },

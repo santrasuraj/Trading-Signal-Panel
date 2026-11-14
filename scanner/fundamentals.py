@@ -82,7 +82,9 @@ def filings(sym: str, get=None) -> list[dict]:
                 if page > 1 else {"index": "equities", "symbol": sym.upper()})
         rows = (r or {}).get("data") or [] if isinstance(r, dict) else []
         for x in rows:
-            if "Financial" not in str(x.get("type")) or not str(x.get("xbrl", "")).startswith("https://nsearchives.nseindia.com/"):
+            # NSE serves the archive from nsearchives.nseindia.com and (since 2026) nsearchives.nseindia.in
+            if "Financial" not in str(x.get("type")) or not str(x.get("xbrl", "")).startswith(
+                    ("https://nsearchives.nseindia.com/", "https://nsearchives.nseindia.in/")):
                 continue
             qe, filed = _d(x.get("qe_Date")), _d(x.get("broadcast_Date") or x.get("creation_Date"))
             if qe and filed:

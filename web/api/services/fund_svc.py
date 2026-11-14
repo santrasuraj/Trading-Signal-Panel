@@ -7,6 +7,7 @@ from __future__ import annotations
 import threading
 from datetime import date
 
+from scanner import financials as fin
 from scanner import fundamentals as fu
 
 from . import data, quotes_svc
@@ -53,7 +54,13 @@ def start_refresh() -> dict:
 
     def work():
         try:
-            _job["report"] = fu.refresh(syms, log=lambda *_: None, progress=lambda d, t: _job.update(done=d, total=t))
+            n = len(syms)                                  # quarterly numbers first, then ten years of financials
+            rep = fu.refresh(syms, log=lambda *_: None, progress=lambda d, t: _job.update(done=d, total=t + n))
+            _job.update(total=_job["total"] or 2 * n)
+            base = _job["done"]
+            rep2 = fin.refresh(syms, log=lambda *_: None, stop=lambda: False,
+                               progress=lambda d, t: _job.update(done=base + d, total=base + t))
+            _job["report"] = {"quarterly": rep, "financials": rep2}
         except Exception as e:
             _job["error"] = f"{type(e).__name__}: {e}"
         finally:
@@ -71,6 +78,8 @@ def screener() -> dict:
     if sc is None or sc.empty:
         return {"rows": [], "stored": 0, "universe": 0, "note": "No scan yet."}
     rows = []
+    from . import company_svc
+    qvm = company_svc.scores()
     for r in sc.itertuples(index=False):
         rec = fu.load(r.symbol)
         if not rec.get("quarters"):
@@ -82,7 +91,14 @@ def screener() -> dict:
 
         def f(x, nd=1):
             return None if x is None or (isinstance(x, float) and math.isnan(x)) else round(float(x), nd)
-        rows.append({"symbol": r.symbol, "company": r.company, "industry": r.industry, "price": f(r.price, 2),
+        fs = fin.snapshot(fin.load(r.symbol), float(r.price) if r.price == r.price else None)             if fin._file(r.symbol).exists() else {}
+        sq = qvm.get(r.symbol) or {}
+        rows.append({"score": sq.get("score"), "quality": sq.get("quality"), "value": sq.get("value"),
+                     "momentum": sq.get("momentum"), "roce": f(fs.get("roce")), "roe": f(fs.get("roe")), "de": f(fs.get("de"), 2), "opm": f(fs.get("opm")),
+                     "sales_cagr_5y": f(fs.get("sales_cagr_5y")), "profit_cagr_5y": f(fs.get("profit_cagr_5y")),
+                     "market_cap_cr": f((fs.get("market_cap") or 0) / 1e7, 0) if fs.get("market_cap") else None,
+                     "pb": f(fs.get("pb"), 2),
+                     "symbol": r.symbol, "company": r.company, "industry": r.industry, "price": f(r.price, 2),
                      "ret_3m": f(r.ret_3m), "ret_12m": f(r.ret_12m), "rs": f(r.rs, 0),
                      "above_sma200": bool(r.above_sma200) if r.above_sma200 == r.above_sma200 else None,
                      "pct_from_52w_high": f(r.pct_from_52w_high), "turnover_cr": f(r.turnover_cr),

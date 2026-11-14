@@ -230,6 +230,11 @@ def refresh(days: int = DEFAULT_DAYS, log=print, today: date | None = None) -> d
             option_history.add_day(body, d)
         except Exception as e:
             rep["errors"].append(f"{d}: option history: {type(e).__name__}: {e}")
+        try:                              # every underlying's ATM implied volatility: IV rank / percentile
+            from . import iv_history
+            iv_history.add_day(body, d)
+        except Exception as e:
+            rep["errors"].append(f"{d}: IV history: {type(e).__name__}: {e}")
         rep["added"].append(d.isoformat())
         log(f"  F&O {d}: {len(fut)} underlyings, participant positions stored")
     rep["elapsed_s"] = round(time.monotonic() - t0, 1)

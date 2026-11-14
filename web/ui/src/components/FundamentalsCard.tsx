@@ -2,6 +2,7 @@
 // margin, EPS over the last four quarters and P/E (web/api/services/fund_svc.py). Also starts the universe-wide
 // fetch that feeds the scan fields.
 
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2 } from 'lucide-react'
 import { fetchJson } from '@/api/client'
@@ -28,7 +29,8 @@ export function FundamentalsCard({ symbol }: { symbol: string }) {
   const s = st.data
   return (
     <Card title={<span className="flex items-center gap-1.5"><Building2 className="h-4 w-4 text-muted" />Company numbers</span>}
-      subtitle={l ? `Quarter to ${qName(l.qe)} · ${d?.basis}` : 'From NSE\'s quarterly filings'}>
+      subtitle={l ? `Quarter to ${qName(l.qe)} · ${d?.basis}` : 'From NSE\'s quarterly filings'}
+      right={<Link to={`/company/${symbol}`} className="text-xs text-accent hover:underline" title="P&L, balance sheet, cash flow, ratios, peers, transcripts">10-year financials</Link>}>
       {!d ? <p className="text-xs text-muted">{q.error ? 'NSE did not answer.' : 'Loading the filings…'}</p> : !l ? (
         <p className="text-xs text-muted">No quarterly filings found for {symbol} (an ETF or index has none).</p>
       ) : (

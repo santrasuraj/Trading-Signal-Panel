@@ -165,6 +165,28 @@ FIELDS.update({
     "net_margin": Field("Net profit margin %", "Company", "%", lambda c: _fund(c, "net_margin")),
 })
 
+
+def _fin(c: "Ctx", key: str) -> pd.DataFrame:
+    """Yearly ratios from ten years of filings (scanner/financials.py), point in time: each from the day its year's
+    results were filed."""
+    if "_fin" not in c.extra:
+        from . import financials
+        c.extra["_fin"] = financials.frames(list(c.p.close.columns), c.p.dates)
+    return c.extra["_fin"][key]
+
+
+FIELDS.update({
+    "roce": Field("ROCE % (last full year)", "Company", "%", lambda c: _fin(c, "roce")),
+    "roe": Field("ROE % (last full year)", "Company", "%", lambda c: _fin(c, "roe")),
+    "de": Field("Debt to equity", "Company", "x", lambda c: _fin(c, "de")),
+    "opm": Field("Operating margin % (last full year)", "Company", "%", lambda c: _fin(c, "opm")),
+    "sales_cagr_3y": Field("Sales growth, 3-year compounded %", "Company", "%", lambda c: _fin(c, "sales_cagr_3y")),
+    "profit_cagr_3y": Field("Profit growth, 3-year compounded %", "Company", "%", lambda c: _fin(c, "profit_cagr_3y")),
+    "sales_cagr_5y": Field("Sales growth, 5-year compounded %", "Company", "%", lambda c: _fin(c, "sales_cagr_5y")),
+    "profit_cagr_5y": Field("Profit growth, 5-year compounded %", "Company", "%", lambda c: _fin(c, "profit_cagr_5y")),
+    "cash_conversion": Field("Operating cash flow / profit %", "Company", "%", lambda c: _fin(c, "cash_conversion")),
+})
+
 PRESETS = [
     {"name": "20-day breakout on 2x volume (uptrend)", "match": "all", "direction": "long", "rules": [
         {"left": "close", "op": ">", "right": {"field": "high_20_prev"}},
