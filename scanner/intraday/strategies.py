@@ -16,6 +16,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from . import fast
 from .engine import (FLAT_FNO, FLAT_OTHER, SLOTS, Day, IntradayCosts, IntradayStrategy, Trade, intraday_metrics,
                      slot_of, stop_entry, walk_exit)
 
@@ -62,10 +63,8 @@ def _trade(d: Day, side: int, slot: int, px: float, stop: float | None, target: 
 
 
 def _first_valid(a: np.ndarray, start: int, end: int) -> int | None:
-    for i in range(start, min(end, len(a))):
-        if not math.isnan(a[i]):
-            return i
-    return None
+    i = fast.first_valid(fast.f64(a), int(start), int(end))
+    return None if i < 0 else int(i)
 
 
 # ---------------------------------------------------------------------------- I1 opening range breakout
@@ -121,16 +120,12 @@ def vwap_trend(d: Day, p: dict) -> list[Trade]:
     vw = d.vwap()
     band = p.get("band_pct", 0.1) / 100
     trades, pos, entry_slot, entry_px = [], 0, None, None
-    for i in range(1, d.flat_slot - 1):
-        if math.isnan(d.c[i]) or math.isnan(vw[i]):
-            continue
-        want = +1 if d.c[i] > vw[i] * (1 + band) else -1 if d.c[i] < vw[i] * (1 - band) else pos
-        nxt = _first_valid(d.o, i + 1, d.flat_slot)
-        if want != pos and nxt is not None and (pos == 0 or nxt - entry_slot >= 2):
-            if pos != 0:
-                trades.append(Trade("", d.symbol, d.date.date().isoformat(), pos, entry_slot, entry_px, nxt,
-                                    float(d.o[nxt]), None, "flip", False, d.ctx.get("liquidity", 0)))
-            pos, entry_slot, entry_px = want, nxt, float(d.o[nxt])
+    for want, nxt in fast.vwap_trend_flips(d.o, d.c, vw, float(band), d.flat_slot):
+        want, nxt = int(want), int(nxt)
+        if pos != 0:
+            trades.append(Trade("", d.symbol, d.date.date().isoformat(), pos, entry_slot, entry_px, nxt,
+                                float(d.o[nxt]), None, "flip", False, d.ctx.get("liquidity", 0)))
+        pos, entry_slot, entry_px = want, nxt, float(d.o[nxt])
     if pos != 0:
         xs, xp, why = walk_exit(d, pos, entry_slot, None, None)
         trades.append(Trade("", d.symbol, d.date.date().isoformat(), pos, entry_slot, entry_px, xs, float(xp),
@@ -280,39 +275,13 @@ def supertrend(d: Day, p: dict) -> list[Trade]:
     """Supertrend (ATR 10, multiplier 3) on 5-minute bars within the day: follow each flip (next-bar
     open), flat at the square-off."""
     n, mult = int(p.get("atr_n", 10)), float(p.get("mult", 3.0))
-    h, l, c = d.h, d.l, d.c
-    m = len(c)
-    tr = np.full(m, np.nan)
-    for i in range(m):
-        if math.isnan(c[i]):
-            continue
-        pc = c[i - 1] if i > 0 and not math.isnan(c[i - 1]) else c[i]
-        tr[i] = max(h[i] - l[i], abs(h[i] - pc), abs(l[i] - pc))
-    atr, a = np.full(m, np.nan), None
-    for i in range(m):
-        if math.isnan(tr[i]):
-            continue
-        a = tr[i] if a is None else (a * (n - 1) + tr[i]) / n
-        atr[i] = a
-    trend, fu, fl, trades = 0, np.nan, np.nan, []
-    pos, e_slot, e_px = 0, None, None
-    for i in range(n, d.flat_slot - 1):
-        if math.isnan(c[i]) or math.isnan(atr[i]):
-            continue
-        mid = (h[i] + l[i]) / 2
-        bu, bl = mid + mult * atr[i], mid - mult * atr[i]
-        fu = bu if math.isnan(fu) or bu < fu or c[i - 1] > fu else fu
-        fl = bl if math.isnan(fl) or bl > fl or c[i - 1] < fl else fl
-        new = 1 if c[i] > fu else -1 if c[i] < fl else trend
-        if new != trend and new != 0:
-            trend = new
-            nxt = _first_valid(d.o, i + 1, d.flat_slot)
-            if nxt is None:
-                break
-            if pos != 0:
-                trades.append(Trade("", d.symbol, d.date.date().isoformat(), pos, e_slot, e_px, nxt,
-                                    float(d.o[nxt]), None, "flip", False, d.ctx.get("liquidity", 0)))
-            pos, e_slot, e_px = trend, nxt, float(d.o[nxt])
+    trades, pos, e_slot, e_px = [], 0, None, None
+    for trend, nxt in fast.supertrend_flips(d.o, d.h, d.l, d.c, n, mult, d.flat_slot):    # ATR, bands, flips
+        trend, nxt = int(trend), int(nxt)
+        if pos != 0:
+            trades.append(Trade("", d.symbol, d.date.date().isoformat(), pos, e_slot, e_px, nxt,
+                                float(d.o[nxt]), None, "flip", False, d.ctx.get("liquidity", 0)))
+        pos, e_slot, e_px = trend, nxt, float(d.o[nxt])
     if pos != 0:
         xs, xp, why = walk_exit(d, pos, e_slot, None, None)
         trades.append(Trade("", d.symbol, d.date.date().isoformat(), pos, e_slot, e_px, xs, float(xp), None, why,
@@ -463,40 +432,17 @@ def _one_sweep(d: Day, side: int, level: float, start: int, last: int, p: dict) 
     tol = float(p.get("tol_pct", 0.05)) / 100
     reclaim_bars, retest_bars = int(p.get("reclaim_bars", 6)), int(p.get("retest_bars", 12))
     rr, max_risk = float(p.get("rr", 2.0)), float(p.get("max_risk_pct", 1.5)) / 100
-    for i in range(start, last):
-        if math.isnan(d.l[i]):
-            continue
-        if not (d.l[i] < level if side > 0 else d.h[i] > level):
-            continue
-        extreme, reclaim = (d.l[i] if side > 0 else d.h[i]), None
-        for k in range(i, min(i + reclaim_bars, last)):
-            if math.isnan(d.c[k]):
-                continue
-            extreme = min(extreme, d.l[k]) if side > 0 else max(extreme, d.h[k])
-            if d.c[k] > level if side > 0 else d.c[k] < level:
-                reclaim = k
-                break
-        if reclaim is None:
-            return None                                  # accepted beyond the level: a breakout, not a trap
-        for k in range(reclaim + 1, min(reclaim + 1 + retest_bars, last)):
-            if math.isnan(d.c[k]):
-                continue
-            if d.l[k] < extreme if side > 0 else d.h[k] > extreme:
-                return None                              # a new extreme beyond the sweep: the trap failed
-            touch = d.l[k] <= level * (1 + tol) if side > 0 else d.h[k] >= level * (1 - tol)
-            hold = d.c[k] > level if side > 0 else d.c[k] < level
-            if touch and hold:
-                nxt = _first_valid(d.o, k + 1, d.flat_slot)
-                if nxt is None or nxt > last:
-                    return None
-                px = float(d.o[nxt])
-                stop = extreme * (1 - SWEEP_STOP_BUFFER) if side > 0 else extreme * (1 + SWEEP_STOP_BUFFER)
-                risk = abs(px - stop)
-                if not (0.001 <= risk / px <= max_risk):
-                    return None                          # too tight for 5-minute bars, or too wide to size
-                return _trade(d, side, nxt, px, stop, px + side * rr * risk, priority=d.ctx.get("relvol", 1.0))
-        return None                                      # no retest in time: the move left without us
-    return None
+    nxt, extreme = fast.sweep_setup(d.o, d.h, d.l, d.c, int(side), float(level),
+                                    int(start), int(last), tol, reclaim_bars, retest_bars, d.flat_slot)
+    if nxt < 0:
+        return None
+    nxt = int(nxt)
+    px = float(d.o[nxt])
+    stop = extreme * (1 - SWEEP_STOP_BUFFER) if side > 0 else extreme * (1 + SWEEP_STOP_BUFFER)
+    risk = abs(px - stop)
+    if not (0.001 <= risk / px <= max_risk):
+        return None                                      # too tight for 5-minute bars, or too wide to size
+    return _trade(d, side, nxt, px, stop, px + side * rr * risk, priority=d.ctx.get("relvol", 1.0))
 
 
 def _sweep_retest(d: Day, support: float, resistance: float, start: int, p: dict) -> list[Trade]:
@@ -531,32 +477,18 @@ def orb_retest_vwap(d: Day, p: dict) -> list[Trade]:
     retest_bars, rr = int(p.get("retest_bars", 12)), float(p.get("rr", 2.0))
     max_risk = float(p.get("max_risk_pct", 1.5)) / 100
     last = min(int(p.get("last_entry_slot", S_1430)), d.flat_slot - 1)
-    for i in range(OR15_END, last):
-        if math.isnan(d.c[i]) or math.isnan(vw[i]):
-            continue
-        side = +1 if d.c[i] > orh and d.c[i] > vw[i] else -1 if d.c[i] < orl and d.c[i] < vw[i] else 0
-        if side == 0:
-            continue
-        level = orh if side > 0 else orl
-        for k in range(i + 1, min(i + 1 + retest_bars, last)):
-            if math.isnan(d.c[k]):
-                continue
-            if d.c[k] < level if side > 0 else d.c[k] > level:
-                return []                                # closed back inside the range: a failed breakout
-            touch = d.l[k] <= level * (1 + tol) if side > 0 else d.h[k] >= level * (1 - tol)
-            if touch and (d.c[k] > vw[k] if side > 0 else d.c[k] < vw[k]):
-                nxt = _first_valid(d.o, k + 1, d.flat_slot)
-                if nxt is None or nxt > last:
-                    return []
-                px = float(d.o[nxt])
-                stop = d.l[k] * (1 - SWEEP_STOP_BUFFER) if side > 0 else d.h[k] * (1 + SWEEP_STOP_BUFFER)
-                risk = abs(px - stop)
-                if not (0.001 <= risk / px <= max_risk):
-                    return []
-                t = _trade(d, side, nxt, px, stop, px + side * rr * risk, priority=d.ctx.get("relvol", 1.0))
-                return [t] if t else []
-        return []                                        # broke out but never came back to retest
-    return []
+    side, nxt, k = fast.orb_retest_setup(d.o, d.h, d.l, d.c, vw, orh, orl, tol,
+                                         retest_bars, OR15_END, last, d.flat_slot)
+    if side == 0:
+        return []                                        # no breakout, a failed one, or no retest in time
+    side, nxt, k = int(side), int(nxt), int(k)
+    px = float(d.o[nxt])
+    stop = d.l[k] * (1 - SWEEP_STOP_BUFFER) if side > 0 else d.h[k] * (1 + SWEEP_STOP_BUFFER)
+    risk = abs(px - stop)
+    if not (0.001 <= risk / px <= max_risk):
+        return []
+    t = _trade(d, side, nxt, px, stop, px + side * rr * risk, priority=d.ctx.get("relvol", 1.0))
+    return [t] if t else []
 
 
 def _check_registered(key: str, p: dict) -> None:

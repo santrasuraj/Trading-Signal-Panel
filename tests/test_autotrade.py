@@ -166,3 +166,83 @@ def test_a_buy_verdict_buys_one_lot_at_the_chains_ask_and_settles_at_expiry(eng,
     (c,) = st["options"]["closed"]
     want = (float(ov.expiry_value(150.0, 65)) - ov.buy_cost(140.0, 65)) * 65
     assert st["options"]["open"] == [] and c["settle"] == 25300.0 and c["pnl_net"] == pytest.approx(want, abs=0.02)
+
+
+# ------------------------------------------------------------------ the speed path: tick bus, live engine, memory state
+def test_a_bus_tick_through_the_stop_closes_at_once_and_is_timed(eng):
+    import time as _t
+    from web.api.services import latency_svc
+    at, w = eng
+    latency_svc.reset()
+    w["signals"] = signals(sig())
+    w["quotes"] = {"SBIN": q(100.3)}
+    at.tick(DAY)
+    assert "SBIN" in at._held                                   # the bus thread's quick check knows the position
+    at.on_tick("INFY", {"price": 1.0, "bus_ts": _t.time()})     # not held: ignored
+    at.on_tick("SBIN", {"price": 99.5, "bus_ts": _t.time(), "exch_ts": None})      # above the 99 stop: nothing
+    assert "SBIN" in at._load()["open"]
+    at.on_tick("SBIN", {"price": 98.9, "bus_ts": _t.time(), "exch_ts": DAY.timestamp()})
+    st = at._load()
+    assert "SBIN" not in st["open"] and st["closed"][-1]["exit_reason"] == "stop" and "SBIN" not in at._held
+    assert {r["name"]: r for r in latency_svc.summary()}["tick_to_exit"]["n"] == 1
+
+
+def test_the_live_engines_signals_win_unless_the_file_has_later_bars(tmp_path, monkeypatch):
+    import json as _json
+    from web.api.paths import P
+    from web.api.services import autotrade_svc as at, livesig_svc
+    monkeypatch.setattr(P, "data", tmp_path)
+    (tmp_path / "results").mkdir()
+    f = {"generated_at": DAY.isoformat(), "bars_to": "2026-11-16T09:55:00", "signals": [sig(t="09:55")]}
+    (tmp_path / "results" / "intraday_signals.json").write_text(_json.dumps(f), encoding="utf-8")
+    live = {"generated_at": DAY.isoformat(), "bars_to": "2026-11-16T10:00:00", "engine": "live", "signals": [sig()]}
+    monkeypatch.setattr(livesig_svc, "latest", lambda: (live, 123.0))
+    assert at._signals(DAY) == (live, 123.0)
+    monkeypatch.setattr(livesig_svc, "latest", lambda: ({**live, "bars_to": "2026-11-16T09:50:00"}, 123.0))
+    got, mtime = at._signals(DAY)
+    assert got["bars_to"] == "2026-11-16T09:55:00" and mtime is not None       # the task's file is newer
+    monkeypatch.setattr(livesig_svc, "latest", lambda: (None, None))
+    assert at._signals(DAY.replace(day=17)) == ({}, None)                      # yesterday's file: nothing today
+
+
+def test_state_stays_in_memory_until_the_file_changes(eng):
+    import json as _json
+    at, w = eng
+    a = at._load()
+    assert at._load() is a                                       # no re-read while the file is unchanged
+    st = _json.loads(at._path().read_text(encoding="utf-8"))
+    st["settings"]["max_positions"] = 7
+    at._path().write_text(_json.dumps(st), encoding="utf-8")     # changed outside this process
+    b = at._load()
+    assert b is not a and b["settings"]["max_positions"] == 7
+
+
+def test_bus_quotes_come_first_then_the_quote_service(monkeypatch):
+    from web.api.services import autotrade_svc as at, quotes_svc, tickbus_svc
+    monkeypatch.setattr(at, "now_ist", lambda: DAY)
+    monkeypatch.setattr(tickbus_svc, "latest", lambda s, max_age_s=5.0: {"price": 812.5, "exch_ts": DAY.timestamp()}
+                        if s == "SBIN" else None)
+    asked = []
+    monkeypatch.setattr(quotes_svc, "quotes", lambda syms, allow_network=True: (
+        asked.append(list(syms)), {"quotes": [{"symbol": s, "price": 1.0, "source": "yahoo"} for s in syms]})[1])
+    out = at._quotes(["SBIN", "INFY"])
+    assert out["SBIN"]["price"] == 812.5 and out["SBIN"]["bus"] and out["SBIN"]["source"] == "live"
+    assert out["SBIN"]["time"] == DAY.isoformat(timespec="seconds") and asked == [["INFY"]]
+
+
+def test_speed_endpoint_and_prometheus_metrics(monkeypatch):
+    from fastapi.testclient import TestClient
+    from web.api.main import create_app
+    from web.api.services import latency_svc
+    latency_svc.reset()
+    for x in (0.002, 0.004, 0.010):
+        latency_svc.record("tick_transport", x)
+    latency_svc.record("tick_age", -0.5)                         # clock skew: never recorded as a latency
+    c = TestClient(create_app(warm=False), base_url="http://127.0.0.1")
+    sp = c.get("/api/autotrade/speed").json()
+    row = {r["name"]: r for r in sp["latency"]}["tick_transport"]
+    assert row["n"] == 3 and row["p50"] == pytest.approx(0.004) and row["max"] == pytest.approx(0.010)
+    assert {r["name"]: r for r in sp["latency"]}["tick_age"]["n"] == 0
+    assert set(sp["bus"]) >= {"available", "connected", "port"} and "numba" in sp["engine"]
+    m = c.get("/api/metrics")
+    assert m.status_code == 200 and "quantdesk_tick_transport_seconds_count 3.0" in m.text

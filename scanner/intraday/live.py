@@ -9,6 +9,9 @@ universe - builds 5-minute bars from the ticks, and every few seconds writes:
   data/intraday/live/orders_feed.json   your FYERS order updates from the order socket (order_feed.py, read-only)
   data/intraday/live/1m_YYYYMMDD.parquet, forming_1m.json   the same ticks as 1-minute bars (1-minute charts)
   data/intraday/live/orderflow_YYYYMMDD.parquet   buyer- / seller-initiated volume per minute and price (orderflow.py)
+and publishes every tick and every write of new bars on the ZeroMQ tick bus (bus.py), so the dashboard's auto-trader
+and live signal engine react within milliseconds instead of polling those files. A flush also lands BAR_SETTLE_S after
+each 5-minute boundary, so the bar that just closed is written ~1 s after the close, not up to FLUSH_SECONDS later.
 At the end of the session the completed bars are merged into the intraday store, so they are kept
 even though FYERS' REST history only covers a rolling year. The intraday scanner reads these files
 for today's setups instead of Yahoo's ~15-minute delayed data, as long as ticks keep arriving.
@@ -31,11 +34,12 @@ from .. import watch
 from ..providers import load_token
 from ..settings import IST, LOG_DIR, ist_now
 from . import data as idata
-from . import order_feed, orderflow, quote_hub
+from . import bus, order_feed, orderflow, quote_hub
 from .fyers_sync import is_trading_day
 
 MAX_SYMBOLS = 100               # FYERS Standard plan WebSocket limit (all connections together)
 FLUSH_SECONDS = 5
+BAR_SETTLE_S = 1.0              # a flush this long after each 5-minute boundary (the closed bar's next ticks are in)
 SETUP_CHECK_S = 120         # live setups on Telegram: checked every 2 minutes
 SESSION_END = (15, 31)
 LOGIN_POLL_SECONDS = 60
@@ -139,6 +143,14 @@ def _token_ok(tok: dict | None) -> bool:
         return False
 
 
+def _sleep_s(now: float, step: int = 300) -> float:
+    """Seconds until the next flush: FLUSH_SECONDS, or sooner so that one lands BAR_SETTLE_S after each 5-minute
+    boundary (epoch and IST 5-minute boundaries coincide: IST is UTC+5:30)."""
+    base = now - now % step
+    nxt = base + BAR_SETTLE_S if now < base + BAR_SETTLE_S else base + step + BAR_SETTLE_S
+    return max(0.05, min(FLUSH_SECONDS, nxt - now))
+
+
 def _session_over() -> bool:
     now = ist_now()
     return (now.hour, now.minute) >= SESSION_END
@@ -181,7 +193,7 @@ def _stop_socket(sock) -> None:
 
 
 def run_live(symbols: list[str], root, interval: str = "5m", log=print, fno: list[dict] | None = None,
-             fno_settings: dict | None = None) -> int:
+             fno_settings: dict | None = None, bus_port: int = bus.DEFAULT_PORT) -> int:
     """Stream ticks for up to 100 symbols until the session ends; returns the number of bars written. `fno`: index
     futures / options to stream too (scanner/fno_live.py) - their large trades are recorded, they make no bars."""
     lock = idata.FileLock(live_dir(root) / LOCK_FILE_NAME)
@@ -190,12 +202,13 @@ def run_live(symbols: list[str], root, interval: str = "5m", log=print, fno: lis
             "(FYERS allows 100 symbols across all connections).")
         return 0
     try:
-        return _run_live(symbols, root, interval, log, fno or [], fno_settings)
+        return _run_live(symbols, root, interval, log, fno or [], fno_settings, bus_port)
     finally:
         lock.release()
 
 
-def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno_settings: dict | None) -> int:
+def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno_settings: dict | None,
+              bus_port: int = bus.DEFAULT_PORT) -> int:
     tok = _wait_for_login(log)
     if tok is None:
         log("The session ended before a valid FYERS login was found - no live bars today.")
@@ -221,13 +234,20 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     fno_rec = FnoRecorder(fno, fno_settings) if fno else None    # large futures / options trades (fno_live.py)
     lock = threading.Lock()
     status = {"live": False, "errors": 0, "ticks": 0, "last_tick": None}
+    pub = bus.open_publisher(bus_port, log)    # ticks / new bars to the dashboard in milliseconds (None = files only)
 
     def on_message(msg):
         if isinstance(msg, dict) and msg.get("ltp") is not None:
+            recv = time.time()
             try:
                 book.on_tick(msg)
             except Exception:                  # a quote glitch must never stop the bars
                 pass
+            if pub is not None:
+                try:
+                    pub.tick_msg(msg, recv, quote_hub.from_ticker(str(msg.get("symbol") or "")))
+                except Exception:              # nor a bus glitch
+                    pass
             if not str(msg.get("symbol") or "").endswith("-EQ") and not (fno_rec is not None and fno_rec.wants(msg.get("symbol"))):
                 with lock:                     # an index (or other non-stock) on the screen: a quote only, no bars
                     status["ticks"] += 1
@@ -292,8 +312,15 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
     feed = order_feed.OrderFeed(live_dir(root))         # your order updates (fills, rejections) pushed by FYERS
 
     def quote_writer() -> None:
-        """quotes.json about twice a second while ticks arrive: the browser's live prices."""
+        """quotes.json about twice a second while ticks arrive: the browser's live prices. Also the bus heartbeat."""
+        beat = 0.0
         while not stop_quotes.wait(quote_hub.WRITE_EVERY_S):
+            if pub is not None and time.monotonic() - beat >= 1.0:
+                beat = time.monotonic()
+                try:
+                    pub.heartbeat()
+                except Exception:
+                    pass
             try:
                 if book.write_if_changed(live_dir(root), idata._replace):
                     _, quotes = book.snapshot()
@@ -326,7 +353,7 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
             log(f"Order updates: could not start the FYERS order socket ({type(e).__name__}: {e})")
         last_setups = 0.0
         while not _session_over():
-            time.sleep(FLUSH_SECONDS)
+            time.sleep(_sleep_s(time.time()))
             if time.monotonic() - last_setups >= SETUP_CHECK_S:     # live setups on Telegram, if switched on
                 last_setups = time.monotonic()
                 try:
@@ -360,6 +387,8 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
                 _write(root, done, forming, _iso(last))     # outside the lock: ticks keep flowing meanwhile
                 written += len(done)
                 write_fails = 0
+                if pub is not None and len(done):
+                    pub.bars("5m", len(done))                # the live signal engine recomputes now
 
             except Exception as e:                           # keep the bars and try again on the next round
                 with lock:
@@ -388,6 +417,8 @@ def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno
                 log(f"Live: writing footprints failed ({type(e).__name__}: {e})")
     finally:
         stop_quotes.set()
+        if pub is not None:
+            pub.close()
         _stop_socket(sock)
         order_feed.stop_socket(osock)
         feed.set_connected(False)

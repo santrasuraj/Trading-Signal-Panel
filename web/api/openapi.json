@@ -6927,6 +6927,26 @@
     }
    }
   },
+  "/api/autotrade/speed": {
+   "get": {
+    "tags": [
+     "autotrade"
+    ],
+    "summary": "Speed",
+    "description": "The live path's latency (P50 / P95 / P99 per step), the ZeroMQ tick bus and the live signal engine.",
+    "operationId": "speed_api_autotrade_speed_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/autotrade/settings": {
    "post": {
     "tags": [

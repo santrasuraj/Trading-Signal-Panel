@@ -192,8 +192,9 @@ def _run(args) -> int:
             if fno:
                 print(f"Live F&O: {len(fno)} futures / options (large trades); {live.MAX_SYMBOLS - len(fno)} stocks",
                       flush=True)
+            from scanner.intraday import bus
             live.run_live(symbols[: live.MAX_SYMBOLS - len(fno)], INTRADAY_DIR, log=lambda m: print(m, flush=True),
-                          fno=fno, fno_settings=fno_live.settings(cfg))
+                          fno=fno, fno_settings=fno_live.settings(cfg), bus_port=bus.port(cfg))
 
     if args.run:
         try:

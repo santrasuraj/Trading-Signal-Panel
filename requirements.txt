@@ -18,3 +18,10 @@ pydantic==2.14.1
 httpx==0.28.1
 # AI analyst (web/api/services/ai_svc.py) - the key goes in .env as ANTHROPIC_API_KEY
 anthropic==2.4.0
+# Speed: compiled intraday bar loops (scanner/intraday/fast.py), the ZeroMQ tick bus from the live feed to the
+# dashboard (scanner/intraday/bus.py) and latency metrics for Prometheus / Grafana (web/api/services/latency_svc.py).
+# All optional at run time: without them the same code runs as plain Python, on the files, without /api/metrics.
+numba==0.68.1
+llvmlite==0.50.0
+pyzmq==27.3.0
+prometheus-client==0.26.0

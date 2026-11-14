@@ -220,6 +220,33 @@ sent to FYERS. Off until you press **Start**; it runs in the dashboard's server,
   engine trades on Yahoo prices ~15 minutes late and says so. True HFT (microseconds, co-located at the exchange) is
   not possible for retail traders; speed multiplies an edge, it doesn't create one.
 
+**The speed path** (with the FYERS live feed running; the **Speed** card on the page shows each part and its
+P50 / P95 / P99):
+- **ZeroMQ tick bus** (`scanner/intraday/bus.py`, pyzmq): the live feed publishes every tick and every write of new
+  bars on `127.0.0.1:5557` (loopback only; `intraday.bus_port` in config.yaml to change it) in a fixed binary layout.
+  The dashboard subscribes: stops and targets of the engine's positions are checked on **every tick** instead of
+  once a second, and quotes for entries are milliseconds old. Without pyzmq or the live feed, everything falls back to
+  the files as before.
+- **Live signal engine** (`scanner/intraday/live_engine.py`, in the dashboard server): the 5-minute task rebuilt
+  everything from scratch each run (~20 s on 151 stocks, then up to 5 minutes until the next run). The engine keeps the
+  earlier sessions in memory, carries each stock's state to today, and on each new bar rebuilds only today: signals
+  about **1 second after a bar closes** (the live feed also flushes 1 s after each 5-minute close). Same
+  `run_intraday_signals` code as the task, so the signals are identical (tests/test_live_engine.py).
+- **Numba** (`scanner/intraday/fast.py`): the bar-by-bar loops of the strategies (stop / target walk, stop entries,
+  VWAP, Supertrend, sweeps, retests) compiled to machine code. On 30 stored sessions the 15 strategies went from
+  10.5 s to 3.3 s with every one of the 1,947 trades identical; the year-long backtest uses it too. Switched on in the
+  dashboard server and the backtest; the short 5-minute task runs the same functions as plain Python (importing Numba
+  would cost it more than it saves).
+- **Latency metrics** (`web/api/services/latency_svc.py`): tick transport, exchange to PC, bar close to signals,
+  signals to fill, strategy decision to fill, tick to exit. Also at `/api/metrics` in Prometheus' format for Grafana
+  (prometheus-client).
+- Not used, on purpose: C++/Rust HFT stacks (NautilusTrader, HftBacktest, Aeron, LMAX Disruptor, QuickFIX, SBE) are
+  for co-located microsecond trading with direct exchange access, which a retail FYERS account doesn't have - FYERS'
+  own round trip is ~0.1-0.5 s. uvloop doesn't run on Windows. Redis / QuestDB would be extra servers to run for
+  state the engine keeps in memory and Parquet already stores. Polars / TA-Lib / QuantLib: after the changes above,
+  pandas is no longer on the hot path, indicators are computed inside the compiled loops, and the option verdicts
+  price from NSE history, not a model.
+
 ### Strategy builder (`g j`)
 Describe a strategy in plain English (Claude turns it into rules; it never says whether they work) or build it from
 the rule editor: entry rules from the scan fields, exits by stop, target, trailing stop, holding days or exit rules,

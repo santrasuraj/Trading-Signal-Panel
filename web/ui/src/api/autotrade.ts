@@ -29,6 +29,18 @@ export interface AutoOption {
   pnl_net?: number; closed_at?: string
 }
 export interface AutoLog { at: string; kind: string; text: string; symbol?: string; strategy?: string }
+/** One step of the live path, in seconds (web/api/services/latency_svc.py). */
+export interface LatencyRow { name: string; label: string; n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null }
+export interface AutoSpeed {
+  latency: LatencyRow[]
+  /** The ZeroMQ tick bus from the live feed (scanner/intraday/bus.py). */
+  bus: { available: boolean; subscribed: boolean; connected: boolean; port: number; ticks: number; bar_events: number; symbols: number }
+  /** The live signal engine in the server (scanner/intraday/live_engine.py); numba = the compiled bar loops. */
+  engine: {
+    running: boolean; numba: boolean | null; numba_warmup_s: number | null; last_trigger: 'bus' | 'file' | null; last_error: string | null
+    day_ready: boolean; runs: number; last_compute_s: number | null; last_day_build_s: number | null; signals_at: string | null; bars_to: string | null
+  }
+}
 export interface AutoView {
   settings: AutoSettings; running: boolean; session: string; feed: 'live' | 'fyers' | 'yahoo' | null
   last_loop: string | null; signals_at: string | null; capital: number; cash: number; equity: number; today_pnl: number
@@ -37,6 +49,9 @@ export interface AutoView {
   options: { open: AutoOption[]; closed: AutoOption[] }
   daily: { on: boolean; strategies: { key: string; name: string; on: boolean; status: string }[]; last_run: unknown }
   log: AutoLog[]; note: string
+  /** Where the signals it trades came from: the live engine (about a second after each bar) or the 5-minute job. */
+  signals_engine: 'live' | 'job' | null
+  speed: AutoSpeed
 }
 
 const KEY = ['autotrade'] as const

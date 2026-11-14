@@ -16,6 +16,11 @@ Every second while the market is open (only while this dashboard's server runs):
     official index close.
   * Daily strategies: the switch turns the practice bot (bot_svc) on for the working strategies (at most 5).
 
+Speed path (when the FYERS live feed runs): ticks arrive over the ZeroMQ tick bus (tickbus_svc), so a held stock's stop
+and target are checked on every tick, not once a second; new 5-minute bars reach the live signal engine (livesig_svc)
+about a second after the close and the engine wakes this loop the moment its signals are ready; the engine's state is
+kept in memory (written to data/autotrade.json on every change). latency_svc records each step's P50 / P95 / P99.
+
 Each trade keeps how fast and how well it was filled: the signal's lag behind the strategy's own entry bar, the
 engine's reaction (signal file written -> filled, in ms), the age of the price it filled on, and the slippage against
 the signal's price. That is the record a backtest can't give: what the strategies earn when they are actually traded.
@@ -24,6 +29,7 @@ microseconds. Speed multiplies an edge - it doesn't create one.
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -33,7 +39,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
-from . import bot_svc, clock, data, quotes_svc, sim_svc
+from . import bot_svc, clock, data, latency_svc, livesig_svc, quotes_svc, sim_svc, tickbus_svc
 from ..errors import ApiException
 from ..paths import P
 from ..util import now_ist, today_ist
@@ -51,6 +57,9 @@ DEFAULTS = {"on": False, "mode": "all", "intraday": True, "oi": True, "options":
 LIMITS = {"max_positions": (1, 50), "max_trades_per_day": (1, 200), "daily_loss_pct": (0.1, 20.0), "max_late_min": (1, 60)}
 _lock = threading.RLock()
 _thread: threading.Thread | None = None
+_wake = threading.Event()             # set when new signals are ready: the loop runs at once instead of within 1 s
+_cache: dict = {"path": None, "mtime": None, "st": None}   # the state in memory (file read only when it changed)
+_held: frozenset = frozenset()       # the engine's open stocks, for the bus thread's quick check (replaced, not mutated)
 
 
 def _path():
@@ -66,19 +75,44 @@ def _blank() -> dict:
             "skipped": {}, "log": [], "day": today_ist().isoformat(), "options": {"open": [], "closed": [], "taken": []}}
 
 
-def _load() -> dict:
+def _mtime(p) -> int | None:
     try:
-        st = json.loads(_path().read_text(encoding="utf-8"))
-        if not isinstance(st, dict):
-            raise ValueError
-    except (OSError, ValueError):
-        st = _blank()
-    for k, v in _blank().items():
-        st.setdefault(k, v)
-    st["settings"] = {**DEFAULTS, **(st.get("settings") or {})}
+        return p.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _load() -> dict:
+    """The engine's state: the in-memory copy while data/autotrade.json is unchanged since this process last wrote or read
+    it (the loop runs every second and on every tick of a held stock), else read from the file. Call under _lock."""
+    p = _path()
+    m = _mtime(p)
+    if _cache["st"] is not None and _cache["path"] == str(p) and _cache["mtime"] == m:
+        st = _cache["st"]
+    else:
+        try:
+            st = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(st, dict):
+                raise ValueError
+        except (OSError, ValueError):
+            st = _blank()
+        for k, v in _blank().items():
+            st.setdefault(k, v)
+        st["settings"] = {**DEFAULTS, **(st.get("settings") or {})}
+        _cache.update(path=str(p), mtime=m, st=st)
     if st.get("day") != today_ist().isoformat():           # a new day: today's dedupe lists start empty
         st.update(day=today_ist().isoformat(), taken=[], skipped={})
     return st
+
+
+def _invalidate() -> None:
+    """After an error half-way through a change: the next _load reads the last saved state again."""
+    _cache.update(path=None, mtime=None, st=None)
+
+
+def _refresh_held(st: dict) -> None:
+    global _held
+    _held = frozenset(st["open"])
 
 
 def _save(st: dict) -> None:
@@ -89,13 +123,16 @@ def _save(st: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(st, default=str), encoding="utf-8")
-    for _ in range(20):                                    # Windows: a reader may hold the file for an instant
+    for i in range(21):                                    # Windows: a reader may hold the file for an instant
         try:
             tmp.replace(p)
-            return
+            break
         except PermissionError:
+            if i == 20:
+                raise
             time.sleep(0.05)
-    tmp.replace(p)
+    _cache.update(path=str(p), mtime=_mtime(p), st=st)
+    _refresh_held(st)
 
 
 def _event(st: dict, now: datetime, kind: str, text: str, **kw) -> dict:
@@ -107,23 +144,44 @@ def _event(st: dict, now: datetime, kind: str, text: str, **kw) -> dict:
 
 # ------------------------------------------------------------------ inputs: signals and quotes
 def _signals(now: datetime) -> tuple[dict, float | None]:
-    """Today's signal file and when it was written (epoch seconds)."""
+    """Today's signals and when they were ready (epoch seconds): the live signal engine's (in memory, about a second
+    after each bar) unless the signal file - the 5-minute task's - has later bars."""
+    day = now.date().isoformat()
     path = P.results / "intraday_signals.json"
     try:
         mtime = path.stat().st_mtime
         f = json.loads(path.read_text(encoding="utf-8"))
+        if str(f.get("generated_at") or "")[:10] != day:
+            f, mtime = {}, None
     except (OSError, ValueError):
-        return {}, None
-    if str(f.get("generated_at") or "")[:10] != now.date().isoformat():
-        return {}, None
+        f, mtime = {}, None
+    live, ready = livesig_svc.latest()
+    if live and str(live.get("generated_at") or "")[:10] == day and \
+            str(live.get("bars_to") or "") >= str(f.get("bars_to") or ""):
+        return live, ready
     return f, mtime
 
 
+def _iso(epoch: float | None) -> str | None:
+    return datetime.fromtimestamp(epoch, now_ist().tzinfo).isoformat(timespec="seconds") if epoch else None
+
+
 def _quotes(syms: list[str]) -> dict[str, dict]:
+    """Live quotes: the tick bus's latest tick (milliseconds old) where it has one, quotes_svc for the rest."""
     if not syms:
         return {}
-    q = quotes_svc.quotes(sorted(set(syms)), allow_network=True)
-    return {x["symbol"]: x for x in q["quotes"]}
+    out, rest = {}, []
+    for s in sorted(set(syms)):
+        b = tickbus_svc.latest(s)
+        if b is not None:
+            out[s] = {"symbol": s, "price": b["price"], "source": "live", "bus": True,
+                      "time": _iso(b.get("exch_ts")) or now_ist().isoformat(timespec="seconds")}
+        else:
+            rest.append(s)
+    if rest:
+        q = quotes_svc.quotes(rest, allow_network=True)
+        out.update({x["symbol"]: x for x in q["quotes"]})
+    return out
 
 
 def _live(q: dict | None) -> float | None:
@@ -284,6 +342,10 @@ def _entries(st: dict, sig: dict, mtime: float | None, quotes: dict, now: dateti
         n_trades = len(st["account"]["trades"])
         o = _order(st, sym, "BUY" if side > 0 else "SELL", qty, px, stop, target)
         filled = time.time()
+        if mtime:
+            latency_svc.record("signal_to_fill", filled - mtime)
+        if bar:
+            latency_svc.record("decision_to_fill", filled - bar.timestamp())
         entry = float(x.get("entry") or px)
         gen = sig.get("generated_at")
         try:
@@ -299,6 +361,8 @@ def _entries(st: dict, sig: dict, mtime: float | None, quotes: dict, now: dateti
                "slippage_bps": round(side * (o["fill_price"] / entry - 1) * 1e4, 1) if entry else None,
                "signal_lag_s": round((gen_dt - bar).total_seconds(), 1) if gen_dt and bar else None,
                "react_ms": round((filled - mtime) * 1000) if mtime else None,
+               "decision_to_fill_s": round(filled - bar.timestamp(), 2) if bar else None,
+               "bus": bool((q or {}).get("bus")),
                "order_ms": round((filled - seen) * 1000, 1), "signal_file_at": gen, "n_trades": n_trades}
         st["open"][sym] = rec
         st["taken"].append(key)
@@ -319,47 +383,93 @@ def _strategy_exits(st: dict, sig: dict, quotes: dict, now: datetime) -> None:
 
 
 def tick(now: datetime | None = None) -> dict:
-    """One pass of the engine (the loop calls it every second; tests call it directly)."""
+    """One pass of the engine (the loop calls it every second and when new signals are ready; tests call it)."""
     now = now or now_ist()
     sess = clock.market_clock()["session"]
     events: list = []
     with _lock:
-        st = _load()
-        s = st["settings"]
-        beat = st.get("last_loop")
-        st["last_loop"] = now.isoformat(timespec="seconds")
-        if st.get("session") != sess or not beat or (now - datetime.fromisoformat(beat)).total_seconds() >= 10:
-            st["_dirty"] = True                            # a heartbeat for the page about every 10 s
-        st["session"] = sess
-        if s["options"] or st["options"]["open"]:
-            _options_pass(st, now, sess, events)
-        if sess != "open":
+        try:
+            st = _load()
+            s = st["settings"]
+            beat = st.get("last_loop")
+            st["last_loop"] = now.isoformat(timespec="seconds")
+            if st.get("session") != sess or not beat or (now - datetime.fromisoformat(beat)).total_seconds() >= 10:
+                st["_dirty"] = True                        # a heartbeat for the page about every 10 s
+            st["session"] = sess
+            if s["options"] or st["options"]["open"]:
+                _options_pass(st, now, sess, events)
+            if sess != "open":
+                if st.get("_dirty"):
+                    _save(st)
+                return {"ran": False, "session": sess, "events": events}
+            sig, mtime = _signals(now) if s["on"] else ({}, None)
+            if st.get("signals_at") != sig.get("generated_at"):
+                st["signals_at"], st["signals_engine"] = sig.get("generated_at"), sig.get("engine")
+                st["_dirty"] = True
+            syms = set(st["account"]["positions"]) | set(st["open"])
+            if s["on"] and (now.hour, now.minute) >= START_AT:
+                syms |= {str(x.get("symbol")) for x in sig.get("signals") or [] if x.get("state") == "open"}
+        except Exception:
+            _invalidate()
+            raise
+    quotes = _quotes(sorted(syms))          # outside the lock: a slow price source never holds up tick-level exits
+    with _lock:
+        try:
+            st = _load()
+            s = st["settings"]
+            srcs = {q.get("source") for q in quotes.values() if q.get("price") is not None}
+            feed = "live" if "live" in srcs else "fyers" if "fyers" in srcs else "yahoo" if "yahoo" in srcs else None
+            if st.get("feed") != feed:
+                st["feed"], st["_dirty"] = feed, True
+            if sim_svc.process(st["account"], quotes, sess):          # stops / targets on this price update
+                st["_dirty"] = True
+            _finalize(st, now, events)
+            if s["on"]:
+                _strategy_exits(st, sig, quotes, now)
+                if (now.hour, now.minute) >= SQUARE_OFF:
+                    for sym in list(st["open"]):
+                        if not st["open"][sym].get("exit_hint"):
+                            _close(st, sym, quotes, "square-off 15:00", now)
+                elif (now.hour, now.minute) >= START_AT:
+                    _entries(st, sig, mtime, quotes, now, events)
+                _finalize(st, now, events)
             if st.get("_dirty"):
                 _save(st)
-            return {"ran": False, "session": sess, "events": events}
-        sig, mtime = _signals(now) if s["on"] else ({}, None)
-        st["signals_at"] = sig.get("generated_at")
-        syms = set(st["account"]["positions"]) | set(st["open"])
-        if s["on"] and (now.hour, now.minute) >= START_AT:
-            syms |= {str(x.get("symbol")) for x in sig.get("signals") or [] if x.get("state") == "open"}
-        quotes = _quotes(sorted(syms))
-        srcs = {q.get("source") for q in quotes.values() if q.get("price") is not None}
-        st["feed"] = "live" if "live" in srcs else "fyers" if "fyers" in srcs else "yahoo" if "yahoo" in srcs else None
-        if sim_svc.process(st["account"], quotes, sess):              # stops / targets on this price update
-            st["_dirty"] = True
-        _finalize(st, now, events)
-        if s["on"]:
-            _strategy_exits(st, sig, quotes, now)
-            if (now.hour, now.minute) >= SQUARE_OFF:
-                for sym in list(st["open"]):
-                    if not st["open"][sym].get("exit_hint"):
-                        _close(st, sym, quotes, "square-off 15:00", now)
-            elif (now.hour, now.minute) >= START_AT:
-                _entries(st, sig, mtime, quotes, now, events)
-            _finalize(st, now, events)
-        if st.get("_dirty"):
-            _save(st)
+            else:
+                _refresh_held(st)
+        except Exception:
+            _invalidate()
+            raise
     return {"ran": True, "session": sess, "events": events}
+
+
+def on_tick(sym: str, q: dict) -> None:
+    """The tick bus, on every tick (bus thread): a stock the engine holds has its stop / target checked on this very
+    price - the practice account's own rules (sim_svc.process) - instead of on the next once-a-second pass."""
+    if sym not in _held:
+        return
+    with _lock:
+        try:
+            st = _load()
+            if st.get("session") != "open" or sym not in st["account"]["positions"]:
+                return
+            quote = {"symbol": sym, "price": q["price"], "source": "live",
+                     "time": _iso(q.get("exch_ts")) or now_ist().isoformat(timespec="seconds")}
+            if not sim_svc.process(st["account"], {sym: quote}, "open"):
+                return
+            closed = sym not in st["account"]["positions"]
+            _finalize(st, now_ist(), [])
+            if closed and q.get("bus_ts"):
+                latency_svc.record("tick_to_exit", time.time() - q["bus_ts"])
+            _save(st)
+        except Exception:
+            _invalidate()
+            raise
+
+
+def wake() -> None:
+    """New signals are ready (the live signal engine): run the next pass now."""
+    _wake.set()
 
 
 # ------------------------------------------------------------------ index options (one lot per BUY verdict)
@@ -439,6 +549,7 @@ def _options_pass(st: dict, now: datetime, sess: str, events: list) -> None:
 # ------------------------------------------------------------------ settings, kill switch, view
 def settings(body: dict) -> dict:
     with _lock:
+        _invalidate()                                      # a settings change always starts from the saved state
         st = _load()
         s = st["settings"]
         for k in ("on", "intraday", "oi", "options", "daily"):
@@ -470,6 +581,7 @@ def stop_all() -> dict:
     """Kill switch: switch the engine off and close every engine position at the live price (market open)."""
     now = now_ist()
     with _lock:
+        _invalidate()
         st = _load()
         st["settings"]["on"] = False
         quotes = _quotes(sorted(st["open"]))
@@ -486,6 +598,7 @@ def stop_all() -> dict:
 def reset() -> dict:
     """A new practice account for the engine (the record of closed trades stays)."""
     with _lock:
+        _invalidate()
         st = _load()
         if st["open"]:
             raise ApiException("VALIDATION", "Close the engine's open positions first (Stop and close all).")
@@ -511,10 +624,15 @@ def _summary(rows: list[dict]) -> dict:
             "quote_age_s": _median([r.get("quote_age_s") for r in rows])}
 
 
+def speed() -> dict:
+    """The live path's latency (P50 / P95 / P99), the tick bus and the live signal engine."""
+    return {"latency": latency_svc.summary(), "bus": tickbus_svc.status(), "engine": livesig_svc.status()}
+
+
 def view() -> dict:
     now = now_ist()
     with _lock:
-        st = _load()
+        st = copy.deepcopy(_load())                        # the loop keeps changing the live copy
     acct = st["account"]
     quotes: dict = {}
     if st["open"] and clock.market_clock()["session"] == "open":
@@ -558,6 +676,7 @@ def view() -> dict:
             "skipped_today": [{"key": k, "why": v} for k, v in list(st["skipped"].items())[-200:]],
             "today": _summary(today), "all_time": _summary(st["closed"]), "record": record,
             "options": {"open": st["options"]["open"], "closed": list(reversed(st["options"]["closed"]))[:100]},
+            "signals_engine": st.get("signals_engine"), "speed": speed(),
             "daily": daily, "log": list(reversed(st["log"]))[:150], "note": __doc__.split("\n\n")[0].replace("\n", " ")}
 
 
@@ -566,21 +685,28 @@ def _loop() -> None:
     while True:
         t0 = time.monotonic()
         try:
-            st = _load()
-            s = st["settings"]
-            if s["on"] or st["open"]:
+            with _lock:
+                st = _load()
+                s = st["settings"]
+                busy = s["on"] or bool(st["open"])
+                options = s["options"] or bool(st["options"]["open"])
+            if busy:
                 tick()                                     # every second: entries, stops, targets, exits
-            elif (s["options"] or st["options"]["open"]) and t0 - idle_at >= OPTIONS_EVERY_S:
+                latency_svc.record("engine_pass", time.monotonic() - t0)
+            elif options and t0 - idle_at >= OPTIONS_EVERY_S:
                 idle_at = t0
                 tick()                                     # off: only the option book, once a minute
         except Exception:                                  # never let the loop die
             pass
-        time.sleep(max(0.05, LOOP_S - (time.monotonic() - t0)))
+        _wake.wait(max(0.05, LOOP_S - (time.monotonic() - t0)))   # new signals cut the wait short
+        _wake.clear()
 
 
 def start() -> None:
     """Start the once-a-second engine in this server (idempotent)."""
     global _thread
+    tickbus_svc.on_tick(on_tick)                           # stops / targets on every tick of a held stock
+    livesig_svc.on_signals(lambda _out: wake())            # new signals: trade them now
     if _thread and _thread.is_alive():
         return
     _thread = threading.Thread(target=_loop, name="autotrade", daemon=True)

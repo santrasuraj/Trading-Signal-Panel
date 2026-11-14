@@ -3,10 +3,12 @@
 // index option BUY verdicts (one lot) and - through the practice bot - the daily strategies; stops and targets act on
 // every price update. Each trade records its speed (signal lag, reaction in ms, price age) and slippage, so the page
 // shows what the strategies earn when actually traded. Nothing is ever sent to FYERS.
+// The Speed card shows the live path: the ZeroMQ tick bus, the live signal engine (Numba-compiled bar loops) and the
+// P50 / P95 / P99 of each step (also at /api/metrics for Prometheus / Grafana).
 
 import { Link } from 'react-router-dom'
 import { Gauge, OctagonX, RotateCcw, Zap } from 'lucide-react'
-import { useAutoTrade, useAutoTradeActions, type AutoPosition, type AutoRecordRow, type AutoSettings, type AutoTrade } from '@/api/autotrade'
+import { useAutoTrade, useAutoTradeActions, type AutoPosition, type AutoRecordRow, type AutoSettings, type AutoSpeed, type AutoTrade, type LatencyRow } from '@/api/autotrade'
 import { DataTable, type Col } from '@/components/DataTable'
 import { ProofBadge } from '@/components/badges'
 import { KpiTile, PageHeader } from '@/components/domain'
@@ -60,6 +62,36 @@ const REC_COLS: Col<AutoRecordRow>[] = [
   { id: 'ch', header: 'Charges ₹', align: 'right', value: (r) => r.charges, cell: (r) => <Money v={r.charges} /> },
   { id: 'net', header: 'Net P&L ₹', align: 'right', value: (r) => r.pnl_net, mobile: 'value', cell: (r) => <Money v={r.pnl_net} signed color /> },
 ]
+
+/** Seconds as µs / ms / s, whichever reads best. */
+const dur = (s: number | null) =>
+  s == null ? '—' : s < 0.001 ? `${num(s * 1e6, 0)} µs` : s < 1 ? `${num(s * 1000, s < 0.01 ? 2 : 0)} ms` : `${num(s, s < 10 ? 2 : 1)} s`
+
+const LAT_COLS: Col<LatencyRow>[] = [
+  { id: 'step', header: 'Step', value: (r) => r.label, sticky: true, mobile: 'primary', cell: (r) => <span className={r.n ? 'font-medium' : 'text-muted'}>{r.label}</span> },
+  { id: 'n', header: 'Samples', align: 'right', value: (r) => r.n, cell: (r) => <span className="num text-muted">{r.n}</span> },
+  { id: 'p50', header: 'P50', align: 'right', value: (r) => r.p50, mobile: 'value', cell: (r) => <span className="num">{dur(r.p50)}</span> },
+  { id: 'p95', header: 'P95', align: 'right', value: (r) => r.p95, cell: (r) => <span className="num">{dur(r.p95)}</span> },
+  { id: 'p99', header: 'P99', align: 'right', value: (r) => r.p99, cell: (r) => <span className="num">{dur(r.p99)}</span> },
+  { id: 'max', header: 'Max', align: 'right', value: (r) => r.max, cell: (r) => <span className="num text-muted">{dur(r.max)}</span> },
+]
+
+function Speed({ sp }: { sp: AutoSpeed }) {
+  const bus = !sp.bus.available ? ['not installed (pyzmq)', 'text-muted'] : sp.bus.connected ? [`connected · ${sp.bus.symbols} symbols`, 'text-profit'] : ['waiting for the live feed', 'text-warn']
+  const e = sp.engine
+  const eng = e.last_error ? [`error: ${e.last_error}`, 'text-loss'] : e.runs ? [`${e.runs} runs · last ${dur(e.last_compute_s)}`, 'text-profit'] : [e.day_ready ? 'ready, waiting for live bars' : 'waiting for the FYERS live feed', 'text-muted']
+  return (
+    <>
+      <div className="mb-2 grid gap-1 text-[13px] sm:grid-cols-3">
+        <div><span className="text-muted">Tick bus (ZeroMQ): </span><span className={bus[1]}>{bus[0]}</span></div>
+        <div><span className="text-muted">Live signal engine: </span><span className={eng[1]}>{eng[0]}</span></div>
+        <div><span className="text-muted">Compiled bar loops (Numba): </span><span className={e.numba ? 'text-profit' : 'text-muted'}>{e.numba == null ? 'starting' : e.numba ? `on${e.numba_warmup_s != null ? ` (ready in ${num(e.numba_warmup_s, 1)} s)` : ''}` : 'off'}</span></div>
+      </div>
+      <DataTable id="autotrade.speed" data={sp.latency} columns={LAT_COLS} rowKey={(r) => r.name} exportName="autotrade-speed" />
+      <p className="mt-2 text-2xs text-muted">Measured in this server since it started. The same numbers are at <a className="link" href="/api/metrics" target="_blank" rel="noreferrer">/api/metrics</a> for Prometheus / Grafana. Exchange to your PC uses the exchange's whole-second time stamps and your PC clock: read it as ±1 s.</p>
+    </>
+  )
+}
 
 function Settings({ s, busy, onSave }: { s: AutoSettings; busy: boolean; onSave: (p: Partial<AutoSettings>) => void }) {
   const numIn = (k: keyof AutoSettings, label: string, hint: string, step = 1) => (
@@ -121,15 +153,19 @@ export default function AutoTradePage() {
         <KpiTile label="Today" value={<Money v={d.today_pnl} signed color />} sub={`${d.today.trades} closed · ${d.positions.length} open`} />
         <KpiTile label="Equity" value={<Money compact v={d.equity} />} sub={`cash ${money(d.cash)}`} />
         <KpiTile label="Median slippage" value={bps(d.all_time.slippage_bps)} sub={`${d.all_time.trades} trades in all`} title="Fill vs the signal's price: the cost of being late" />
-        <KpiTile label="Median reaction" value={d.all_time.react_ms == null ? '—' : `${num(d.all_time.react_ms, 0)} ms`} sub={d.all_time.signal_lag_s == null ? 'signal lag —' : `signal lag ${num(d.all_time.signal_lag_s, 0)} s`} title="Reaction: signal file written -> filled. Signal lag: the 5-minute signal job vs the strategy's own entry bar" />
+        <KpiTile label="Median reaction" value={d.all_time.react_ms == null ? '—' : `${num(d.all_time.react_ms, 0)} ms`} sub={d.all_time.signal_lag_s == null ? 'signal lag —' : `signal lag ${num(d.all_time.signal_lag_s, 0)} s`} title="Reaction: signals ready -> filled. Signal lag: the signals vs the strategy's own entry bar (about a second with the live engine, minutes with the 5-minute job)" />
       </div>
 
-      <Card title="What it trades" subtitle={d.signals_at ? `Signals updated ${dateTimeIST(d.signals_at)}` : 'Signals: none today yet (the 5-minute job runs 09:20-15:05)'}>
+      <Card title="What it trades" subtitle={d.signals_at ? `Signals updated ${dateTimeIST(d.signals_at)} by the ${d.signals_engine === 'live' ? 'live engine (about a second after each bar)' : '5-minute job'}` : 'Signals: none today yet (live engine with the FYERS feed, else the 5-minute job 09:20-15:05)'}>
         <Settings s={s} busy={busy} onSave={(p) => save.mutate(p)} />
         {s.daily && d.daily.strategies.length > 0 && <p className="mt-2 text-2xs text-muted">Practice bot running for: {d.daily.strategies.map((x) => x.name).join(', ')} · <Link to="/bot" className="link">its own page</Link></p>}
       </Card>
 
-      <Card title="Open positions" subtitle="Stops and targets act on every price update; everything is squared off at 15:00" flush>
+      <Card title="Speed" subtitle="How long each step of the live path takes (P50 = typical, P99 = 1 in 100 slower)">
+        <Speed sp={d.speed} />
+      </Card>
+
+      <Card title="Open positions" subtitle="Stops and targets act on every tick (tick bus), else every second; everything is squared off at 15:00" flush>
         {d.positions.length === 0 ? <EmptyState compact title={s.on ? 'No open position.' : 'The engine is off.'} />
           : <DataTable id="autotrade.positions" data={d.positions} columns={POS_COLS} rowKey={(r) => r.symbol} exportName="autotrade-positions" />}
       </Card>

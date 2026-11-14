@@ -28,6 +28,8 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
+from . import fast
+
 BAR_MIN = 5
 SLOTS = 75                         # 09:15 .. 15:25 bar starts
 
@@ -89,20 +91,27 @@ class Day:
     results_day: bool = False    # results announced today or after yesterday's close
     ctx: dict = field(default_factory=dict)   # per-strategy extras (rolling stats from earlier days)
 
+    def __post_init__(self):
+        # the compiled bar loops (fast.py) take float64 arrays: converted once here, not on every call
+        for k in ("o", "h", "l", "c", "v"):
+            a = getattr(self, k)
+            if not (isinstance(a, np.ndarray) and a.dtype == np.float64):
+                setattr(self, k, np.asarray(a, dtype=np.float64))
+
     @property
     def flat_slot(self) -> int:
         return FLAT_FNO if self.is_fno else FLAT_OTHER
 
     def vwap(self) -> np.ndarray:
-        tp = (self.h + self.l + self.c) / 3
-        v = np.nan_to_num(self.v)
-        # one VWAP for every source: from 09:20, seeded by the 09:15 typical price (Yahoo history has no 09:15 volume)
-        v[0] = 0.0
-        pv = np.nancumsum(np.nan_to_num(tp) * v)
-        cv = np.cumsum(v)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            out = np.where(cv > 0, pv / cv, np.nan)
-        return np.where(np.isnan(out), tp, out)   # no volume yet (the 09:15 bar): use its typical price
+        """Session VWAP per slot: from 09:20, seeded by the 09:15 typical price (Yahoo history has no 09:15 volume), the
+        typical price where there is no volume yet - one VWAP for every source. Computed once per Day (several
+        strategies use it) by the compiled kernel (fast.py) and handed out read-only, so no caller can change it."""
+        vw = self.__dict__.get("_vwap")
+        if vw is None:
+            vw = fast.vwap(self.h, self.l, self.c, self.v)
+            vw.flags.writeable = False
+            self.__dict__["_vwap"] = vw
+        return vw
 
 
 @dataclass
@@ -125,45 +134,30 @@ class Trade:
     gross_pct: float = 0.0       # % from entry_px to exit_px, before slippage and charges
 
 
+def _px(x) -> float:
+    return math.nan if x is None else float(x)
+
+
 def walk_exit(d: Day, side: int, entry_slot: int, stop: float | None, target: float | None,
               exit_slot: int | None = None, check_entry_bar: bool = True) -> tuple[int, float, str]:
     """Walk bars after entry until stop / target / time exit / forced flat. Returns (slot, price, reason).
-    Stop wins when stop and target are both inside the same bar (conservative)."""
+    Stop wins when stop and target are both inside the same bar (conservative). The bar loop is fast.walk_exit."""
     last = min(exit_slot if exit_slot is not None else d.flat_slot, d.flat_slot)
     start = entry_slot if check_entry_bar else entry_slot + 1
-    for i in range(start, last):
-        if math.isnan(d.l[i]):
-            continue
-        o = d.o[i]
-        if stop is not None:
-            if side > 0 and d.l[i] <= stop:
-                return i, (min(o, stop) if i > entry_slot else stop), "stop"
-            if side < 0 and d.h[i] >= stop:
-                return i, (max(o, stop) if i > entry_slot else stop), "stop"
-        if target is not None and i > entry_slot:   # never take profit inside the entry bar
-            if side > 0 and d.h[i] >= target:
-                return i, max(o, target), "target"
-            if side < 0 and d.l[i] <= target:
-                return i, min(o, target), "target"
-    reason = "time" if exit_slot is not None and exit_slot < d.flat_slot else "square-off"
-    if last < SLOTS and not math.isnan(d.o[last]):
-        return last, d.o[last], reason
-    for j in range(last - 1, entry_slot - 1, -1):   # bar missing: latest earlier close
-        if not math.isnan(d.c[j]):
-            return j, d.c[j], reason
-    return entry_slot, d.c[entry_slot], reason
+    i, px, code = fast.walk_exit(d.o, d.h, d.l, d.c, int(side), int(entry_slot), _px(stop), _px(target), int(last),
+                                 int(start), SLOTS)
+    if code == fast.STOP:
+        return int(i), px, "stop"
+    if code == fast.TARGET:
+        return int(i), px, "target"
+    return int(i), px, ("time" if exit_slot is not None and exit_slot < d.flat_slot else "square-off")
 
 
 def stop_entry(d: Day, side: int, level: float, start: int, end: int) -> tuple[int, float] | None:
     """First bar in [start, end) whose range crosses `level` (buy-stop above / sell-stop below)."""
-    for i in range(start, min(end, d.flat_slot)):
-        if math.isnan(d.h[i]):
-            continue
-        if side > 0 and d.h[i] >= level:
-            return i, max(d.o[i], level)
-        if side < 0 and d.l[i] <= level:
-            return i, min(d.o[i], level)
-    return None
+    i, px = fast.stop_entry(d.o, d.h, d.l, int(side), float(level), int(start),
+                            int(min(end, d.flat_slot)))
+    return None if i < 0 else (int(i), px)
 
 
 @dataclass

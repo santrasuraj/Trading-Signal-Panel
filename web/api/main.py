@@ -85,9 +85,11 @@ def create_app(warm: bool = True) -> FastAPI:
     async def lifespan(_app):
         if warm:
             threading.Thread(target=warm_up, args=(_app,), name="warm-up", daemon=True).start()
-            from .services import autotrade_svc, bot_svc
+            from .services import autotrade_svc, bot_svc, livesig_svc, tickbus_svc
             bot_svc.start()                       # the practice bot's once-a-minute check (practice account only)
-            autotrade_svc.start()                 # the high-speed auto-trader's once-a-second loop (practice only)
+            tickbus_svc.start()                   # the live feed's ticks and new bars over ZeroMQ (if pyzmq is installed)
+            livesig_svc.start()                   # live signals ~1 s after each 5-minute bar; compiles the Numba kernels
+            autotrade_svc.start()                 # the high-speed auto-trader's loop (practice only)
         yield
 
     app = FastAPI(title="Quant Desk API", version=system.VERSION, docs_url="/api/docs", redoc_url=None,

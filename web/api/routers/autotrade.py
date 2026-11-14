@@ -4,11 +4,12 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import Field
 
 from ..errors import SafeJSONResponse
 from ..models import Model
-from ..services import autotrade_svc
+from ..services import autotrade_svc, latency_svc
 
 router = APIRouter(prefix="/api", tags=["autotrade"])
 
@@ -30,6 +31,23 @@ class AutoSettings(Model):
 def view():
     """Files only: the engine's settings, positions, today's trades, its speed and its record."""
     return autotrade_svc.view()
+
+
+@router.get("/autotrade/speed", response_model=None, response_class=SafeJSONResponse)
+def speed():
+    """The live path's latency (P50 / P95 / P99 per step), the ZeroMQ tick bus and the live signal engine."""
+    return autotrade_svc.speed()
+
+
+@router.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
+def metrics():
+    """The same latencies in Prometheus' text format, for Grafana or any scraper (needs prometheus-client)."""
+    out = latency_svc.prometheus_text()
+    if out is None:
+        return PlainTextResponse("prometheus-client is not installed (pip install -r requirements.txt)",
+                                 status_code=503)
+    body, ctype = out
+    return Response(body, media_type=ctype)
 
 
 @router.post("/autotrade/settings", response_model=None, response_class=SafeJSONResponse)
