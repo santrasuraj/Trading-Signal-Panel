@@ -226,7 +226,9 @@ class OptVerdict(Model):
     exit: OvExit | None = None
     edge_min_pct: float
     prob_min_pct: float
-    cost_pct: float
+    cost_pct: float                               # the buy order's charges as a % of the ATM premium
+    lot: int | None = None                        # contract size from NSE's F&O bhavcopy
+    charges_basis: Literal["exact", "estimate"] = "estimate"   # exact = official rates on the real lot size
     track: OvTrack
     note: str
 

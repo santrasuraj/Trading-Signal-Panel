@@ -405,8 +405,10 @@ def _verdict(full: dict, daily: pd.DataFrame, stu: dict | None, codes: dict, lt:
         m = _index_match(sym, daily) or m     # an index: its own history, not a study measured on stocks
     sup = next((x["price"] for x in scen["below"] if x["kind"] in ("support", "sma", "low_52w")), None)
     res = next((x["price"] for x in scen["above"] if x["kind"] in ("resistance", "sma", "high_52w")), None)
+    from . import options_svc
+    lot = options_svc._lot(str(full.get("symbol") or "")) if full.get("symbol") else None   # exact charges need it
     v = ov.assess(full, daily["close"], m, st.all_strategies(lt) if lt else [], sym, last_day=last_day,
-                  results_on=results_on, support=sup, resistance=res)
+                  results_on=results_on, support=sup, resistance=res, lot=lot)
     closes = data.store_close()
     rows = ov.score(_read(P.results / ov.JOURNAL_FILE.name, []), {c: closes[c] for c in closes.columns})
     return {**v, "track": ov.track(rows)}

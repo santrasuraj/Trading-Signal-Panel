@@ -4,7 +4,7 @@
 
 # Your account - used to size positions (how many shares to buy).
 account:
-  capital: 500000            # rupees you plan to invest with these strategies
+  capital: 500000            # your real trading capital in rupees (confirmed by you, 14 Nov 2026)
   min_position: 15000        # skip buys smaller than this (fixed Rs 20 + Rs 14.75 charges hurt tiny orders)
 
 # auto  = Fyers real-time live prices when logged in, otherwise Yahoo (~15 min delayed)
@@ -185,7 +185,8 @@ intraday:
     stamp_buy_pct: 0.003
     slippage_large_pct: 0.03 # Nifty 50 stocks, per side
     slippage_other_pct: 0.07 # other F&O stocks, per side
-    tax_pct: 31.2            # intraday profit = speculative business income at YOUR slab rate (set yours)
+    tax_pct: 0               # intraday profit = speculative business income at your slab rate: 0 = total income below
+                             # the taxable limit (your slab, confirmed 14 Nov 2026); 31.2 = the 30% slab + cess
 
 # Option chains (Quant Desk › Options): NSE's public option chain, stored every `interval_seconds` in market hours
 # by the 09:12 scheduled task (intraday_sync.py --options) - open interest, PCR, max pain, implied volatility,

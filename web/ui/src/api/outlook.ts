@@ -68,7 +68,8 @@ export interface OptVerdict {
   direction: { bias: 'bullish' | 'bearish' | 'none'; reasons: string[] }
   pick: OvCandidate | null; calls: OvCandidate[]; puts: OvCandidate[]; checks: OvCheck[]
   exit: { stop_underlying: number | null; target_underlying: number | null; note: string } | null
-  edge_min_pct: number; prob_min_pct: number; cost_pct: number; track: OvTrack; note: string
+  edge_min_pct: number; prob_min_pct: number; cost_pct: number; lot: number | null; charges_basis: 'exact' | 'estimate'
+  track: OvTrack; note: string
 }
 export interface OlDerivatives { fno: boolean; options_symbol: string | null; chain: OlChain | null; futures: OlFutures | null; verdict: OptVerdict | null }
 export interface BmPledge {

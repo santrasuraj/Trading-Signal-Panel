@@ -49,6 +49,31 @@ def test_journal_keeps_the_headline_and_the_direction(tmp_path, monkeypatch):
     assert row["headline"].startswith("No options edge") and row["bias"] == "none" and row["symbol"] == "FINNIFTY"
 
 
+# ---- exact option charges -------------------------------------------------------------------------------------------
+def test_exact_buy_cost_from_the_official_rates_and_the_lot_size():
+    # NIFTY ATM call at Rs 137.75, lot 65: premium + 0.03503% NSE + 0.0001% SEBI (both + 18% GST) + 0.003% stamp
+    # + Rs 20 brokerage + 18% GST spread over 65 units
+    want = 137.75 * (1 + (0.03503 + 0.0001) / 100 * 1.18 + 0.003 / 100) + 20 * 1.18 / 65
+    assert ov.buy_cost(137.75, 65) == pytest.approx(want)
+    assert (ov.buy_cost(137.75, 65) / 137.75 - 1) * 100 == pytest.approx(0.31, abs=0.01)    # not the old 3% guess
+    assert ov.buy_cost(137.75, None) == pytest.approx(137.75 * 1.03)                        # no lot: the estimate
+
+
+def test_expiry_value_charges_only_an_option_that_finishes_in_the_money():
+    pay = np.array([0.0, 100.0])
+    got = ov.expiry_value(pay, 65)
+    assert got[0] == 0.0                                                                     # expires worthless: no charges
+    assert got[1] == pytest.approx(100 * (1 - 0.00125) - 20 * 1.18 / 65)                     # exercise STT + brokerage
+
+
+def test_breakeven_and_return_include_the_exercise_charges():
+    cost = ov.buy_cost(137.75, 65)
+    be = ov._breakeven("ce", 25150.0, cost, 65)
+    assert float(ov.expiry_value(be - 25150.0, 65)) == pytest.approx(cost)                  # pays back exactly at breakeven
+    assert ov._payoff("ce", 25150.0, 137.75, be, 65) == pytest.approx(0.0, abs=1e-9)
+    assert ov._payoff("ce", 25150.0, 137.75, 25000.0, 65) == pytest.approx(-100.0)          # worthless: lose it all
+
+
 def test_index_options_endpoint_lists_each_index_with_its_latest_verdict(monkeypatch):
     from web.api.services import data, options_svc as svc
     refs = [{"symbol": "NIFTY", "expiry": "2026-11-17", "day": "2026-11-13"},

@@ -21053,6 +21053,26 @@
       "type": "number",
       "title": "Cost Pct"
      },
+     "lot": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lot"
+     },
+     "charges_basis": {
+      "type": "string",
+      "enum": [
+       "exact",
+       "estimate"
+      ],
+      "title": "Charges Basis",
+      "default": "estimate"
+     },
      "track": {
       "$ref": "#/components/schemas/OvTrack"
      },
@@ -21085,6 +21105,8 @@
      "edge_min_pct",
      "prob_min_pct",
      "cost_pct",
+     "lot",
+     "charges_basis",
      "track",
      "note"
     ],

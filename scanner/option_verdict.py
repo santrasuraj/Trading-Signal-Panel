@@ -34,8 +34,15 @@ PROB_MIN_PCT = 35.0          # at least a 35% chance of ending above the breakev
 SPREAD_MAX_PCT = 10.0        # bid-ask spread at most 10% of the mid price
 OI_MIN = 200                 # open interest of at least 200 contracts
 DAYS_MIN = 2.0               # at least two calendar days to expiry (expiry-day options are lottery tickets)
-COST_PCT = 3.0               # brokerage (Rs 20 x 2 per lot), exchange, SEBI, stamp and GST: ~3% of a typical premium
-EXERCISE_STT_PCT = 0.125     # STT on the settlement value of an option held to expiry in the money
+COST_PCT = 3.0               # fallback ONLY when the lot size is unknown (no F&O file yet): ~3% of a typical premium
+EXERCISE_STT_PCT = 0.125     # STT on the intrinsic value of an option held to expiry in the money
+# Exact charges of an option bought and held to expiry, from the official rates (NSE / SEBI circulars, Oct 2024) and
+# FYERS' brokerage; the lot size comes from NSE's F&O bhavcopy. Update these if NSE, SEBI or FYERS change them.
+BROKERAGE_RS = 20.0          # per executed order: the buy, and the automatic exercise of an in-the-money option
+EXCHANGE_PCT = 0.03503       # NSE transaction charge on option premium turnover
+SEBI_PCT = 0.0001            # SEBI turnover fee (Rs 10 per crore)
+STAMP_BUY_PCT = 0.003        # stamp duty on the buy side
+GST_PCT = 18.0               # on brokerage, the exchange charge and the SEBI fee
 STRIKES_OUT = 2
 STORE_SYMBOL = {"NIFTY": "NIFTY50"}      # option underlying -> the price-store column that settles it
 # index underlyings -> their column in NSE's daily index file (data/nse/index_history.parquet, kept by the scan since
@@ -126,7 +133,42 @@ def direction(match: dict | None, n: int, strategies: list[dict], symbol: str) -
     return {"bias": bias, "reasons": reasons, "drift_log": drift, "horizon": horizon}
 
 
-def _candidates(c: dict, side: str, mv: np.ndarray, spot: float) -> list[dict]:
+def buy_cost(prem: float, lot: int | None) -> float:
+    """Rupees per unit to buy one option at `prem`: the premium plus the buy order's charges (exact with the lot size;
+    without it, the COST_PCT estimate)."""
+    if not lot:
+        return prem * (1 + COST_PCT / 100)
+    g = 1 + GST_PCT / 100
+    return prem * (1 + (EXCHANGE_PCT + SEBI_PCT) / 100 * g + STAMP_BUY_PCT / 100) + BROKERAGE_RS * g / lot
+
+
+def expiry_value(pay, lot: int | None):
+    """Rupees per unit received at expiry from intrinsic value `pay` (array or number): minus the exercise STT and, for
+    an in-the-money option with a known lot, the exercise order's brokerage; an expired worthless option pays nothing."""
+    net = np.asarray(pay, dtype=float) * (1 - EXERCISE_STT_PCT / 100)
+    if lot:
+        net = np.where(np.asarray(pay) > 0, net - BROKERAGE_RS * (1 + GST_PCT / 100) / lot, 0.0)
+    return net
+
+
+def _breakeven(side: str, k: float, cost: float, lot: int | None) -> float:
+    """The expiry price at which the option pays back its cost after the exercise charges."""
+    fixed = BROKERAGE_RS * (1 + GST_PCT / 100) / lot if lot else 0.0
+    need = (cost + fixed) / (1 - EXERCISE_STT_PCT / 100)
+    return k + need if side == "ce" else k - need
+
+
+def lot_sizes() -> dict[str, int]:
+    """Contract size per F&O symbol from NSE's newest stored F&O bhavcopy (empty before the first F&O fetch)."""
+    try:
+        from . import fno
+        _, day = fno.day_futures(fno.load_futures())
+        return {str(s): int(v) for s, v in zip(day["symbol"], day["lot"]) if pd.notna(v) and v > 0}
+    except Exception:
+        return {}
+
+
+def _candidates(c: dict, side: str, mv: np.ndarray, spot: float, lot: int | None = None) -> list[dict]:
     rows = [r for r in c.get("rows") or [] if r.get("strike") is not None]
     if not rows or not len(mv):
         return []
@@ -145,10 +187,10 @@ def _candidates(c: dict, side: str, mv: np.ndarray, spot: float) -> list[dict]:
         if not prem or prem <= 0:
             continue
         pay = np.maximum(st - k, 0) if side == "ce" else np.maximum(k - st, 0)
-        net = pay * (1 - EXERCISE_STT_PCT / 100)
-        cost = prem * (1 + COST_PCT / 100)
+        net = expiry_value(pay, lot)
+        cost = buy_cost(prem, lot)
         fair = float(net.mean())
-        be = k + cost if side == "ce" else k - cost
+        be = _breakeven(side, k, cost, lot)
         spread = (ask - bid) / ((ask + bid) / 2) * 100 if quoted else None
         fails = []
         edge = (fair / cost - 1) * 100
@@ -173,10 +215,23 @@ def _candidates(c: dict, side: str, mv: np.ndarray, spot: float) -> list[dict]:
     return out
 
 
+def _effective_cost_pct(c: dict, lot: int | None) -> float:
+    """The buy order's charges as a % of the at-the-money premium (what the page quotes); COST_PCT without a lot."""
+    if not lot:
+        return COST_PCT
+    atm = next((r for r in c.get("rows") or [] if r.get("atm")), None)
+    prems = [x for x in ((atm or {}).get("ce", {}).get("ltp"), (atm or {}).get("pe", {}).get("ltp")) if x and x > 0]
+    if not prems:
+        return COST_PCT
+    p = float(np.mean(prems))
+    return round((buy_cost(p, lot) / p - 1) * 100, 2)
+
+
 def assess(c: dict, close: pd.Series, match: dict | None, strategies: list[dict], symbol: str, *,
            last_day: str, results_on: str | None = None, support: float | None = None,
-           resistance: float | None = None) -> dict:
-    """The verdict for one stored chain `c` (scanner.options.analyze output) of the store symbol `symbol`."""
+           resistance: float | None = None, lot: int | None = None) -> dict:
+    """The verdict for one stored chain `c` (scanner.options.analyze output) of the store symbol `symbol`. `lot`: the
+    contract size (NSE's F&O bhavcopy) for exact charges; None = the COST_PCT estimate."""
     spot = c.get("spot")
     days = float(c.get("days_to_expiry") or 0)
     n = trading_days(days)
@@ -189,7 +244,8 @@ def assess(c: dict, close: pd.Series, match: dict | None, strategies: list[dict]
             "hv252_pct": _r(v["hv252_pct"], 1), "vol_used_pct": _r(v["used_pct"], 1),
             "iv_vs_hv": _r(iv / v["used_pct"], 2) if iv and v["used_pct"] else None,
             "direction": {"bias": d["bias"], "reasons": d["reasons"]}, "edge_min_pct": EDGE_MIN_PCT,
-            "prob_min_pct": PROB_MIN_PCT, "cost_pct": COST_PCT, "note": NOTE}
+            "prob_min_pct": PROB_MIN_PCT, "cost_pct": _effective_cost_pct(c, lot), "lot": lot,
+            "charges_basis": "exact" if lot else "estimate", "note": NOTE}
     old = str(c.get("time", ""))[:10] < last_day
     checks.append({"name": "Current option chain", "ok": not old,
                    "detail": f"stored {str(c.get('time', ''))[:16].replace('T', ' ')}" + (" - before the last price bar: refresh it" if old else "")})
@@ -197,7 +253,7 @@ def assess(c: dict, close: pd.Series, match: dict | None, strategies: list[dict]
     checks.append({"name": "Tested direction", "ok": d["bias"] != "none",
                    "detail": d["bias"] if d["bias"] != "none" else "none of the tested sources points one way"})
     mv = moves(close, n, v["used_pct"] or 0, d["drift_log"]) if spot else np.array([])
-    calls, puts = _candidates(c, "ce", mv, spot), _candidates(c, "pe", mv, spot)
+    calls, puts = _candidates(c, "ce", mv, spot, lot), _candidates(c, "pe", mv, spot, lot)
     if results_on and last_day <= results_on <= str(c.get("expiry")):
         checks.append({"name": "No results before expiry", "ok": False,
                        "detail": f"results on {results_on}: implied volatility usually drops right after them"})
@@ -255,7 +311,7 @@ def record(verdicts: list[dict], day: str) -> int:
         rows[rid] = {"id": rid, "day": day, "recorded_at": ist_now().isoformat(timespec="seconds"),
                      "symbol": v["symbol"], "store_symbol": v.get("store_symbol"), "expiry": v["expiry"],
                      "spot": v.get("spot"), "verdict": v["verdict"], "headline": v.get("headline"),
-                     "bias": (v.get("direction") or {}).get("bias"),
+                     "bias": (v.get("direction") or {}).get("bias"), "lot": v.get("lot"),
                      "side": (v.get("pick") or {}).get("side"), "strike": (v.get("pick") or {}).get("strike"),
                      "premium": (v.get("pick") or {}).get("premium"), "breakeven": (v.get("pick") or {}).get("breakeven"),
                      "atm_call": {"strike": kc, "premium": pc}, "atm_put": {"strike": kp, "premium": pp}}
@@ -267,11 +323,13 @@ def record(verdicts: list[dict], day: str) -> int:
     return len(verdicts)
 
 
-def _payoff(side: str | None, k, prem, s_exp) -> float | None:
+def _payoff(side: str | None, k, prem, s_exp, lot: int | None = None) -> float | None:
+    """% return of buying at `prem` and holding to expiry, after charges (exact with the lot, else the estimate)."""
     if side not in ("ce", "pe") or k is None or not prem or s_exp is None:
         return None
     pay = max(s_exp - k, 0) if side == "ce" else max(k - s_exp, 0)
-    return (pay * (1 - EXERCISE_STT_PCT / 100) - prem * (1 + COST_PCT / 100)) / (prem * (1 + COST_PCT / 100)) * 100
+    cost = buy_cost(prem, lot)
+    return (float(expiry_value(pay, lot)) - cost) / cost * 100
 
 
 def load_index_history() -> pd.DataFrame | None:
@@ -312,9 +370,11 @@ def score(rows: list[dict], closes: dict[str, pd.Series], today: date | None = N
         done = s is not None and exp.date() < today and len(s.loc[:exp].dropna())
         s_exp = float(s.loc[:exp].dropna().iloc[-1]) if done else None
         out.append({**r, "settled": bool(done), "settle_price": _r(s_exp),
-                    "pick_return_pct": _r(_payoff(r.get("side"), r.get("strike"), r.get("premium"), s_exp), 1),
-                    "atm_call_return_pct": _r(_payoff("ce", r["atm_call"]["strike"], r["atm_call"]["premium"], s_exp), 1),
-                    "atm_put_return_pct": _r(_payoff("pe", r["atm_put"]["strike"], r["atm_put"]["premium"], s_exp), 1)})
+                    "pick_return_pct": _r(_payoff(r.get("side"), r.get("strike"), r.get("premium"), s_exp, r.get("lot")), 1),
+                    "atm_call_return_pct": _r(_payoff("ce", r["atm_call"]["strike"], r["atm_call"]["premium"], s_exp,
+                                                      r.get("lot")), 1),
+                    "atm_put_return_pct": _r(_payoff("pe", r["atm_put"]["strike"], r["atm_put"]["premium"], s_exp,
+                                                     r.get("lot")), 1)})
     return out
 
 
@@ -346,6 +406,7 @@ def record_stored_chains(frames: dict[str, pd.DataFrame], latest: dict, log=prin
     from . import index_study
     close = frames["close"]
     feats, ih, out = None, None, []
+    lots = lot_sizes()
     for ref in refs:
         under = ref["symbol"]
         if under in INDEX_COLUMN:
@@ -380,7 +441,8 @@ def record_stored_chains(frames: dict[str, pd.DataFrame], latest: dict, log=prin
         except Exception as e:     # a damaged snapshot file: skip that chain
             log(f"Options verdict: {ref['symbol']} {ref['expiry']} skipped ({type(e).__name__})")
             continue
-        v = assess(a, s, m, latest.get("strategies") or [], sym, last_day=s.index[-1].date().isoformat())
+        v = assess(a, s, m, latest.get("strategies") or [], sym, last_day=s.index[-1].date().isoformat(),
+                   lot=lots.get(under))
         out.append({**v, "store_symbol": sym})
     n = record(out, day)
     log(f"Options verdicts journalled: {n} chain(s) ({', '.join(f'{v['symbol']} {v['verdict']}' for v in out)})")

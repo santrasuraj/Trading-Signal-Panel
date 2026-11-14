@@ -75,7 +75,7 @@ export function OptionVerdictPanel({ v }: { v: OptVerdict }) {
         <div className="space-y-3">
           <Candidates items={v.calls} title="Calls (for a rise)" />
           <Candidates items={v.puts} title="Puts (for a fall)" />
-          <p className="text-2xs text-muted">History-fair: the option's average payoff at expiry over every past {v.trading_days}-trading-day move of this stock, re-scaled to today's volatility ({num(v.vol_used_pct, 1)}%/yr) and shifted by the similar setups' median drift. Edge: that value vs the price paid plus ~{num(v.cost_pct, 0)}% costs. A buy needs +{num(v.edge_min_pct, 0)}% edge, a {num(v.prob_min_pct, 0)}% chance to end beyond the breakeven, a spread under 10% and 200+ contracts open. * no live bid / ask (market closed): last traded price.</p>
+          <p className="text-2xs text-muted">History-fair: the option's average payoff at expiry over every past {v.trading_days}-trading-day move of this stock, re-scaled to today's volatility ({num(v.vol_used_pct, 1)}%/yr) and shifted by the similar setups' median drift. Edge: that value vs the price paid plus {v.charges_basis === 'exact' ? <>the exact charges on a lot of {num(v.lot, 0)} (₹20 brokerage, NSE and SEBI fees, stamp duty and GST: {num(v.cost_pct, 2)}% of the ATM premium; exercise STT and brokerage at expiry)</> : <>~{num(v.cost_pct, 0)}% estimated costs (no lot size yet)</>}. A buy needs +{num(v.edge_min_pct, 0)}% edge, a {num(v.prob_min_pct, 0)}% chance to end beyond the breakeven, a spread under 10% and 200+ contracts open. * no live bid / ask (market closed): last traded price.</p>
         </div>
       )}
       <div className="rounded-md border border-line px-2 py-1.5 text-xs">
