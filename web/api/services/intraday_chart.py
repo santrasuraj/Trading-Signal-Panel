@@ -7,7 +7,10 @@ Bars come from the intraday store (data/intraday/bars/5m: FYERS history and the 
 last 60 days before that), today's completed live bars (data/intraday/live/YYYYMMDD.parquet) and the bar still
 forming (forming.json), newest source winning per bar. 15-minute bars are built from the 5-minute ones (09:15,
 09:30, ...). VWAP restarts every session. Times are IST wall-clock seconds (the chart shows them as they are).
-The store covers the ~150 most liquid F&O stocks and whatever the live feed streams; anything else has no bars.
+The store covers the ~150 most liquid F&O stocks and whatever the live feed streams. Anything else - another stock,
+an index, 1-minute candles the live feed never streamed - and a store that is behind (no bars from the last complete
+session, or none today while the market is open) are fetched on demand (ondemand_bars.py: FYERS history when logged in,
+else Yahoo) and merged, the better source winning per bar.
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ from scanner.intraday import data as idata
 from scanner.intraday.live import FORMING_1M_NAME, FORMING_FILE_NAME, live_dir, live_file, live_file_1m
 from scanner.intraday.quote_hub import to_ticker
 
-from . import data
+from . import clock, data, ondemand_bars
 from ..errors import ApiException
 from ..paths import P
 from ..util import today_ist
@@ -121,22 +124,37 @@ def daily_levels(symbol: str, last_ts) -> list[dict]:
         return []
 
 
+def _behind(raw: pd.DataFrame) -> bool:
+    """True when the stored bars miss the last complete session, or today's while the market is open."""
+    if raw.empty:
+        return True
+    from scanner.intraday.fyers_sync import last_complete_day
+    last = raw["ts"].max().date()
+    try:
+        is_open = clock.market_clock()["session"] == "open"
+    except Exception:
+        is_open = False
+    return last < (today_ist() if is_open else last_complete_day())
+
+
 def build(symbol: str, tf: str = "5m", days: int = 3) -> dict:
     if tf not in TFS:
         raise ApiException("VALIDATION", "tf must be 1m, 5m, 15m, 30m or 1h.")
     days = max(1, min(int(days), MAX_DAYS[tf]))
     raw = bars(symbol, days, one_minute=tf == "1m")
-    if raw.empty and tf == "1m":
-        raise ApiException("FEATURE_UNAVAILABLE", f"No 1-minute bars for {symbol.upper()} yet.",
-                           "1-minute bars come from the live FYERS feed: they exist for the symbols it streams (the "
-                           "screen's, your watchlists' and the most liquid F&O stocks) from the first session it "
-                           "runs with this version, and are kept at each close. 5-minute bars go back further.",
-                           {"feature": "intraday_chart"})
+    fetched = None
+    if _behind(raw):                                  # not stored, or the store is behind: fetch it now
+        od, fetched = ondemand_bars.intraday(symbol, "1m" if tf == "1m" else "5m", days)
+        if len(od):
+            raw = od if raw.empty else idata.merge_by_priority(raw.astype({"symbol": str, "source": str}),
+                                                               od.astype({"symbol": str, "source": str}))
+            raw["ts"] = pd.to_datetime(raw["ts"])
+            sessions = sorted(raw["ts"].dt.normalize().unique())[-days:]
+            raw = raw[raw["ts"].dt.normalize().isin(sessions)].sort_values("ts").reset_index(drop=True)
     if raw.empty:
-        raise ApiException("FEATURE_UNAVAILABLE", f"No intraday bars for {symbol.upper()}.",
-                           "Intraday candles cover the ~150 most liquid F&O stocks and the symbols the live feed streams "
-                           "(add it to a watchlist: it is streamed from the next live session).",
-                           {"feature": "intraday_chart"})
+        raise ApiException("FEATURE_UNAVAILABLE", f"No {tf} candles for {symbol.upper()}.",
+                           "Neither the local store, FYERS nor Yahoo has intraday bars for this symbol (check the NSE "
+                           "symbol; a suspended or newly listed stock may have none).", {"feature": "intraday_chart"})
     df = resample(raw, tf)
     # IST wall-clock as epoch seconds: the chart library shows UTC, so 09:15 IST reads 09:15
     t = ((df["ts"] - pd.Timestamp("1970-01-01")) // pd.Timedelta(seconds=1)).astype("int64").tolist()
@@ -147,4 +165,4 @@ def build(symbol: str, tf: str = "5m", days: int = 3) -> dict:
             "bars": {"t": t, "o": r2(df["open"]), "h": r2(df["high"]), "l": r2(df["low"]), "c": r2(df["close"]),
                      "v": [float(x) for x in df["volume"]]},
             "vwap": vwap(df), "forming": bool(len(df) and int(df["flags"].iloc[-1]) & idata.FLAG_FORMING),
-            "sources": src, "note": NOTE}
+            "sources": src, "note": NOTE + (f" Fetched now from {ondemand_bars.SOURCE_NOTE[fetched]}." if fetched else "")}

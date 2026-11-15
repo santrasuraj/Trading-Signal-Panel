@@ -108,10 +108,11 @@ class ChartResponse(Model):
     company: str | None = None
     industry: str | None = None
     kind: SymbolKind
-    tf: Literal["1d", "1w"]
+    tf: Literal["1d", "1w", "1mo"]
     range: str
-    adjusted: Literal[True] = True
+    adjusted: bool = True               # False for a symbol fetched on demand (not adjusted with NSE's actions)
     source_date: ISODate
+    fetched: Literal["yahoo"] | None = None   # not in the local daily store: fetched on demand (ondemand_bars.py)
     bars: Bars
     indicators: dict[IndicatorId, list[float | None]]
     markers: list[ChartMarker]

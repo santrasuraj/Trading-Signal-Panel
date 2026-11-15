@@ -382,7 +382,8 @@ export type IndicatorId = 'sma20' | 'sma50' | 'sma200' | 'ema21' | 'bb_upper' | 
 // GET /api/chart/{symbol}?tf=1d|1w&range=3m|6m|1y|2y|5y|max&indicators=sma20,sma50,sma200,rsi14   (daily store only; intraday has its own endpoint later)
 export interface ChartResponse {
   symbol: string; company: string | null; industry: string | null; kind: 'stock' | 'etf' | 'index';
-  tf: '1d' | '1w'; range: string; adjusted: true; source_date: ISODate;
+  tf: '1d' | '1w' | '1mo'; range: string; adjusted: boolean; source_date: ISODate;
+  fetched?: 'yahoo' | null;                  // not in the local daily store (e.g. BANKNIFTY): fetched on demand, not adjusted
   bars: { t: ISODate[]; o: number[]; h: number[]; l: number[]; c: number[]; v: number[] };
      // NaN-close rows dropped; 1w: t = LAST TRADING DATE of the week (not the W-FRI label), O first/H max/L min/C last/V sum
      // index symbols (NIFTY50, INDIAVIX, NIFTY500): v = 0

@@ -33,3 +33,13 @@ def _no_corporate_action_downloads(tmp_path_factory, monkeypatch):
     empty = tmp_path_factory.mktemp("ca")
     monkeypatch.setattr(dividends, "NETWORK", False)
     monkeypatch.setattr(dividends, "_dir", lambda: empty)
+
+
+@pytest.fixture(autouse=True)
+def _no_chart_downloads(monkeypatch):
+    """Charts' on-demand bars (web/api/services/ondemand_bars.py): never Yahoo or FYERS in a test (a test that wants
+    them sets its own fakes)."""
+    from web.api.services import ondemand_bars
+    monkeypatch.setattr(ondemand_bars, "_yahoo", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(ondemand_bars, "_fyers", lambda: None)
+    ondemand_bars._cache.clear()

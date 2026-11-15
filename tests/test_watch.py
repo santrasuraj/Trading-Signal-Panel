@@ -1,6 +1,7 @@
 """Watchlists and price alerts (scanner/watch.py), intraday candles (web/api/services/intraday_chart.py)."""
 import time
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -67,3 +68,55 @@ def test_intraday_resample_and_vwap():
     assert int(m15["flags"].iloc[-1]) == 16                                                # still forming
     v = ic.vwap(df)
     assert v[0] == round((2 + 1 + 1) / 3, 2) and v[6] == round((8 + 7 + 7) / 3, 2)        # restarts each session
+
+
+def _yahoo_bars(ticker: str, interval: str, period: str) -> pd.DataFrame:
+    """A fake Yahoo answer: the last three weekdays' full sessions at `interval`."""
+    step = {"1m": 1, "5m": 5}[interval]
+    days = pd.bdate_range(end=pd.Timestamp("2026-11-13"), periods=3)
+    ts = pd.DatetimeIndex([d + pd.Timedelta(minutes=555 + i * step) for d in days for i in range(375 // step)])
+    px = 100 + np.arange(len(ts)) * 0.01
+    sym = ticker.removesuffix(".NS")
+    return pd.DataFrame({"ts": ts, "symbol": sym, "open": px, "high": px + 0.2, "low": px - 0.2, "close": px + 0.05,
+                         "volume": 1000.0})
+
+
+def test_any_symbol_and_timeframe_is_fetched_when_the_stores_lack_it(monkeypatch):
+    """1-minute candles, a stock outside the intraday store and an index: fetched on demand (Yahoo when not logged in
+    to FYERS), resampled like stored bars, labelled with their source; the daily chart of an index the store lacks too."""
+    from fastapi.testclient import TestClient
+    from scanner.intraday import fyers_sync
+    from web.api.main import create_app
+    from web.api.services import clock, ondemand_bars, intraday_chart
+    asked = []
+    monkeypatch.setattr(ondemand_bars, "_yahoo", lambda t, iv, p: (asked.append((t, iv)), _yahoo_bars(t, iv, p))[1]
+                        if iv in ("1m", "5m") else pd.DataFrame({
+                            "ts": pd.bdate_range(end="2026-11-13", periods=300), "symbol": t, "open": 100.0,
+                            "high": 101.0, "low": 99.0, "close": 100.5, "volume": 0.0}))
+    monkeypatch.setattr(intraday_chart, "bars", lambda *a, **k: intraday_chart.idata.empty_bars())
+    monkeypatch.setattr(clock, "market_clock", lambda: {"session": "closed"})
+    monkeypatch.setattr(fyers_sync, "last_complete_day", lambda: pd.Timestamp("2026-11-13").date())
+    c = TestClient(create_app(warm=False), base_url="http://127.0.0.1")
+    for tf, n in (("1m", 375 * 2), ("5m", 75 * 2), ("15m", 25 * 2), ("30m", 13 * 2), ("1h", 7 * 2)):
+        r = c.get(f"/api/chart/CUPID/intraday?tf={tf}&days=2")
+        assert r.status_code == 200, (tf, r.text)
+        d = r.json()
+        assert len(d["bars"]["t"]) == n and d["sessions"] == ["2026-11-12", "2026-11-13"] and d["sources"] == ["yahoo"]
+        assert "Fetched now from Yahoo" in d["note"]
+    assert ("CUPID.NS", "1m") in asked and ("CUPID.NS", "5m") in asked
+    r = c.get("/api/chart/BANKNIFTY/intraday?tf=15m&days=1")
+    assert r.status_code == 200 and ("^NSEBANK", "5m") in asked                       # an index: its Yahoo ticker
+    d = c.get("/api/chart/BANKNIFTY?tf=1w&range=1y").json()
+    assert d["kind"] == "index" and d["fetched"] == "yahoo" and d["adjusted"] is False and len(d["bars"]["t"]) > 40
+    n_calls = len(asked)
+    c.get("/api/chart/CUPID/intraday?tf=5m&days=2")
+    assert len(asked) == n_calls                                                         # cached
+
+
+def test_stored_bars_are_topped_up_only_when_behind(monkeypatch):
+    from scanner.intraday import fyers_sync
+    from web.api.services import clock, intraday_chart as ic
+    monkeypatch.setattr(clock, "market_clock", lambda: {"session": "closed"})
+    monkeypatch.setattr(fyers_sync, "last_complete_day", lambda: pd.Timestamp("2026-11-13").date())
+    upto = lambda day: pd.DataFrame({"ts": [pd.Timestamp(f"{day} 15:25")]})            # noqa: E731
+    assert not ic._behind(upto("2026-11-13")) and ic._behind(upto("2026-11-12")) and ic._behind(pd.DataFrame())

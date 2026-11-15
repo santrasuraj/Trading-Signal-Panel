@@ -34,8 +34,14 @@ def bars_frame(symbol: str) -> pd.DataFrame:
     frames = data.store()
     c = frames["close"]
     if symbol not in c.columns:
-        raise ApiException("NOT_FOUND", f"Symbol '{symbol}' not found in the price store.",
-                           "Run a scan, or check the NSE symbol (e.g. M&M).")
+        # not in the daily store (an index such as BANKNIFTY, a stock outside the scan universe): fetched on demand
+        from . import ondemand_bars
+        df, _src = ondemand_bars.daily(symbol)
+        if df is None or df.empty:
+            raise ApiException("NOT_FOUND", f"Symbol '{symbol}' not found in the price store or on Yahoo.",
+                               "Check the NSE symbol (e.g. M&M).")
+        df.attrs["source"] = "yahoo"
+        return df
     df = pd.DataFrame({f: frames[f][symbol] for f in ("open", "high", "low", "close", "volume")}).dropna(subset=["close"])
     if df.empty:
         raise not_found(f"Price history for '{symbol}'")
@@ -198,6 +204,7 @@ def extra_indicators(df: pd.DataFrame, out: pd.DataFrame) -> pd.DataFrame:
 def build(symbol: str, tf: str, rng: str, indicators: list[str]) -> dict:
     lt = data.latest() or {}
     df = bars_frame(symbol)
+    fetched = df.attrs.get("source")                    # "yahoo" when the daily store doesn't have the symbol
     source_date = df.index[-1].date().isoformat()
     if tf == "1w":
         df = weekly(df)
@@ -210,7 +217,8 @@ def build(symbol: str, tf: str, rng: str, indicators: list[str]) -> dict:
     view = full if days is None else full[full.index >= full.index[-1] - pd.Timedelta(days=days)]
     first = view.index[0].date().isoformat()
     t = [d.date().isoformat() for d in view.index]
-    kind = data.symbol_kind(symbol)
+    from . import ondemand_bars
+    kind = "index" if ondemand_bars.is_index(symbol) else data.symbol_kind(symbol)
     meta = data.symbol_meta().get(symbol, {})
     out_ind = {k: ser_list(view[k], 4) for k in indicators if k in view.columns}
     markers, lines, avail = _markers_and_lines(symbol, lt, first, t, tf)
@@ -233,7 +241,7 @@ def build(symbol: str, tf: str, rng: str, indicators: list[str]) -> dict:
     markers.sort(key=lambda m: m["t"])
     return {
         "symbol": symbol, "company": meta.get("company"), "industry": meta.get("industry"), "kind": kind,
-        "tf": tf, "range": rng, "adjusted": True, "source_date": source_date,
+        "tf": tf, "range": rng, "adjusted": fetched is None, "source_date": source_date, "fetched": fetched,
         "bars": {"t": t, "o": ser_list(view["open"], 2), "h": ser_list(view["high"], 2), "l": ser_list(view["low"], 2),
                  "c": ser_list(view["close"], 2), "v": [0.0] * len(view) if kind == "index" else ser_list(view["volume"], 0)},
         "indicators": out_ind, "markers": markers, "price_lines": [x for x in lines if x["price"] is not None],

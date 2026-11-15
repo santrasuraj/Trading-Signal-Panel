@@ -11192,7 +11192,8 @@
       "type": "string",
       "enum": [
        "1d",
-       "1w"
+       "1w",
+       "1mo"
       ],
       "title": "Tf"
      },
@@ -11202,13 +11203,24 @@
      },
      "adjusted": {
       "type": "boolean",
-      "const": true,
       "title": "Adjusted",
       "default": true
      },
      "source_date": {
       "type": "string",
       "title": "Source Date"
+     },
+     "fetched": {
+      "anyOf": [
+       {
+        "type": "string",
+        "const": "yahoo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fetched"
      },
      "bars": {
       "$ref": "#/components/schemas/Bars"
@@ -11296,6 +11308,7 @@
      "range",
      "adjusted",
      "source_date",
+     "fetched",
      "bars",
      "indicators",
      "markers",
