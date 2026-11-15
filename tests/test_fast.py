@@ -71,8 +71,6 @@ def test_compiled_kernels_match_python_exactly_on_random_sessions(compiled):
             ("vwap", (h, lo, c, v)),
             ("walk_exit", (o, h, lo, c, side, entry, stop, target, last, entry + int(rng.integers(0, 2)), SLOTS)),
             ("stop_entry", (o, h, lo, side, float(ref_px * (1 + side * 0.004)), 3, 69)),
-            ("supertrend_flips", (o, h, lo, c, 10, 3.0, 69)),
-            ("vwap_trend_flips", (o, c, vw, 0.001, 69)),
             ("sweep_setup", (o, h, lo, c, side, float(np.nanmin(lo[:3]) if side > 0 else np.nanmax(h[:3])), 3, 60,
                              0.0005, 6, 12, 69)),
             ("orb_retest_setup", (o, h, lo, c, vw, float(np.nanmax(h[:3])), float(np.nanmin(lo[:3])), 0.0005, 12, 3,

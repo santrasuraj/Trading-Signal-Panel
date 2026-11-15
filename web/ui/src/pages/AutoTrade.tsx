@@ -110,12 +110,14 @@ function Settings({ s, busy, onSave }: { s: AutoSettings; busy: boolean; onSave:
         <Switch checked={s.oi} onChange={(v) => onSave({ oi: v })} label="Live OI build-ups" disabled={busy} />
         <Switch checked={s.options} onChange={(v) => onSave({ options: v })} label="Index option verdicts (1 lot)" disabled={busy} />
         <Switch checked={s.daily} onChange={(v) => onSave({ daily: v })} label="Daily strategies (practice bot)" disabled={busy} />
+        <Switch checked={s.option_signals} onChange={(v) => onSave({ option_signals: v })} label="Options signals (1 lot each)" disabled={busy} />
       </div>
       <div className="flex flex-wrap gap-4">
         {numIn('max_positions', 'Max open positions', 'each trade at most 2x capital / this')}
         {numIn('max_trades_per_day', 'Max trades a day', 'then it stops entering')}
         {numIn('daily_loss_pct', 'Daily loss stop %', 'of capital: no new entries below it', 0.1)}
         {numIn('max_late_min', 'Max lateness (min)', 'after the strategy\'s own entry bar')}
+        {numIn('max_option_positions', 'Max option positions', 'options signals open at once')}
       </div>
     </div>
   )
@@ -179,6 +181,15 @@ export default function AutoTradePage() {
         {d.record.length === 0 ? <EmptyState compact title="No closed trade yet." />
           : <DataTable id="autotrade.record" data={d.record} columns={REC_COLS} rowKey={(r) => r.strategy_key} exportName="autotrade-record" />}
       </Card>
+
+      {((d.options.signals_open?.length ?? 0) > 0 || (d.options.signals_closed?.length ?? 0) > 0) && (
+        <Card title="Options signals (one lot each)" subtitle="Taken from Signals > Options; closed with their signal (stop, target, strategy exit, square-off, expiry)">
+          <ul className="space-y-1 text-[13px]">
+            {(d.options.signals_open ?? []).map((p) => <li key={p.id}><span className="font-semibold">{p.symbol}</span> {p.structure} {p.legs.map((l) => `${l.strike.toLocaleString('en-IN')} ${l.type}`).join(' / ')} · {p.expiry} · lot {p.lot} at {num(p.entry, 2)}{p.mark != null && <> · now {num(p.mark, 2)} (<Money v={p.unrealized ?? null} signed color />)</>}</li>)}
+            {(d.options.signals_closed ?? []).slice(0, 30).map((p) => <li key={p.id} className="text-muted">{p.symbol} {p.structure} · {p.exit_reason} · <Money v={p.pnl ?? null} signed color /></li>)}
+          </ul>
+        </Card>
+      )}
 
       {(d.options.open.length > 0 || d.options.closed.length > 0) && (
         <Card title="Index options (one lot per BUY verdict)" subtitle="Bought at the stored chain's ask with exact charges; settled at expiry at NSE's official close">

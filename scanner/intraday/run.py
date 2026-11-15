@@ -15,7 +15,7 @@ import math
 import os
 import time
 from dataclasses import asdict
-from datetime import date, timedelta
+from datetime import timedelta
 from statistics import NormalDist
 
 import numpy as np
@@ -267,7 +267,7 @@ def build_days(bars: pd.DataFrame, frames: dict, info: dict, large: set[str], re
 
 
 def _top30(days: dict[str, list[Day]], info: dict) -> dict[pd.Timestamp, set[str]]:
-    """Top-30 by turnover as of each day (vwap_trend / supertrend universe), plus the ETFs."""
+    """Top-30 by turnover as of each day (the "top30" strategy universe), plus the ETFs."""
     by_date: dict[pd.Timestamp, list[tuple[float, str]]] = {}
     for sym, ds in days.items():
         if sym in info["etfs"]:

@@ -146,11 +146,6 @@ def test_etf_trend_holds_only_etfs_above_their_200_day_average(frames_factory):
 def test_rule_values_from_config_reach_the_rules():
     """A rule must use ITS strategy's config value, not the last strategy's (lambdas bind names late)."""
     df = lambda v: pd.DataFrame(v, index=range(3), columns=["A"])  # noqa: E731
-    gc = SimpleNamespace(golden_cross=df(True), rs_rating=df(70.0))
-    on = build_strategies({"strategies": {"golden_cross": {"rs_min": 60}}}, include_disabled=True)
-    off = build_strategies({"strategies": {"golden_cross": {"rs_min": 80}}}, include_disabled=True)
-    entries = lambda strats: next(s for s in strats if s.key == "golden_cross").entries(gc)  # noqa: E731
-    assert entries(on).all().all() and not entries(off).any().any()
     eg = SimpleNamespace(results_window=df(True), gap_pct=df(5.0), vol_ratio=df(4.0), sma200=df(100.0),
                          p=SimpleNamespace(close=df(110.0), open=df(100.0)))
     strict = build_strategies({"strategies": {"earnings_gap": {"min_gap_pct": 6}}}, include_disabled=True)
@@ -161,9 +156,9 @@ def test_rule_values_from_config_reach_the_rules():
 
 def test_config_retires_the_losing_swing_strategies_and_runs_the_new_ones():
     cfg = load_config()
-    for key in ("nr7_breakout", "bb_squeeze", "pullback_leaders"):
+    for key in ("bb_squeeze", "pullback_leaders"):
         state, reason = strategy_lifecycle(cfg, key)
         assert state == "rejected" and reason, key
     assert all(strategy_lifecycle(cfg, k)[0] == "active" for k in NEW_KEYS)
     keys = {s.key for s in build_strategies(cfg, include_disabled=True)}
-    assert set(NEW_KEYS) <= keys and {"nr7_breakout", "bb_squeeze", "pullback_leaders"} <= keys
+    assert set(NEW_KEYS) <= keys and {"bb_squeeze", "pullback_leaders"} <= keys

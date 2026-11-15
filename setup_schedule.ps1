@@ -35,7 +35,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
     -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45) -MultipleInstances IgnoreNew
 
 foreach ($t in @("08:30", "15:40", "19:15")) {
-    # --status: the dashboards (Quant Desk and the old Streamlit app) follow a scheduled scan's progress and see
+    # --status: the dashboard (Quant Desk) follows a scheduled scan's progress and see
     # whether it failed, from the same status file their own scans write
     $action = New-ScheduledTaskAction -Execute $pythonw `
         -Argument "run_scan.py --telegram --by scheduled --status data\results\status.json" -WorkingDirectory $root
@@ -61,7 +61,8 @@ Register-ScheduledTask -TaskName "NSE Scanner live" -Action $action -Trigger $tr
 Write-Host "Created task: NSE Scanner live (weekdays 09:45-15:15, every 30 minutes)"
 
 # 08:45 on weekdays: a reminder to log in to FYERS when today's login is missing (Telegram if configured, and
-# data\logseminders.log). Nothing on NSE holidays or once you are logged in; no FYERS call.
+# data\logs
+eminders.log). Nothing on NSE holidays or once you are logged in; no FYERS call.
 $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-m scanner.reminders" -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At "08:45"
 Register-ScheduledTask -TaskName "NSE Scanner login reminder" -Action $action -Trigger $trigger -Settings $settings -Force `

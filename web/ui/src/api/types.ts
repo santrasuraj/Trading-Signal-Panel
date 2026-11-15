@@ -499,7 +499,7 @@ export interface ResultsEvent {
 export interface FyersStatus {
   configured: boolean; client_id_masked: string | null; plan: 'standard' | 'prime'; data_source: 'auto' | 'yahoo';
   token_present: boolean; token_created: ISODateTime | null;
-  logged_in_today: boolean;                  // token.created[:10] == IST today (app.py rule)
+  logged_in_today: boolean;                  // token.created[:10] == IST today
   verified: boolean | null; verified_at: ISODateTime | null; user_name: string | null;   // only with ?verify=true (5-min cache)
   redirect_uri: string; login_modes: FyersLoginMode[];
   // who receives Fyers' redirect: this app's callback / a one-shot listener on a free local port (one click), or

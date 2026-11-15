@@ -1,7 +1,7 @@
 """Compiled hot loops of the intraday engine (Numba).
 
 The backtest and the live signals walk every 5-minute bar of every stock-day in Python loops: the stop / target walk,
-stop-entry orders, VWAP, Supertrend, the VWAP trend flips and the sweep / retest setups. Measured on 30 sessions x 151
+stop-entry orders, VWAP and the sweep / retest setups. Measured on 30 sessions x 151
 stocks (13 Nov 2026) those loops were most of the 10.5 s the 15 strategies took. Here they are plain numeric
 functions over the Day's float64 arrays, compiled to machine code by Numba (LLVM) on first use and cached on disk
 (__pycache__), so later runs start compiled.
@@ -133,79 +133,6 @@ def stop_entry(o, h, l, side, level, start, end):
 
 
 @_jit
-def supertrend_flips(o, h, l, c, n, mult, flat_slot):
-    """Supertrend(ATR n, mult) on the day's bars: each flip as (new trend, slot of the next bar's open). A flip with no
-    later bar ends the list (the position is then held to the square-off)."""
-    m = c.shape[0]
-    tr = np.full(m, np.nan)
-    for i in range(m):
-        if math.isnan(c[i]):
-            continue
-        pc = c[i - 1] if i > 0 and not math.isnan(c[i - 1]) else c[i]
-        r = h[i] - l[i]
-        b = abs(h[i] - pc)
-        if b > r:
-            r = b
-        b = abs(l[i] - pc)
-        if b > r:
-            r = b
-        tr[i] = r
-    atr = np.full(m, np.nan)
-    a, have = 0.0, False
-    for i in range(m):
-        if math.isnan(tr[i]):
-            continue
-        a = tr[i] if not have else (a * (n - 1) + tr[i]) / n
-        have = True
-        atr[i] = a
-    out = np.empty((m, 2), np.int64)
-    k, trend, fu, fl = 0, 0, np.nan, np.nan
-    for i in range(n, flat_slot - 1):
-        if math.isnan(c[i]) or math.isnan(atr[i]):
-            continue
-        mid = (h[i] + l[i]) / 2
-        bu, bl = mid + mult * atr[i], mid - mult * atr[i]
-        if math.isnan(fu) or bu < fu or c[i - 1] > fu:
-            fu = bu
-        if math.isnan(fl) or bl > fl or c[i - 1] < fl:
-            fl = bl
-        new = 1 if c[i] > fu else (-1 if c[i] < fl else trend)
-        if new != trend and new != 0:
-            trend = new
-            nxt = first_valid(o, i + 1, flat_slot)
-            if nxt < 0:
-                break
-            out[k, 0], out[k, 1] = trend, nxt
-            k += 1
-    return out[:k]
-
-
-@_jit
-def vwap_trend_flips(o, c, vw, band, flat_slot):
-    """VWAP trend: decided on bar closes beyond VWAP x (1 +/- band), filled at the next open, each position held at least
-    2 bars. Each change as (new side, slot of the fill)."""
-    out = np.empty((c.shape[0], 2), np.int64)
-    k, pos, entry = 0, 0, -1
-    for i in range(1, flat_slot - 1):
-        if math.isnan(c[i]) or math.isnan(vw[i]):
-            continue
-        if c[i] > vw[i] * (1 + band):
-            want = 1
-        elif c[i] < vw[i] * (1 - band):
-            want = -1
-        else:
-            want = pos
-        if want == pos:
-            continue
-        nxt = first_valid(o, i + 1, flat_slot)
-        if nxt >= 0 and (pos == 0 or nxt - entry >= 2):
-            out[k, 0], out[k, 1] = want, nxt
-            k += 1
-            pos, entry = want, nxt
-    return out[:k]
-
-
-@_jit
 def sweep_setup(o, h, l, c, side, level, start, last, tol, reclaim_bars, retest_bars, flat_slot):
     """The first liquidity sweep of `level` from `start` (strategies._one_sweep): trade through it, close back within
     `reclaim_bars`, then a retest that holds within `retest_bars` without a new extreme. Returns (entry slot, the
@@ -286,12 +213,9 @@ def warm_up() -> float:
     vwap(a, a, a, a)
     walk_exit(a, a, a, a, 1, 3, 99.0, 102.0, 69, 3, 75)
     stop_entry(a, a, a, 1, 100.5, 3, 69)
-    supertrend_flips(a, a, a, a, 10, 3.0, 69)
-    vwap_trend_flips(a, a, a, 0.001, 69)
     sweep_setup(a, a, a, a, 1, 100.2, 0, 60, 0.0005, 6, 12, 69)
     orb_retest_setup(a, a, a, a, a, 100.1, 99.9, 0.0005, 12, 3, 60, 69)
     vw = vwap(a, a, a, a)
     vw.flags.writeable = False                     # Day.vwap() hands out a read-only array: its own specialisation
-    vwap_trend_flips(a, a, vw, 0.001, 69)
     orb_retest_setup(a, a, a, a, vw, 100.1, 99.9, 0.0005, 12, 3, 60, 69)
     return time.perf_counter() - t

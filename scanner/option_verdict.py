@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from . import outlook as ol
-from .settings import RESULTS_DIR, ist_now, ist_today
+from .settings import RESULTS_DIR, ist_now, ist_today, load_config
 
 JOURNAL_FILE = RESULTS_DIR / "option_verdicts.json"
 EDGE_MIN_PCT = 10.0          # history-fair value at least 10% above the price paid plus costs
@@ -43,6 +43,8 @@ EXCHANGE_PCT = 0.03503       # NSE transaction charge on option premium turnover
 SEBI_PCT = 0.0001            # SEBI turnover fee (Rs 10 per crore)
 STAMP_BUY_PCT = 0.003        # stamp duty on the buy side
 GST_PCT = 18.0               # on brokerage, the exchange charge and the SEBI fee
+SELL_STT_PCT = 0.1           # STT on the premium of an option sold before expiry (from 1 Oct 2024)
+RISK_FREE = 0.065            # for re-pricing the pick at its stop / target (Black-76 at the option's own IV)
 STRIKES_OUT = 2
 STORE_SYMBOL = {"NIFTY": "NIFTY50"}      # option underlying -> the price-store column that settles it
 # index underlyings -> their column in NSE's daily index file (data/nse/index_history.parquet, kept by the scan since
@@ -168,6 +170,56 @@ def lot_sizes() -> dict[str, int]:
         return {}
 
 
+def sell_value(prem: float, lot: int | None) -> float:
+    """Rupees per unit received for selling an option at `prem` before expiry: minus STT, the exchange and SEBI charges
+    (with GST) and the sell order's brokerage (the COST_PCT estimate without a lot)."""
+    if not lot:
+        return prem * (1 - COST_PCT / 100)
+    g = 1 + GST_PCT / 100
+    return prem * (1 - SELL_STT_PCT / 100 - (EXCHANGE_PCT + SEBI_PCT) / 100 * g) - BROKERAGE_RS * g / lot
+
+
+def premium_at(c: dict, strike: float, side: str, iv_pct: float | None, spot_new: float | None,
+               days_later: float) -> float | None:
+    """The option's Black-76 value if the underlying were at `spot_new` `days_later` calendar days from the chain,
+    at the option's own implied volatility (None without an IV or a forward)."""
+    from . import options as opt
+    F, spot, days = c.get("forward"), c.get("spot"), float(c.get("days_to_expiry") or 0)
+    if not (F and spot and iv_pct and spot_new) or days <= 0:
+        return None
+    T = max((days - days_later) / 365, opt.MIN_T_YEARS)
+    return float(opt.black76(F * spot_new / spot, strike, T, RISK_FREE, iv_pct / 100, 1.0 if side == "ce" else 0.0))
+
+
+def plan(c: dict, pick: dict, exit_: dict | None, lot: int | None, horizon: int | None) -> dict:
+    """How to trade a BUY pick: the ask paid, the premium at the underlying's stop (re-priced a day later) and at its
+    target (re-priced at the tested horizon, before expiry), the lot, the capital and the most that can be lost (the
+    whole premium: a stop is not guaranteed when the market gaps)."""
+    days = float(c.get("days_to_expiry") or 0)
+    hold = min(float(horizon or 5) * 7 / 5, max(days - 0.5, 0.0))      # trading days -> calendar days, before expiry
+    k, side, iv, prem = pick["strike"], pick["side"], pick.get("iv_pct"), pick["premium"]
+    stop = premium_at(c, k, side, iv, (exit_ or {}).get("stop_underlying"), min(1.0, hold))
+    target = premium_at(c, k, side, iv, (exit_ or {}).get("target_underlying"), hold)
+    stop = stop if stop is not None and stop < prem else None           # a "stop" above the entry is no stop
+    target = target if target is not None and target > prem else None
+    cost = buy_cost(prem, lot)
+    per = lot or 1
+    return {"entry": _r(prem), "stop": _r(stop), "target": _r(target), "lot": lot, "hold_days": _r(hold, 1),
+            "capital": _r(cost * per) if lot else None, "max_loss": _r(cost * per) if lot else None,
+            "loss_at_stop": _r((cost - sell_value(stop, lot)) * per) if lot and stop else None,
+            "gain_at_target": _r((sell_value(target, lot) - cost) * per) if lot and target else None,
+            "basis": "Black-76 at the option's IV; the stop / target are the underlying's levels re-priced"}
+
+
+def _compact(x: dict | None) -> dict | None:
+    """A candidate as the journal keeps it."""
+    if not x:
+        return None
+    keep = ("side", "strike", "moneyness", "premium", "fair", "edge_pct", "prob_profit_pct", "breakeven",
+            "spread_pct", "oi", "iv_pct", "ok", "fails")
+    return {k: x.get(k) for k in keep}
+
+
 def _candidates(c: dict, side: str, mv: np.ndarray, spot: float, lot: int | None = None) -> list[dict]:
     rows = [r for r in c.get("rows") or [] if r.get("strike") is not None]
     if not rows or not len(mv):
@@ -260,6 +312,10 @@ def assess(c: dict, close: pd.Series, match: dict | None, strategies: list[dict]
     want = calls if d["bias"] == "bullish" else puts if d["bias"] == "bearish" else []
     good = [x for x in want if x["ok"]]
     pick = max(good, key=lambda x: x["edge_pct"]) if good else None
+    # the option nearest to passing: in the tested direction, or on either side when there is none (shown with a NO
+    # TRADE so the reader sees how far it is; never traded)
+    pool = want or (calls + puts)
+    closest = pick or (min(pool, key=lambda x: (len(x["fails"]), -x["edge_pct"])) if pool else None)
     if want:
         best = max(want, key=lambda x: x["edge_pct"])
         checks.append({"name": f"An option worth more than it costs (+{EDGE_MIN_PCT:g}%)", "ok": pick is not None,
@@ -290,7 +346,8 @@ def assess(c: dict, close: pd.Series, match: dict | None, strategies: list[dict]
                           "resistance; similar setups' lower quartile is the target") + ". Never risk more than you "
                          "can lose in full."}
     return {**base, "verdict": verdict, "headline": head, "pick": pick, "calls": calls, "puts": puts,
-            "checks": checks, "exit": exit_}
+            "checks": checks, "exit": exit_, "closest": closest,
+            "plan": plan(c, pick, exit_, lot, d["horizon"]) if pick and exit_ else None}
 
 
 # --------------------------------------------------------------------------- journal (written by the scan)
@@ -307,14 +364,21 @@ def record(verdicts: list[dict], day: str) -> int:
     for v in verdicts:
         atm = lambda xs: (xs[0]["strike"], xs[0]["premium"]) if xs else (None, None)   # noqa: E731
         (kc, pc), (kp, pp) = atm(v.get("calls") or []), atm(v.get("puts") or [])
-        rid = f"{v['symbol']}|{v['expiry']}|{day}"
-        rows[rid] = {"id": rid, "day": day, "recorded_at": ist_now().isoformat(timespec="seconds"),
+        d = v.get("journal_day") or day
+        rid = f"{v['symbol']}|{v['expiry']}|{d}"
+        rows[rid] = {"id": rid, "day": d, "recorded_at": ist_now().isoformat(timespec="seconds"),
                      "symbol": v["symbol"], "store_symbol": v.get("store_symbol"), "expiry": v["expiry"],
                      "spot": v.get("spot"), "verdict": v["verdict"], "headline": v.get("headline"),
                      "bias": (v.get("direction") or {}).get("bias"), "lot": v.get("lot"),
                      "side": (v.get("pick") or {}).get("side"), "strike": (v.get("pick") or {}).get("strike"),
                      "premium": (v.get("pick") or {}).get("premium"), "breakeven": (v.get("pick") or {}).get("breakeven"),
-                     "atm_call": {"strike": kc, "premium": pc}, "atm_put": {"strike": kp, "premium": pp}}
+                     "atm_call": {"strike": kc, "premium": pc}, "atm_put": {"strike": kp, "premium": pp},
+                     "reasons": (v.get("direction") or {}).get("reasons") or [],
+                     "checks": [{"name": x.get("name"), "ok": bool(x.get("ok")), "detail": x.get("detail")}
+                                for x in v.get("checks") or []],
+                     "closest": _compact(v.get("closest")), "plan": v.get("plan"), "exit": v.get("exit"),
+                     "iv_pct": v.get("iv_pct"), "vol_used_pct": v.get("vol_used_pct"),
+                     "days_to_expiry": v.get("days_to_expiry")}
     out = sorted(rows.values(), key=lambda r: (r["day"], r["symbol"], r["expiry"]))
     JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = JOURNAL_FILE.with_suffix(".tmp")
@@ -374,7 +438,10 @@ def score(rows: list[dict], closes: dict[str, pd.Series], today: date | None = N
                     "atm_call_return_pct": _r(_payoff("ce", r["atm_call"]["strike"], r["atm_call"]["premium"], s_exp,
                                                       r.get("lot")), 1),
                     "atm_put_return_pct": _r(_payoff("pe", r["atm_put"]["strike"], r["atm_put"]["premium"], s_exp,
-                                                     r.get("lot")), 1)})
+                                                     r.get("lot")), 1),
+                    "closest_return_pct": _r(_payoff(cl.get("side"), cl.get("strike"), cl.get("premium"), s_exp,
+                                                     r.get("lot")), 1) if (cl := r.get("closest") or {})
+                    and r.get("verdict") == "NO_TRADE" else None})
     return out
 
 
@@ -385,7 +452,10 @@ def track(scored: list[dict]) -> dict:
     mean = lambda xs: _r(float(np.mean(xs)), 1) if xs else None    # noqa: E731
     calls = [r["atm_call_return_pct"] for r in done if r["atm_call_return_pct"] is not None]
     puts = [r["atm_put_return_pct"] for r in done if r["atm_put_return_pct"] is not None]
+    skipped = [r["closest_return_pct"] for r in done if r.get("closest_return_pct") is not None]
     return {"recorded": len(scored), "settled": len(done), "open": len(scored) - len(done),
+            "skipped": len(skipped), "skipped_wins": sum(1 for x in skipped if x > 0),
+            "skipped_avg_return_pct": mean(skipped),
             "buys": len(buys), "buy_wins": sum(1 for r in buys if r["pick_return_pct"] > 0),
             "buy_avg_return_pct": mean([r["pick_return_pct"] for r in buys]),
             "no_trades": sum(1 for r in done if r["verdict"] == "NO_TRADE"),
@@ -393,18 +463,38 @@ def track(scored: list[dict]) -> dict:
             "first_day": scored[0]["day"] if scored else None}
 
 
-def record_stored_chains(frames: dict[str, pd.DataFrame], latest: dict, log=print) -> int:
-    """The scan's hook: today's verdict for every stored, unexpired chain of today (latest chain of each)."""
+def _session_refs(last_day: str) -> list[dict]:
+    """latest.json's chains stored on the last price session or later, still unexpired."""
+    from . import options as opt
+    today = ist_today().isoformat()
+    return [x for x in (opt.load_latest().get("chains") or {}).values() if isinstance(x, dict)
+            and str(x.get("day")) >= last_day and str(x.get("expiry", "")) >= today]
+
+
+def record_stored_chains(frames: dict[str, pd.DataFrame], latest: dict, log=print, fetch_missing: bool = True) -> int:
+    """The scan's hook: the verdict for every stored, unexpired chain of the last price session (latest chain of
+    each). A configured index with no chain from that session is fetched from NSE first (fetch_missing), so every
+    index gets its verdict even when the day's options task did not run."""
     from . import options as opt
     study = ol.load()
-    lt = opt.load_latest()
+    close = frames["close"]
+    last = pd.Timestamp(close.index[-1]).date().isoformat()
     day = ist_today().isoformat()
-    refs = [x for x in (lt.get("chains") or {}).values() if isinstance(x, dict) and str(x.get("day")) == day
-            and str(x.get("expiry", "")) >= day]
+    refs = _session_refs(last)
+    if fetch_missing:
+        have = {x["symbol"] for x in refs}
+        miss = [u for u in opt.settings(load_config())["underlyings"] if u in INDEX_COLUMN and u not in have]
+        if miss:
+            try:
+                rep = opt.refresh(symbols=miss, log=lambda m: None)
+                log(f"Options verdict: fetched {len(rep['chains'])} missing index chain(s) for {', '.join(miss)}"
+                    + (f" ({'; '.join(rep['errors'][:3])})" if rep["errors"] else ""))
+            except Exception as e:      # NSE down: the stored chains still get their verdicts
+                log(f"Options verdict: could not fetch {', '.join(miss)} ({type(e).__name__})")
+            refs = _session_refs(last)
     if not refs:
         return 0
     from . import index_study
-    close = frames["close"]
     feats, ih, out = None, None, []
     lots = lot_sizes()
     for ref in refs:
@@ -443,7 +533,7 @@ def record_stored_chains(frames: dict[str, pd.DataFrame], latest: dict, log=prin
             continue
         v = assess(a, s, m, latest.get("strategies") or [], sym, last_day=s.index[-1].date().isoformat(),
                    lot=lots.get(under))
-        out.append({**v, "store_symbol": sym})
+        out.append({**v, "store_symbol": sym, "journal_day": ref["day"]})
     n = record(out, day)
     log(f"Options verdicts journalled: {n} chain(s) ({', '.join(f'{v['symbol']} {v['verdict']}' for v in out)})")
     return n

@@ -12,7 +12,7 @@ from scanner.intraday import data as idata
 from scanner.intraday import fyers_sync, live
 from scanner.intraday.engine import (FLAT_FNO, FLAT_OTHER, SLOTS, Day, IntradayCosts, IntradayStrategy, Trade,
                                      run_intraday, slot_of, stop_entry, walk_exit)
-from scanner.intraday.strategies import _trade, orb5_inplay, orb15
+from scanner.intraday.strategies import _trade
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -69,16 +69,6 @@ def test_stop_entry_fills_at_level_or_gapped_open():
     assert stop_entry(d2, +1, 101.0, 3, 60) == (4, 102.0)
 
 
-def test_orb15_long_breakout_with_2r_target():
-    d = make_day(atr_d=4.0)                           # range 1.0 < 1.5 x ATR/4 -> stop at the range low
-    d.h[:3], d.l[:3] = 100.5, 99.5                    # opening range 99.5 - 100.5
-    d.h[5], d.o[5], d.c[5] = 101.0, 100.4, 100.9      # breakout bar
-    d.h[8], d.c[8] = 103.0, 102.8                     # reaches 2R
-    t = orb15(d, {})[0]
-    assert t.side == 1 and t.entry_slot == 5 and t.reason == "target"
-    assert t.exit_px == pytest.approx(t.entry_px + 2 * (t.entry_px - 99.5))
-
-
 def test_costs_turn_zero_edge_into_loss():
     """A strategy with zero gross edge must lose roughly its costs - the core intraday reality check."""
     days = []
@@ -99,15 +89,6 @@ def test_no_trade_when_entry_is_beyond_its_stop_or_target():
     assert _trade(d, +1, 5, 100.0, 99.0, 99.5) is None        # long target already passed at entry
     t = _trade(d, +1, 5, 100.0, 99.0, 102.0)
     assert t is not None and t.reason == "square-off"
-
-
-def test_orb5_inplay_enters_only_once_the_early_volume_is_known():
-    d = make_day(ctx={"relvol": 3.0})
-    d.c[0], d.h[0] = 100.5, 100.6                             # green first candle, high 100.6
-    d.h[1] = 100.7                                            # crossed at 09:20 - relvol not known yet
-    d.o[4], d.h[4] = 100.2, 100.8                             # first bar from 09:30 trading through 100.6
-    t = orb5_inplay(d, {})[0]
-    assert t.side == 1 and t.entry_slot == 4 and t.entry_px == pytest.approx(100.6)
 
 
 def test_daily_selection_is_first_come_and_sized_on_a_fixed_share():

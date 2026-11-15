@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Literal
 
 from .common import ISODate, ISODateTime, Model
-from .outlook import OvTrack
+from .outlook import OvCheck, OvExit, OvPlan, OvTrack
 
 OptBuildup = Literal["long_buildup", "short_buildup", "short_covering", "long_unwinding"]
 OptRunState = Literal["idle", "running", "done", "failed"]
@@ -238,6 +238,23 @@ class OptIndexPick(Model):
     breakeven: float | None = None
 
 
+class OptIndexClosest(Model):
+    """The journalled option nearest to passing the verdict's checks."""
+    side: Literal["ce", "pe"]
+    strike: float | None = None
+    moneyness: str | None = None
+    premium: float | None = None
+    fair: float | None = None
+    edge_pct: float | None = None
+    prob_profit_pct: float | None = None
+    breakeven: float | None = None
+    spread_pct: float | None = None
+    oi: int | None = None
+    iv_pct: float | None = None
+    ok: bool = False
+    fails: list[str] = []
+
+
 class OptIndexRow(Model):
     """One NSE index option expiry: the stored chain's summary and the scan's latest verdict for it."""
     symbol: str                                   # NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50
@@ -261,6 +278,12 @@ class OptIndexRow(Model):
     headline: str | None = None                   # the verdict in one sentence (with the first failed check)
     bias: Literal["bullish", "bearish", "none"] | None = None
     pick: OptIndexPick | None = None
+    plan: OvPlan | None = None                    # BUY: entry / stop / target premium, lot, capital, maximum loss
+    exit: OvExit | None = None                    # BUY: the underlying's stop and target
+    closest: OptIndexClosest | None = None        # NO TRADE: the option nearest to passing, and why it fails
+    checks: list[OvCheck] = []                    # every check of the verdict, passed or not
+    reasons: list[str] = []                       # the direction's tested sources
+    lot: int | None = None
 
 
 class OptIndicesResponse(Model):

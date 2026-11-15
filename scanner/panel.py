@@ -201,8 +201,6 @@ class Factors:
 
     # ---------------------------------------------------------------- trend
     @cached_property
-    def sma5(self): return self.sma(5)
-    @cached_property
     def sma10(self): return self.sma(10)
     @cached_property
     def sma20(self): return self.sma(20)
@@ -423,19 +421,8 @@ class Factors:
         return self.bb_width <= lo + 0.1 * (hi - lo)
 
     @cached_property
-    def nr7(self) -> pd.DataFrame:
-        """Today's high-low range is the narrowest of the last 7 days (only on real bars: a gap-filled day has
-        a made-up zero range)."""
-        rng = self.p.high - self.p.low
-        return (rng <= rolling(rng, "min", 7, 7)) & self.p.observed
-
-    @cached_property
     def gap_pct(self) -> pd.DataFrame:
         return (self.p.open / self.p.close.shift(1) - 1) * 100
-
-    @cached_property
-    def golden_cross(self) -> pd.DataFrame:
-        return (self.sma50 > self.sma200) & (self.sma50.shift(1) <= self.sma200.shift(1))
 
     @cached_property
     def results_window(self) -> pd.DataFrame:

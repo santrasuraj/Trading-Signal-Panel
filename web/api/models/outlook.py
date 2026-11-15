@@ -185,6 +185,20 @@ class OvExit(Model):
     note: str
 
 
+class OvPlan(Model):
+    """How to trade a BUY pick, per lot after charges (Black-76 re-pricing at the option's IV)."""
+    entry: float | None = None                    # the ask paid
+    stop: float | None = None                     # premium at the underlying's stop, a day later
+    target: float | None = None                   # premium at the underlying's target, at the tested horizon
+    lot: int | None = None
+    hold_days: float | None = None                # calendar days the target is priced at
+    capital: float | None = None                  # premium + the buy charges, one lot
+    max_loss: float | None = None                 # the whole premium: a stop is not guaranteed when prices gap
+    loss_at_stop: float | None = None
+    gain_at_target: float | None = None
+    basis: str
+
+
 class OvDirection(Model):
     bias: Literal["bullish", "bearish", "none"]
     reasons: list[str]
@@ -202,6 +216,9 @@ class OvTrack(Model):
     atm_call_avg_return_pct: float | None = None
     atm_put_avg_return_pct: float | None = None
     first_day: ISODate | None = None
+    skipped: int = 0                              # settled NO TRADE verdicts with a closest option
+    skipped_wins: int = 0
+    skipped_avg_return_pct: float | None = None   # what buying that closest option anyway would have returned
 
 
 class OptVerdict(Model):
@@ -224,6 +241,8 @@ class OptVerdict(Model):
     puts: list[OvCandidate]
     checks: list[OvCheck]
     exit: OvExit | None = None
+    closest: OvCandidate | None = None            # the option nearest to passing (a NO TRADE's "how far")
+    plan: OvPlan | None = None                    # BUY only
     edge_min_pct: float
     prob_min_pct: float
     cost_pct: float                               # the buy order's charges as a % of the ATM premium

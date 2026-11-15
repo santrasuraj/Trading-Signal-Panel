@@ -3,6 +3,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { fetchJson } from '@/api/client'
+import type { OvPlan, OvTrack } from '@/api/outlook'
 
 export type IndexVerdict = 'BUY_CALL' | 'BUY_PUT' | 'NO_TRADE' | 'NO_DATA'
 export interface IndexOptionRow {
@@ -12,11 +13,22 @@ export interface IndexOptionRow {
   max_pain: number | null; verdict: IndexVerdict | null; verdict_day: string | null; headline: string | null
   bias: 'bullish' | 'bearish' | 'none' | null
   pick: { side: 'ce' | 'pe'; strike: number | null; premium: number | null; breakeven: number | null } | null
+  /** BUY: the premiums to trade it with (Black-76 re-pricing of the underlying's stop / target), per lot after charges. */
+  plan: OvPlan | null
+  exit: { stop_underlying: number | null; target_underlying: number | null; note: string } | null
+  /** The option nearest to passing (NO TRADE: how far it is, and why it fails). Never traded. */
+  closest: IndexClosest | null
+  checks: { name: string; ok: boolean; detail: string }[]
+  /** The direction's tested sources. */
+  reasons: string[]
+  lot: number | null
 }
-export interface IndexVerdictTrack {
-  recorded: number; settled: number; open: number; buys: number; buy_wins: number; buy_avg_return_pct: number | null
-  no_trades: number; atm_call_avg_return_pct: number | null; atm_put_avg_return_pct: number | null; first_day: string | null
+export interface IndexClosest {
+  side: 'ce' | 'pe'; strike: number | null; moneyness: string | null; premium: number | null; fair: number | null
+  edge_pct: number | null; prob_profit_pct: number | null; breakeven: number | null; spread_pct: number | null
+  oi: number | null; iv_pct: number | null; ok: boolean; fails: string[]
 }
+export type IndexVerdictTrack = OvTrack
 export interface IndexOptionsResponse {
   generated_at: string; rows: IndexOptionRow[]; missing: string[]; track: IndexVerdictTrack; note: string
 }

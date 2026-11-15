@@ -798,7 +798,7 @@ def backtest_setup(cfg: dict, frames: dict, info: dict, current: list[str], live
 
 
 # --------------------------------------------------------------------------- comparison
-def compare(cfg: dict | None = None, keys=("momentum", "trend_breakout", "low_vol"), log=print) -> pd.DataFrame:
+def compare(cfg: dict | None = None, keys=("momentum", "trend_breakout", "alpha_low_vol"), log=print) -> pd.DataFrame:
     """Each strategy on (a) today's list with the store's data - what the dashboard used to show,
     (b) today's list rebuilt from NSE files - checks the NSE rebuild, (c) the point-in-time universe."""
     from dataclasses import replace

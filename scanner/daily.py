@@ -595,7 +595,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                    "vix": vix, "vix_change_pct": vix_chg,
                    "breadth_50": breadth, "advances": int((pool > 0).sum()), "declines": int((pool < 0).sum())},
         "strategies": strat_out,
-        # B4: kept out of `strategies` so older readers (Streamlit, Telegram, the paper journal) never see them
+        # B4: kept out of `strategies` so older readers (Telegram, the paper journal) never see them
         "rejected_strategies": rejected_out,
         "gainers": [mover(s) for s in pool.sort_values(ascending=False).head(movers_n).index],
         "losers": [mover(s) for s in pool.sort_values().head(movers_n).index],

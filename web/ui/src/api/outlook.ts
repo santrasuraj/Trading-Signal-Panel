@@ -59,6 +59,13 @@ export interface OvCheck { name: string; ok: boolean; detail: string }
 export interface OvTrack {
   recorded: number; settled: number; open: number; buys: number; buy_wins: number; buy_avg_return_pct: number | null
   no_trades: number; atm_call_avg_return_pct: number | null; atm_put_avg_return_pct: number | null; first_day: ISODate | null
+  /** Settled NO TRADE verdicts: what buying their closest option anyway would have returned. */
+  skipped: number; skipped_wins: number; skipped_avg_return_pct: number | null
+}
+/** How to trade a BUY pick, per lot after charges: the underlying's stop / target re-priced (Black-76, the option's IV). */
+export interface OvPlan {
+  entry: number | null; stop: number | null; target: number | null; lot: number | null; hold_days: number | null
+  capital: number | null; max_loss: number | null; loss_at_stop: number | null; gain_at_target: number | null; basis: string
 }
 export type OvKind = 'BUY_CALL' | 'BUY_PUT' | 'NO_TRADE' | 'NO_DATA'
 export interface OptVerdict {
@@ -68,6 +75,9 @@ export interface OptVerdict {
   direction: { bias: 'bullish' | 'bearish' | 'none'; reasons: string[] }
   pick: OvCandidate | null; calls: OvCandidate[]; puts: OvCandidate[]; checks: OvCheck[]
   exit: { stop_underlying: number | null; target_underlying: number | null; note: string } | null
+  /** The option nearest to passing (a NO TRADE's "how far"); never traded. */
+  closest: OvCandidate | null
+  plan: OvPlan | null
   edge_min_pct: number; prob_min_pct: number; cost_pct: number; lot: number | null; charges_basis: 'exact' | 'estimate'
   track: OvTrack; note: string
 }

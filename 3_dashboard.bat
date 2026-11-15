@@ -1,6 +1,5 @@
 @echo off
 REM Open Quant Desk at http://127.0.0.1:8600. Keep this window open while using it.
-REM (The old Streamlit dashboard is still available: 3b_dashboard_streamlit.bat)
 cd /d "%~dp0"
 
 REM Build the app when there is no Quant Desk build yet (no web\ui\dist, or the old Vite template page)

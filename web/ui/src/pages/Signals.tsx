@@ -13,7 +13,8 @@ import { isFailure } from '@/api/client'
 import type { Horizon, IntradaySignal, Quote, SignalGroup, SignalsResponse } from '@/api/types'
 import { AiPlan } from '@/components/AiPlan'
 import { isBuy, useIndexOptions } from '@/api/indexOptions'
-import { IndexOptions } from '@/components/IndexOptions'
+import { OptionSignals } from '@/components/OptionSignals'
+import { useOptionSignals } from '@/api/optionSignals'
 import { DataTable, type Col } from '@/components/DataTable'
 import { EvidenceChip, EtfChip, HorizonChip, ProofBadge, StatusBadge, WarnChip } from '@/components/badges'
 import { BiasNote, OrdersTable, PageHeader, flatteredNote } from '@/components/domain'
@@ -264,6 +265,7 @@ export default function Signals() {
   const optionsTab = horizon === 'options'
   const special = intraday || optionsTab           // tabs with their own card instead of the strategies' orders
   const idx = useIndexOptions().data
+  const optSig = useOptionSignals().data
   // a stale or mistyped ?allocations= (e.g. a strategy key that no longer exists) must not lock the page
   const resetWhatIf = () => { setDraft({}); setSp((p) => { const n = new URLSearchParams(p); n.delete('allocations'); return n }, { replace: true }) }
   const d = q.data
@@ -329,12 +331,12 @@ export default function Signals() {
                 { id: 'longterm', label: HORIZON.longterm.label, count: count('longterm') },
                 { id: 'swing', label: HORIZON.swing.label, count: count('swing') },
                 { id: 'intraday', label: <span title={intra?.show_untested ? 'Same-day signals from every intraday strategy and live F&O build-ups, each labelled with its backtest result' : 'Same-day signals, only from intraday strategies whose backtest shows a real edge after costs'}>Intraday</span>, count: intra?.signals.length ?? 0 },
-                { id: 'options', label: <span title="Daily options verdict for every NSE index: BUY CALL / BUY PUT / NO TRADE">Index options</span>, count: idx?.rows.filter((r) => isBuy(r.verdict)).length ?? 0 },
+                { id: 'options', label: <span title="Intraday and stock signals as option trades, volatility (IV rank) trades and the daily index verdicts">Options</span>, count: (optSig?.signals.filter((r) => r.state === 'open').length ?? 0) + (idx?.rows.filter((r) => isBuy(r.verdict)).length ?? 0) },
               ]}
             />
           </div>
           {intraday && <IntradaySignals />}
-          {optionsTab && <IndexOptions />}
+          {optionsTab && <OptionSignals />}
           {/* the cross-strategy ranking only says something new when the buys come from two or more strategies;
               with one, it repeated that strategy's own table */}
           {!special &&ranked.length > 1 && new Set(ranked.map((o) => o.strategy_key)).size > 1 && (

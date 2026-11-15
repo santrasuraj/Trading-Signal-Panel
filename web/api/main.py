@@ -90,6 +90,8 @@ def create_app(warm: bool = True) -> FastAPI:
             tickbus_svc.start()                   # the live feed's ticks and new bars over ZeroMQ (if pyzmq is installed)
             livesig_svc.start()                   # live signals ~1 s after each 5-minute bar; compiles the Numba kernels
             autotrade_svc.start()                 # the high-speed auto-trader's loop (practice only)
+            from .services import optsig_svc
+            optsig_svc.start()                    # options signals: open / mark / exit every minute in market hours
         yield
 
     app = FastAPI(title="Quant Desk API", version=system.VERSION, docs_url="/api/docs", redoc_url=None,

@@ -53,8 +53,10 @@ OI_KEY = "oi_buildup"
 LEVERAGE = 2.0                       # total intraday notional at most 2x capital (config intraday.leverage)
 LOG_MAX, CLOSED_MAX = 300, 5000
 DEFAULTS = {"on": False, "mode": "all", "intraday": True, "oi": True, "options": True, "daily": False,
-            "max_positions": 10, "max_trades_per_day": 30, "daily_loss_pct": 2.0, "max_late_min": 10}
-LIMITS = {"max_positions": (1, 50), "max_trades_per_day": (1, 200), "daily_loss_pct": (0.1, 20.0), "max_late_min": (1, 60)}
+            "option_signals": False, "max_positions": 10, "max_trades_per_day": 30, "daily_loss_pct": 2.0,
+            "max_late_min": 10, "max_option_positions": 5}
+LIMITS = {"max_positions": (1, 50), "max_trades_per_day": (1, 200), "daily_loss_pct": (0.1, 20.0), "max_late_min": (1, 60),
+          "max_option_positions": (1, 30)}
 _lock = threading.RLock()
 _thread: threading.Thread | None = None
 _wake = threading.Event()             # set when new signals are ready: the loop runs at once instead of within 1 s
@@ -396,7 +398,7 @@ def tick(now: datetime | None = None) -> dict:
             if st.get("session") != sess or not beat or (now - datetime.fromisoformat(beat)).total_seconds() >= 10:
                 st["_dirty"] = True                        # a heartbeat for the page about every 10 s
             st["session"] = sess
-            if s["options"] or st["options"]["open"]:
+            if s["options"] or st["options"]["open"] or s.get("option_signals") or st["options"].get("signals_open"):
                 _options_pass(st, now, sess, events)
             if sess != "open":
                 if st.get("_dirty"):
@@ -502,6 +504,7 @@ def _options_pass(st: dict, now: datetime, sess: str, events: list) -> None:
             events.append(_event(st, now, "exit", f"{p['symbol']} {p['strike']:,.0f} {p['side'].upper()} settled at "
                                                    f"{settle:,.2f}: Rs {net:+,.0f} after charges", symbol=p["symbol"],
                                  strategy="options_verdict"))
+    _option_signals_pass(st, now, events)
     if sess != "open":
         return
     # mark the open positions from the stored chain (bid, else last price)
@@ -546,13 +549,59 @@ def _options_pass(st: dict, now: datetime, sess: str, events: list) -> None:
                              symbol=r["symbol"], strategy="options_verdict"))
 
 
+def _option_signals_pass(st: dict, now: datetime, events: list) -> None:
+    """Options signals (scanner/option_signals.py) in the practice book: each new one is taken - one lot at its own entry
+    premium - while fewer than max_option_positions are open; it is closed when its signal closes, at the signal's exit.
+    The signals' own journal applies the entries, marks and exits; this mirrors them inside the engine's limits."""
+    from scanner import option_signals as osg
+    book = st["options"]
+    book.setdefault("signals_open", {})
+    book.setdefault("signals_closed", [])
+    book.setdefault("signals_taken", [])
+    rows = {r["id"]: r for r in osg.load()}
+    for sid, pos in list(book["signals_open"].items()):
+        rec = rows.get(sid)
+        if rec is None:
+            continue
+        pos.update(mark=rec.get("mark"), unrealized=rec.get("unrealized"))
+        if rec.get("state") == "closed":
+            done = {**pos, "exit": rec.get("exit"), "exit_reason": rec.get("exit_reason"), "pnl": rec.get("pnl"),
+                    "ret_pct": rec.get("ret_pct"), "closed_at": rec.get("closed_at")}
+            book["signals_closed"].append(done)
+            book["signals_open"].pop(sid)
+            st["_dirty"] = True
+            events.append(_event(st, now, "exit", f"{pos['symbol']} {pos['structure']} closed at {rec.get('exit')} "
+                                                   f"({rec.get('exit_reason')}): Rs {(rec.get('pnl') or 0):+,.0f} after charges",
+                                 symbol=pos["symbol"], strategy=f"options_{pos['source']}"))
+    if not st["settings"].get("option_signals"):
+        return
+    today = now.date().isoformat()
+    for sid, rec in rows.items():
+        if len(book["signals_open"]) >= int(st["settings"].get("max_option_positions") or 5):
+            break
+        if rec.get("state") != "open" or rec.get("day") != today or sid in book["signals_taken"]:
+            continue
+        pos = {k: rec.get(k) for k in ("id", "source", "symbol", "structure", "kind", "legs", "expiry", "lot", "entry",
+                                       "stop", "target", "capital", "max_loss", "strategy", "mark")}
+        pos["taken_at"] = now.isoformat(timespec="seconds")
+        book["signals_open"][sid] = pos
+        book["signals_taken"].append(sid)
+        st["_dirty"] = True
+        legs = " / ".join(f"{leg['action']} {float(leg['strike']):g} {leg['type']}" for leg in rec["legs"])
+        events.append(_event(st, now, "entry", f"{rec['symbol']} {rec['structure']} {legs}"
+                                                f" x {rec['lot']}: {'credit' if rec['kind'] == 'credit' else 'paid'} "
+                                                f"{rec['entry']} ({osg.SOURCES.get(rec['source'], rec['source'])})",
+                             symbol=rec["symbol"], strategy=f"options_{rec['source']}"))
+    book["signals_taken"] = book["signals_taken"][-2000:]
+
+
 # ------------------------------------------------------------------ settings, kill switch, view
 def settings(body: dict) -> dict:
     with _lock:
         _invalidate()                                      # a settings change always starts from the saved state
         st = _load()
         s = st["settings"]
-        for k in ("on", "intraday", "oi", "options", "daily"):
+        for k in ("on", "intraday", "oi", "options", "daily", "option_signals"):
             if k in body and body[k] is not None:
                 s[k] = bool(body[k])
         if body.get("mode") in ("all", "proven"):
@@ -675,7 +724,9 @@ def view() -> dict:
             "positions": positions, "trades_today": list(reversed(today))[:200],
             "skipped_today": [{"key": k, "why": v} for k, v in list(st["skipped"].items())[-200:]],
             "today": _summary(today), "all_time": _summary(st["closed"]), "record": record,
-            "options": {"open": st["options"]["open"], "closed": list(reversed(st["options"]["closed"]))[:100]},
+            "options": {"open": st["options"]["open"], "closed": list(reversed(st["options"]["closed"]))[:100],
+                        "signals_open": list((st["options"].get("signals_open") or {}).values()),
+                        "signals_closed": list(reversed(st["options"].get("signals_closed") or []))[:100]},
             "signals_engine": st.get("signals_engine"), "speed": speed(),
             "daily": daily, "log": list(reversed(st["log"]))[:150], "note": __doc__.split("\n\n")[0].replace("\n", " ")}
 
@@ -689,7 +740,8 @@ def _loop() -> None:
                 st = _load()
                 s = st["settings"]
                 busy = s["on"] or bool(st["open"])
-                options = s["options"] or bool(st["options"]["open"])
+                options = s["options"] or bool(st["options"]["open"]) or s.get("option_signals") or \
+                    bool(st["options"].get("signals_open"))
             if busy:
                 tick()                                     # every second: entries, stops, targets, exits
                 latency_svc.record("engine_pass", time.monotonic() - t0)

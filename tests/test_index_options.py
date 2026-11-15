@@ -101,3 +101,96 @@ def test_index_options_endpoint_lists_each_index_with_its_latest_verdict(monkeyp
     assert first["atm_call"] == 137.75 and first["expected_move_pct"] == 1.09
     assert second["verdict"] is None                                                 # not journalled yet
     assert out["missing"] == ["BANKNIFTY"] and "SEBI" in out["note"]
+
+
+# ---- better verdicts: the plan, the closest option, every check, every index ---------------------------------------
+def _fwd_chain(spot=25000.0, days=10.0):
+    return {"forward": spot * 1.002, "spot": spot, "days_to_expiry": days}
+
+
+def test_a_buy_pick_comes_with_its_trade_in_premiums():
+    c = _fwd_chain()
+    fair = ov.premium_at(c, 25000.0, "ce", 14.0, 25000.0, 0.0)
+    pick = {"strike": 25000.0, "side": "ce", "iv_pct": 14.0, "premium": round(fair * 1.01, 2)}
+    p = ov.plan(c, pick, {"stop_underlying": 24800.0, "target_underlying": 25300.0}, 65, 5)
+    assert p["stop"] < p["entry"] < p["target"] and p["hold_days"] == 7.0              # 5 trading days = 7 calendar
+    assert p["capital"] == pytest.approx(ov.buy_cost(p["entry"], 65) * 65, abs=0.01)
+    assert p["max_loss"] == p["capital"]                                              # a gap can jump the stop
+    assert 0 < p["loss_at_stop"] < p["max_loss"] and p["gain_at_target"] > 0
+    put = ov.plan(c, {**pick, "side": "pe"}, {"stop_underlying": 25200.0, "target_underlying": 24700.0}, 65, 5)
+    assert put["stop"] < put["entry"] < put["target"]
+    no_iv = ov.plan(c, {**pick, "iv_pct": None}, {"stop_underlying": 24800.0, "target_underlying": 25300.0}, 65, 5)
+    assert no_iv["stop"] is None and no_iv["target"] is None and no_iv["capital"] is not None
+
+
+def test_selling_an_option_pays_its_charges():
+    assert ov.sell_value(100.0, 65) == pytest.approx(100 * (1 - 0.001 - (0.03503 + 0.0001) / 100 * 1.18) - 20 * 1.18 / 65)
+    assert ov.sell_value(100.0, None) == pytest.approx(97.0)
+
+
+def test_journal_keeps_the_checks_the_reasons_the_closest_option_and_the_plan(tmp_path, monkeypatch):
+    monkeypatch.setattr(ov, "JOURNAL_FILE", tmp_path / "option_verdicts.json")
+    closest = {"side": "ce", "strike": 27000.0, "premium": 300.0, "fair": 330.0, "edge_pct": 9.0, "prob_profit_pct": 38.0,
+               "breakeven": 27310.0, "ok": False, "fails": ["history-fair value only +9% vs the price paid (needs +10%)"],
+               "bid": 299.0, "quoted": True}
+    v = {"symbol": "FINNIFTY", "expiry": "2026-11-23", "spot": 27000.0, "verdict": "NO_TRADE", "headline": "No options edge",
+         "direction": {"bias": "none", "reasons": ["Similar setups: no usable direction."]},
+         "checks": [{"name": "Tested direction", "ok": False, "detail": "none"}], "closest": closest, "plan": None,
+         "calls": [{"strike": 27000.0, "premium": 300.0}], "puts": [], "pick": None, "journal_day": "2026-11-13"}
+    ov.record([v], "2026-11-15")
+    (row,) = ov.load_journal()
+    assert row["day"] == "2026-11-13" and row["id"] == "FINNIFTY|2026-11-23|2026-11-13"   # the chain's session
+    assert row["checks"] == [{"name": "Tested direction", "ok": False, "detail": "none"}]
+    assert row["reasons"] == ["Similar setups: no usable direction."]
+    assert row["closest"]["strike"] == 27000.0 and "bid" not in row["closest"]          # compact
+
+
+def test_the_closest_option_of_a_no_trade_is_scored_too():
+    base = {"id": "x", "day": "2026-11-03", "symbol": "BANKNIFTY", "expiry": "2026-11-10", "spot": 55000.0, "lot": 30,
+            "atm_call": {"strike": 55000.0, "premium": 500.0}, "atm_put": {"strike": 55000.0, "premium": 480.0}}
+    rows = [{**base, "verdict": "NO_TRADE", "closest": {"side": "ce", "strike": 55000.0, "premium": 500.0}},
+            {**base, "id": "y", "verdict": "NO_TRADE", "closest": {"side": "pe", "strike": 55000.0, "premium": 480.0}},
+            {**base, "id": "z", "verdict": "NO_DATA", "closest": {"side": "ce", "strike": 55000.0, "premium": 500.0}}]
+    closes = {"BANKNIFTY": pd.Series([56100.0], index=pd.to_datetime(["2026-11-10"]))}
+    a, b, c = ov.score(rows, {}, today=date(2026, 11, 14), index_closes=closes)
+    assert a["closest_return_pct"] > 0 and b["closest_return_pct"] == -100.0 and c["closest_return_pct"] is None
+    t = ov.track([a, b, c])
+    assert t["skipped"] == 2 and t["skipped_wins"] == 1
+    assert t["skipped_avg_return_pct"] == pytest.approx((a["closest_return_pct"] - 100.0) / 2, abs=0.1)
+
+
+def test_the_closest_option_prefers_fewer_failed_checks():
+    from tests.test_option_verdict import _chain, _close
+    c = _close()
+    spot = float(c.iloc[-1].round(-1))
+    ch = _chain(spot, 0.5, 0.5, oi=50)                                   # every strike fails the OI check
+    v = ov.assess(ch, c, None, [], "TEST", last_day="2026-11-04")
+    assert v["verdict"] == "NO_TRADE" and v["closest"] is not None and v["plan"] is None
+    cands = v["calls"] + v["puts"]
+    assert len(v["closest"]["fails"]) == min(len(x["fails"]) for x in cands)
+
+
+def test_session_refs_keep_the_last_sessions_unexpired_chains(monkeypatch):
+    from scanner import options as opt
+    monkeypatch.setattr(ov, "ist_today", lambda: date(2026, 11, 15))      # a Sunday scan
+    monkeypatch.setattr(opt, "load_latest", lambda: {"chains": {
+        "a": {"symbol": "NIFTY", "expiry": "2026-11-17", "day": "2026-11-13"},
+        "b": {"symbol": "NIFTY", "expiry": "2026-11-23", "day": "2026-11-12"},       # an older session
+        "c": {"symbol": "BANKNIFTY", "expiry": "2026-11-14", "day": "2026-11-13"}}})  # expired
+    assert [r["symbol"] + r["expiry"] for r in ov._session_refs("2026-11-13")] == ["NIFTY2026-11-17"]
+
+
+def test_the_scan_fetches_any_configured_index_chain_still_missing(monkeypatch):
+    from scanner import options as opt
+    calls = []
+    monkeypatch.setattr(ov, "ist_today", lambda: date(2026, 11, 13))
+    monkeypatch.setattr(ov.ol, "load", lambda: None)
+    monkeypatch.setattr(opt, "load_latest", lambda: {"chains": {}})
+    monkeypatch.setattr(opt, "refresh", lambda symbols=None, log=None, **k: calls.append(symbols) or {"chains": [], "errors": []})
+    monkeypatch.setattr(ov, "load_config", lambda: {"options": {"underlyings": ["NIFTY", "FINNIFTY", "RELIANCE"]}})
+    frames = {"close": pd.DataFrame({"NIFTY50": [25000.0]}, index=pd.to_datetime(["2026-11-13"]))}
+    logs = []
+    assert ov.record_stored_chains(frames, {}, log=logs.append) == 0
+    assert calls == [["NIFTY", "FINNIFTY"]] and "fetched 0 missing index chain(s)" in logs[0]   # indices only
+    calls.clear()
+    assert ov.record_stored_chains(frames, {}, log=logs.append, fetch_missing=False) == 0 and calls == []

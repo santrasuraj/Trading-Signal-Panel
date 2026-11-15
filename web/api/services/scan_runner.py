@@ -1,6 +1,6 @@
 """Start the daily scan as a background process and merge its state from files (spec 6.14, review A6).
 
-State merge (same logic as app.py's scan_monitor):
+State merge:
 - our own scan process is alive -> starting / running (or its final state while it is exiting);
 - the lock is held (any scan: platform, dashboard, scheduled task) or we launched < 30 s ago and the status
   file is not final -> running / starting;

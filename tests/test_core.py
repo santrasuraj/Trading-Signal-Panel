@@ -159,16 +159,6 @@ def test_factors_have_no_lookahead(frames_factory):
         pd.testing.assert_frame_equal(a, b, check_exact=False, rtol=1e-9)
 
 
-def test_nr7_ignores_gap_filled_bars(frames_factory):
-    """A day with no trade is bridged with a flat copy of the last close (range 0): never a narrow-range day."""
-    fr = frames_factory({"A": list(100 + np.arange(40.0))})    # real ranges widen every day: no real NR7
-    for fld in ("open", "high", "low", "close"):
-        fr[fld].iloc[30, 0] = np.nan
-    f = Factors(panel_from_wide(fr))
-    assert f.p.high["A"].iloc[30] == f.p.low["A"].iloc[30] and not f.p.observed["A"].iloc[30]
-    assert not f.nr7["A"].any()
-
-
 def test_min_price_filter_can_use_prices_as_traded(frames_factory):
     """On a back-adjusted panel a later 1:10 split shows Rs 300 as Rs 30: the minimum-price test must use the
     price as it traded that day, or a future split decides whether the stock was tradable before it."""

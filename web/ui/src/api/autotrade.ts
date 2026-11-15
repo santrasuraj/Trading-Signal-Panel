@@ -7,6 +7,8 @@ import type { SignalProof } from '@/api/types'
 
 export interface AutoSettings {
   on: boolean; mode: 'all' | 'proven'; intraday: boolean; oi: boolean; options: boolean; daily: boolean
+  /** Options signals (intraday / stock / volatility) as practice trades, one lot each, at most max_option_positions open. */
+  option_signals: boolean; max_option_positions: number
   max_positions: number; max_trades_per_day: number; daily_loss_pct: number; max_late_min: number
 }
 interface Timing { slippage_bps: number | null; react_ms: number | null; signal_lag_s: number | null }
@@ -28,6 +30,12 @@ export interface AutoOption {
   cost_unit: number; verdict_day: string; opened_at: string; mark?: number; value_net?: number; settle?: number
   pnl_net?: number; closed_at?: string
 }
+/** An options signal taken by the engine (mirrors scanner/option_signals.py's journal). */
+export interface AutoOptSignal {
+  id: string; source: string; symbol: string; structure: string; kind: 'debit' | 'credit'; expiry: string; lot: number; entry: number
+  stop: number | null; target: number | null; capital: number | null; max_loss: number | null; mark: number | null; unrealized?: number | null
+  legs: { action: string; type: string; strike: number }[]; exit?: number | null; exit_reason?: string; pnl?: number | null; closed_at?: string
+}
 export interface AutoLog { at: string; kind: string; text: string; symbol?: string; strategy?: string }
 /** One step of the live path, in seconds (web/api/services/latency_svc.py). */
 export interface LatencyRow { name: string; label: string; n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null }
@@ -46,7 +54,7 @@ export interface AutoView {
   last_loop: string | null; signals_at: string | null; capital: number; cash: number; equity: number; today_pnl: number
   positions: AutoPosition[]; trades_today: AutoTrade[]; skipped_today: { key: string; why: string }[]
   today: AutoSummary; all_time: AutoSummary; record: AutoRecordRow[]
-  options: { open: AutoOption[]; closed: AutoOption[] }
+  options: { open: AutoOption[]; closed: AutoOption[]; signals_open?: AutoOptSignal[]; signals_closed?: AutoOptSignal[] }
   daily: { on: boolean; strategies: { key: string; name: string; on: boolean; status: string }[]; last_run: unknown }
   log: AutoLog[]; note: string
   /** Where the signals it trades came from: the live engine (about a second after each bar) or the 5-minute job. */

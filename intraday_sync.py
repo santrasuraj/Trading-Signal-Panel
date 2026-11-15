@@ -213,7 +213,15 @@ def _run(args) -> int:
                 print(f"Live F&O build-ups: {err or 'updated from NSE'}", flush=True)
             except Exception as e:
                 print(f"Live F&O build-ups: {type(e).__name__}: {e}", flush=True)
-        run_intraday_signals(cfg, frames=frames, log=lambda m: print(m, flush=True))
+        sig = run_intraday_signals(cfg, frames=frames, log=lambda m: print(m, flush=True))
+        if live.market_open_now():
+            try:   # the same signals as option trades, plus the volatility trades (scanner/option_signals.py)
+                from scanner import option_signals
+                rep = option_signals.refresh(intraday=sig)
+                print(f"Options signals: {rep['opened']} opened, {rep['closed']} closed, {rep['open']} open"
+                      + (f" ({'; '.join(rep['errors'][:3])})" if rep["errors"] else ""), flush=True)
+            except Exception as e:
+                print(f"Options signals: {type(e).__name__}: {e}", flush=True)
         try:   # RSI / moving-average / live scan alerts on the live service's quotes (scanner/rule_alerts.py)
             from scanner import rule_alerts
             from scanner.intraday import quote_hub

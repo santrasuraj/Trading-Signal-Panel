@@ -21,6 +21,8 @@ class AutoSettings(Model):
     oi: bool | None = None                        # live F&O OI build-ups
     options: bool | None = None                   # BUY CALL / BUY PUT index option verdicts (one lot each)
     daily: bool | None = None                     # the daily strategies through the practice bot
+    option_signals: bool | None = None            # options signals (intraday / stock / volatility) as practice trades
+    max_option_positions: int | None = Field(None, ge=1, le=30)
     max_positions: int | None = Field(None, ge=1, le=50)
     max_trades_per_day: int | None = Field(None, ge=1, le=200)
     daily_loss_pct: float | None = Field(None, ge=0.1, le=20)

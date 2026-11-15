@@ -145,7 +145,7 @@ GET_ENDPOINTS = [
     ("/api/health", M.Health), ("/api/status", M.AppStatus), ("/api/overview", M.OverviewResponse),
     ("/api/market/breadth?range=1y", M.BreadthResponse), ("/api/strategies", M.StrategyListResponse),
     ("/api/strategies?horizon=swing", M.StrategyListResponse), ("/api/strategies/momentum", M.StrategyDetail),
-    ("/api/strategies/earnings_gap", M.StrategyDetail), ("/api/strategies/rsi2_pullback", M.StrategyDetail),
+    ("/api/strategies/earnings_gap", M.StrategyDetail), ("/api/strategies/near_high", M.StrategyDetail),
     ("/api/strategies/momentum/curve?range=3y", M.CurveResponse),
     ("/api/strategies/momentum/trades?page_size=20", M.TradesPage), ("/api/signals", M.SignalsResponse),
     ("/api/screener?preset=all", M.ScreenerResponse), ("/api/screener?preset=momentum", M.ScreenerResponse),
@@ -185,7 +185,7 @@ def test_openapi_lists_every_contract_path(client):
     paths = set(spec["paths"])
     for url, _ in GET_ENDPOINTS:
         p = url.split("?")[0]
-        p = p.replace("/momentum", "/{key}").replace("/earnings_gap", "/{key}").replace("/rsi2_pullback", "/{key}")
+        p = p.replace("/momentum", "/{key}").replace("/earnings_gap", "/{key}").replace("/near_high", "/{key}")
         p = p.replace("/IGIL", "/{symbol}").replace("/NIFTY50", "/{symbol}")
         assert p in paths, p
     for p in ("/api/holdings/import/fyers", "/api/scan", "/api/fyers/login", "/api/fyers/login/complete",

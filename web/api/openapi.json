@@ -2763,6 +2763,95 @@
     }
    }
   },
+  "/api/options/signals": {
+   "get": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Signals",
+    "description": "Options signals: intraday and stock signals as option trades, volatility (IV rank) trades and the index verdicts,\nwith their records. Practice only.",
+    "operationId": "signals_api_options_signals_get",
+    "parameters": [
+     {
+      "name": "source",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 12
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Source"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options/signals/refresh": {
+   "post": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Signals Refresh",
+    "description": "Open, mark and exit the options signals now (NSE's live chains; market hours).",
+    "operationId": "signals_refresh_api_options_signals_refresh_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/options/vol-test": {
+   "get": {
+    "tags": [
+     "options"
+    ],
+    "summary": "Vol Test",
+    "description": "The volatility source's backtest: the iron condor sold only when the IV rank was high vs every month.",
+    "operationId": "vol_test_api_options_vol_test_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/fno/status": {
    "get": {
     "tags": [
@@ -9710,6 +9799,30 @@
        }
       ],
       "title": "Daily"
+     },
+     "option_signals": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Option Signals"
+     },
+     "max_option_positions": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 30.0,
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Option Positions"
      },
      "max_positions": {
       "anyOf": [
@@ -20093,6 +20206,159 @@
     ],
     "title": "OptHistoryResponse"
    },
+   "OptIndexClosest": {
+    "properties": {
+     "side": {
+      "type": "string",
+      "enum": [
+       "ce",
+       "pe"
+      ],
+      "title": "Side"
+     },
+     "strike": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Strike"
+     },
+     "moneyness": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Moneyness"
+     },
+     "premium": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Premium"
+     },
+     "fair": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fair"
+     },
+     "edge_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Edge Pct"
+     },
+     "prob_profit_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Prob Profit Pct"
+     },
+     "breakeven": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Breakeven"
+     },
+     "spread_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Spread Pct"
+     },
+     "oi": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Oi"
+     },
+     "iv_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Iv Pct"
+     },
+     "ok": {
+      "type": "boolean",
+      "title": "Ok",
+      "default": false
+     },
+     "fails": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Fails",
+      "default": []
+     }
+    },
+    "type": "object",
+    "required": [
+     "side",
+     "strike",
+     "moneyness",
+     "premium",
+     "fair",
+     "edge_pct",
+     "prob_profit_pct",
+     "breakeven",
+     "spread_pct",
+     "oi",
+     "iv_pct",
+     "ok",
+     "fails"
+    ],
+    "title": "OptIndexClosest",
+    "description": "The journalled option nearest to passing the verdict's checks."
+   },
    "OptIndexPick": {
     "properties": {
      "side": {
@@ -20353,6 +20619,63 @@
         "type": "null"
        }
       ]
+     },
+     "plan": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OvPlan"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "exit": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OvExit"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "closest": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OptIndexClosest"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "checks": {
+      "items": {
+       "$ref": "#/components/schemas/OvCheck"
+      },
+      "type": "array",
+      "title": "Checks",
+      "default": []
+     },
+     "reasons": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Reasons",
+      "default": []
+     },
+     "lot": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lot"
      }
     },
     "type": "object",
@@ -20377,7 +20700,13 @@
      "verdict_day",
      "headline",
      "bias",
-     "pick"
+     "pick",
+     "plan",
+     "exit",
+     "closest",
+     "checks",
+     "reasons",
+     "lot"
     ],
     "title": "OptIndexRow",
     "description": "One NSE index option expiry: the stored chain's summary and the scan's latest verdict for it."
@@ -21600,6 +21929,26 @@
        }
       ]
      },
+     "closest": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OvCandidate"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "plan": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OvPlan"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "edge_min_pct": {
       "type": "number",
       "title": "Edge Min Pct"
@@ -21661,6 +22010,8 @@
      "puts",
      "checks",
      "exit",
+     "closest",
+     "plan",
      "edge_min_pct",
      "prob_min_pct",
      "cost_pct",
@@ -22326,6 +22677,128 @@
     ],
     "title": "OvExit"
    },
+   "OvPlan": {
+    "properties": {
+     "entry": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Entry"
+     },
+     "stop": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stop"
+     },
+     "target": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Target"
+     },
+     "lot": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lot"
+     },
+     "hold_days": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hold Days"
+     },
+     "capital": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Capital"
+     },
+     "max_loss": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Max Loss"
+     },
+     "loss_at_stop": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Loss At Stop"
+     },
+     "gain_at_target": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Gain At Target"
+     },
+     "basis": {
+      "type": "string",
+      "title": "Basis"
+     }
+    },
+    "type": "object",
+    "required": [
+     "entry",
+     "stop",
+     "target",
+     "lot",
+     "hold_days",
+     "capital",
+     "max_loss",
+     "loss_at_stop",
+     "gain_at_target",
+     "basis"
+    ],
+    "title": "OvPlan",
+    "description": "How to trade a BUY pick, per lot after charges (Black-76 re-pricing at the option's IV)."
+   },
    "OvTrack": {
     "properties": {
      "recorded": {
@@ -22395,6 +22868,27 @@
        }
       ],
       "title": "First Day"
+     },
+     "skipped": {
+      "type": "integer",
+      "title": "Skipped",
+      "default": 0
+     },
+     "skipped_wins": {
+      "type": "integer",
+      "title": "Skipped Wins",
+      "default": 0
+     },
+     "skipped_avg_return_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Skipped Avg Return Pct"
      }
     },
     "type": "object",
@@ -22408,7 +22902,10 @@
      "no_trades",
      "atm_call_avg_return_pct",
      "atm_put_avg_return_pct",
-     "first_day"
+     "first_day",
+     "skipped",
+     "skipped_wins",
+     "skipped_avg_return_pct"
     ],
     "title": "OvTrack",
     "description": "Every journalled verdict so far, scored at its expiry, next to 'always buy the ATM call / put'."

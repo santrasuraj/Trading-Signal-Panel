@@ -83,25 +83,10 @@ strategies:
     stop_pct: 8              # 8% beat 10% both in and out of sample
     trail_pct: 0             # 0 = no trailing stop (the one robust improvement); exit on close below 50-DMA
     max_positions: 10
-  rsi2_pullback:
-    enabled: false           # short-term dips: lost money after realistic costs
-    rsi2_below: 10
-    stop_pct: 10
-    max_hold: 10
-    max_positions: 10
-  low_vol:
-    enabled: true
-    universe_size: 150       # the 150 most traded stocks (stand-in for "large caps")
-    top_n: 20                # hold the 20 steadiest
-    keep_rank: 40
-    rebalance: quarterly
-    use_regime: false        # defensive by design: stays invested
   sector_rotation:
     enabled: true
     top_industries: 3
     top_n: 12
-  golden_cross:
-    enabled: true
   index_trend:
     enabled: true
     etf: NIFTYBEES
@@ -118,8 +103,6 @@ strategies:
   earnings_gap:
     enabled: true
   bb_squeeze:
-    enabled: true
-  nr7_breakout:
     enabled: true
   legacy_rules:
     enabled: false           # the old v1 rules (-12%/yr); enable only to compare

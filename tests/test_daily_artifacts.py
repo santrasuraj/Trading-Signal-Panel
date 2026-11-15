@@ -16,7 +16,7 @@ from scanner.strategies import REJECTED_REASONS, build_strategies, strategy_life
 
 def test_lifecycle_rules():
     assert strategy_lifecycle({}, "momentum") == ("active", None)
-    assert strategy_lifecycle({}, "rsi2_pullback")[0] == "rejected"
+    assert strategy_lifecycle({}, "near_high")[0] == "rejected"
     assert strategy_lifecycle({"strategies": {"momentum": {"enabled": False}}}, "momentum") == ("disabled", None)
     cfg = {"strategies": {"momentum": {"enabled": False, "rejected_reason": "too slow"}}}
     assert strategy_lifecycle(cfg, "momentum") == ("rejected", "too slow")

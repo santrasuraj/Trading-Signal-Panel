@@ -76,9 +76,10 @@ def cycles(hist: pd.DataFrame, cycle: str) -> list[pd.Timestamp]:
     return [pd.Timestamp(x) for x in s.groupby(s.dt.to_period("M")).max()]
 
 
-def backtest(hist: pd.DataFrame, spec: dict) -> dict:
+def backtest(hist: pd.DataFrame, spec: dict, entry_days: set | None = None) -> dict:
     """hist: option_history.load(symbol). spec: strategy, cycle, entry_dte, short_pct, wing_pct, stop_pct, target_pct,
-    lots, slippage_pct."""
+    lots, slippage_pct. `entry_days`: when given, a cycle is entered only on one of these days (e.g. the days the IV
+    rank was high: scanner/option_signals.py's volatility test); otherwise on the first day within entry_dte."""
     legs = legs_for(spec)
     lots = int(spec.get("lots", 1))
     entry_dte = int(spec.get("entry_dte", 30))
@@ -100,6 +101,8 @@ def backtest(hist: pd.DataFrame, spec: dict) -> dict:
         cands = [pd.Timestamp(d) for d in days if pd.Timestamp(d) < exp and (exp - pd.Timestamp(d)).days <= entry_dte]
         if busy_until is not None:
             cands = [d for d in cands if d > busy_until]
+        if entry_days is not None:
+            cands = [d for d in cands if d in entry_days]
         if not cands:
             continue
         d0 = cands[0]

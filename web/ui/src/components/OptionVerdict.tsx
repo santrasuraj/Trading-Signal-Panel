@@ -4,7 +4,8 @@
 
 import { useState } from 'react'
 import { Check, X } from 'lucide-react'
-import type { OptVerdict, OvCandidate } from '@/api/outlook'
+import type { OptVerdict, OvCandidate, OvPlan } from '@/api/outlook'
+import { Money } from '@/components/num'
 import { Tip } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { DASH, date, num, pct, qty } from '@/lib/format'
@@ -35,6 +36,21 @@ function Candidates({ items, title }: { items: OvCandidate[]; title: string }) {
           ))}</tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+/** A BUY pick as a trade in premiums: entry, stop and target, the lot, the capital and the most it can lose. */
+export function PlanLine({ p, className }: { p: OvPlan; className?: string }) {
+  return (
+    <div className={cn('rounded-md bg-raised px-2 py-1.5 text-xs', className)}>
+      <span className="font-medium">Trade it as: </span>buy at <span className="num">{num(p.entry, 2)}</span>
+      {p.stop != null && <> · stop <span className="num text-loss">{num(p.stop, 2)}</span></>}
+      {p.target != null && <> · target <span className="num text-profit">{num(p.target, 2)}</span></>}
+      {p.lot != null && <> · lot {num(p.lot, 0)} · capital <Money v={p.capital} /> (all of it can be lost)</>}
+      {p.loss_at_stop != null && <> · at the stop <Money v={-p.loss_at_stop} signed color /></>}
+      {p.gain_at_target != null && <> · at the target <Money v={p.gain_at_target} signed color /></>}
+      <span className="block text-2xs text-muted">{p.basis}{p.hold_days != null ? `; the target is priced ${num(p.hold_days, 0)} days out` : ''}. Estimates: premiums also move with volatility, and a gap can jump the stop.</span>
     </div>
   )
 }
@@ -70,6 +86,12 @@ export function OptionVerdictPanel({ v }: { v: OptVerdict }) {
           <span className="font-medium">Exit plan: </span>stop if the stock closes {v.verdict === 'BUY_CALL' ? 'below' : 'above'} {num(v.exit.stop_underlying, 2)} · target near {num(v.exit.target_underlying, 2)}. <span className="text-muted">{v.exit.note}</span>
         </div>
       )}
+      {v.plan && <PlanLine p={v.plan} />}
+      {!v.pick && v.closest && (
+        <div className="text-xs text-muted">
+          <span className="font-medium text-fg">Closest option: </span>{num(v.closest.strike, 0)} {v.closest.side.toUpperCase()} at {num(v.closest.premium, 2)} · history-fair {v.closest.edge_pct != null ? `${v.closest.edge_pct > 0 ? '+' : ''}${num(v.closest.edge_pct, 0)}%` : DASH} · {num(v.closest.prob_profit_pct, 0)}% chance beyond the breakeven{v.closest.fails.length ? ` · fails: ${v.closest.fails.join('; ')}` : ' · passes the price checks, but the verdict needs every check'}. Not a signal.
+        </div>
+      )}
       <button type="button" className="link text-xs" onClick={() => setMore(!more)}>{more ? 'Hide' : 'Show'} every call and put checked</button>
       {more && (
         <div className="space-y-3">
@@ -82,7 +104,7 @@ export function OptionVerdictPanel({ v }: { v: OptVerdict }) {
         <span className="font-medium">Record so far: </span>
         {t.settled === 0
           ? <span className="text-muted">{t.recorded} verdict{t.recorded === 1 ? '' : 's'} journalled{t.first_day ? ` since ${date(t.first_day)}` : ''}, none expired yet. The scan journals each day's verdict and scores it at expiry - judge this only after dozens have settled.</span>
-          : <span className="text-muted">{t.settled} settled: {t.buys} buys ({t.buy_wins} won, average {pct(t.buy_avg_return_pct, { dp: 0 })}), {t.no_trades} no-trades. For comparison, always buying the ATM call averaged {pct(t.atm_call_avg_return_pct, { dp: 0 })}, the ATM put {pct(t.atm_put_avg_return_pct, { dp: 0 })}.</span>}
+          : <span className="text-muted">{t.settled} settled: {t.buys} buys ({t.buy_wins} won, average {pct(t.buy_avg_return_pct, { dp: 0 })}), {t.no_trades} no-trades. For comparison, always buying the ATM call averaged {pct(t.atm_call_avg_return_pct, { dp: 0 })}, the ATM put {pct(t.atm_put_avg_return_pct, { dp: 0 })}{t.skipped > 0 ? <>; the closest option of the no-trades would have averaged {pct(t.skipped_avg_return_pct, { dp: 0 })} ({t.skipped_wins} of {t.skipped} won)</> : null}.</span>}
       </div>
       <p className="text-2xs text-muted">{v.note}</p>
     </div>

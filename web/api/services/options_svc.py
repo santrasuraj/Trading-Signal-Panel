@@ -160,7 +160,9 @@ def indices() -> dict:
                          "pcr_oi": s.get("pcr_oi"), "max_pain": s.get("max_pain"),
                          "verdict": j["verdict"] if j else None, "verdict_day": j.get("day") if j else None,
                          "headline": j.get("headline") if j else None, "bias": j.get("bias") if j else None,
-                         "pick": pick})
+                         "pick": pick, "plan": j.get("plan") if j else None, "exit": j.get("exit") if j else None,
+                         "closest": j.get("closest") if j else None, "checks": (j or {}).get("checks") or [],
+                         "reasons": (j or {}).get("reasons") or [], "lot": j.get("lot") if j else None})
     mine = [r for r in journal if r.get("symbol") in ov.INDEX_COLUMN]
     from . import data
     closes = data.store_close()

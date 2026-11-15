@@ -86,7 +86,6 @@ def _qvm(f: Factors, size: int) -> dict:
 # Strategies that are off unless config.yaml turns them on: tested here and rejected. They are still
 # re-tested (cached) by the daily scan so the platform can show the evidence, but never produce orders.
 REJECTED_REASONS = {
-    "rsi2_pullback": "Lost money after realistic Indian delivery costs (short-term reversal works mostly in illiquid stocks).",
     "near_high": "Never beat the average stock in our tests.",
 }
 
@@ -134,23 +133,6 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             regime_action=opt(k, "regime_action", "hold"), stop_pct=opt(k, "stop_pct", None),
         ))
 
-    k = "low_vol"
-    if enabled(k):
-        big = int(opt(k, "universe_size", 150))
-        out.append(RankStrategy(
-            key=k, name="Low volatility", horizon="longterm", evidence="STRONG",
-            benchmark="Nifty100 Low Volatility 30",
-            description=("Holds the 20 steadiest large, liquid stocks (lowest 1-year volatility), reviewed quarterly "
-                         "- the method behind NSE's Nifty100 Low Vol 30 index (17.7% vs 13.7%/yr for Nifty 100, "
-                         "2005-18, and much smaller crash losses). Defensive: lags in strong rallies."),
-            score=lambda f: -f.vol_ann,
-            # "most traded" among STOCKS (that day's universe members on a point-in-time panel): heavily
-            # traded ETFs (NIFTYBEES, GOLDBEES...) must not take the slots
-            eligible=lambda f: (f.turnover_rank <= big) & f.vol_ann.notna(),
-            top_n=int(opt(k, "top_n", 20)), keep_rank=int(opt(k, "keep_rank", 40)),
-            rebalance=opt(k, "rebalance", "quarterly"), use_regime=opt(k, "use_regime", False),
-        ))
-
     k = "qvm_score"
     if enabled(k):
         big = int(opt(k, "universe_size", 200))
@@ -182,21 +164,6 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             eligible=lambda f: (f.industry_rank <= top_ind) & (f.p.close > f.sma200),
             top_n=int(opt(k, "top_n", 12)), keep_rank=int(opt(k, "keep_rank", 24)),
             rebalance=opt(k, "rebalance", "monthly"), use_regime=opt(k, "use_regime", True),
-        ))
-
-    k = "golden_cross"
-    if enabled(k):
-        gc_rs = float(opt(k, "rs_min", 60))
-        out.append(EventStrategy(
-            key=k, name="Golden cross trend", horizon="longterm", evidence="WEAK",
-            description=("Buys when the 50-day average crosses above the 200-day average (a 'golden cross') in a "
-                         "strong stock, and holds until the 'death cross' (50-day back below 200-day). Classic "
-                         "long-term trend following; slow, many small losses, a few big winners."),
-            entries=lambda f: f.golden_cross & (f.rs_rating >= gc_rs),
-            priority=lambda f: f.rs_rating,
-            exit_signal=lambda f: f.sma50 < f.sma200,
-            stop_pct=float(opt(k, "stop_pct", 15)), max_positions=int(opt(k, "max_positions", 15)),
-            use_regime=opt(k, "use_regime", False),
         ))
 
     k = "index_trend"
@@ -394,34 +361,6 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             priority=lambda f: f.rs_rating, exit_signal=lambda f: f.p.close < f.sma20,
             stop_pct=float(opt(k, "stop_pct", 8)), max_positions=int(opt(k, "max_positions", 10)),
             use_regime=opt(k, "use_regime", True),
-        ))
-
-    k = "nr7_breakout"
-    if enabled(k):
-        out.append(EventStrategy(
-            key=k, name="NR7 breakout", horizon="swing", evidence="WEAK",
-            description=("Toby Crabel's narrow-range pattern: after the quietest day in 7 sessions, a close above "
-                         "that day's high in an uptrending leader. Short holding (exit below the 10-day average or "
-                         "after 7 days), 5% stop."),
-            entries=lambda f: (f.nr7.shift(1).fillna(False).astype(bool) & (f.p.close > f.p.high.shift(1))
-                               & _uptrend(f) & (f.rs_rating >= 70)),
-            priority=lambda f: f.rs_rating, exit_signal=lambda f: f.p.close < f.sma10,
-            stop_pct=float(opt(k, "stop_pct", 5)), max_hold=int(opt(k, "max_hold", 7)),
-            max_positions=int(opt(k, "max_positions", 10)), use_regime=opt(k, "use_regime", True),
-        ))
-
-    k = "rsi2_pullback"
-    if enabled(k, default=False):
-        level = float(opt(k, "rsi2_below", 10))
-        out.append(EventStrategy(
-            key=k, name="RSI-2 pullback (Connors)", horizon="swing", evidence="WEAK",
-            description=("Larry Connors' short-term mean reversion: buy a 1-3 day plunge (RSI-2 under 10) in a "
-                         "stock above its 200-day average, sell on the bounce. Works in US large caps; here it lost "
-                         "money after realistic costs (reversal mostly works in illiquid stocks)."),
-            entries=lambda f: (f.p.close > f.sma200) & (f.rsi2 < level),
-            priority=lambda f: -f.rsi2, exit_signal=lambda f: f.p.close > f.sma5,
-            stop_pct=float(opt(k, "stop_pct", 10)), max_hold=int(opt(k, "max_hold", 10)),
-            max_positions=int(opt(k, "max_positions", 10)), use_regime=opt(k, "use_regime", True),
         ))
 
     k = "near_high"
