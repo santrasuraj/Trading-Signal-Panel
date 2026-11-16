@@ -277,10 +277,14 @@ maximum loss after charges, labelled with the evidence behind it. Practice only:
   in its own backtest (`not_lost`, the default: losing on the shares means losing more on options; `proven` = only
   strategies that beat costs; `all` = everything), once per strategy, stock and direction a day (the live OI build-up
   re-fires on every bar), and not while another option on that stock is open; an OI build-up also needs the price to
-  have moved 0.2%. Trades opened before a rule are cancelled and left out of the record; the page lists what was not
-  taken and why, and each strategy's own record. Stop and target premiums are the option's modelled move (at the IV
-  that prices its mid, the hold's time decay included) from now to the underlying's stop / target, added to the price
-  paid and rounded to NSE's 5-paise tick.
+  have moved 0.2%. A strategy whose own bought options clearly lose is paused too (10+ closed in the last 30 days,
+  losing on average with a t-stat of -1 or worse - an untested strategy's only test; trades leave the window as they
+  age, then it gets a new trial), and no new intraday option opens after 14:30 (30 minutes before the square-off: the
+  spread and charges in full, no time to reach a target). Trades opened before a rule are cancelled and left out of the
+  record; the page lists what was not taken and why, and each strategy's own record with its newest backtest result.
+  Each closed option's P&L is split into the stock's move (the signal), time decay, volatility, the spread and charges.
+  Stop and target premiums are the option's modelled move (at the IV that prices its mid, the hold's time decay
+  included) from now to the underlying's stop / target, added to the price paid and rounded to NSE's 5-paise tick.
 - The directional sources can't be backtested on options here (no intraday option prices are stored), so each shows
   its strategy's backtest label and builds its own record, after charges, on the page. Positions still open when the
   dashboard isn't running are marked and closed at NSE's official close by the nightly F&O download.

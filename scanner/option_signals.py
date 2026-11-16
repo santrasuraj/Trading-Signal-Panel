@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import math
+import statistics
 import time
 from datetime import date, datetime, timedelta
 
@@ -56,6 +57,8 @@ STRADDLE_TARGET_PCT, STRADDLE_STOP_PCT = 50.0, 35.0
 OI_MIN, SPREAD_MAX_PCT = 200, 10.0
 MAX_NEW = {"intraday": 10, "stock": 10, "volatility": 6}
 SQUARE_OFF = (15, 0)
+NO_NEW_INTRADAY = (14, 30)  # no new intraday option in the last 30 minutes: too little time to reach a target, while
+                            # the spread and charges are paid in full
 MAX_LATE_MIN = 15.0         # an intraday signal becomes an option only this soon after its entry bar starts (the
                             # 5-minute task's signals arrive up to ~10 min after it; later, the price has moved on)
 CHAIN_TTL_S = 60
@@ -67,8 +70,14 @@ CHAIN_TTL_S = 60
 EVIDENCE = {"not_lost": {"working", "mixed", "unknown", "untested"}, "proven": {"working"}, "all": None}
 DEFAULT_EVIDENCE = "not_lost"
 LOST = "not-working"
+# ... and by its own live record: a strategy whose bought options clearly lose (at least LIVE_MIN_TRADES closed in the
+# last LIVE_DAYS days, losing on average with a t-stat at or below LIVE_T) is paused - an untested strategy's only test,
+# and a backtest that stopped holding. Older trades drop out of the window: after LIVE_DAYS it gets a new trial.
+LIVE_DAYS, LIVE_MIN_TRADES, LIVE_T = 30, 10, -1.0
 SKIP_REASONS = {"lost": "their strategy lost money in its backtest", "evidence": "below the evidence rule",
+                "lost_live": "their strategy's live option record is losing",
                 "repeat": "a repeat of a trade already taken today", "stacked": "another option on the stock was open",
+                "closing": "in the last 30 minutes before the 15:00 square-off",
                 "late": "too late after the signal's bar", "no_option": "no liquid option near the target delta"}
 SOURCES = {"intraday": "From intraday signals", "stock": "From stock strategies", "volatility": "Volatility (IV rank)",
            "index": "Index verdicts"}
@@ -153,6 +162,57 @@ def tidy(rows: list[dict], day: str, allowed: set | None) -> int:
             kept.add(key)
             busy[r["symbol"]] = r.get("closed_at")
     return n
+
+
+def live_record(rows: list[dict], today: date) -> dict[str, dict]:
+    """Each intraday strategy's closed options of the last LIVE_DAYS days (cancelled ones never count): trades, total
+    P&L, t-stat of the average and whether that pauses it."""
+    since = (today - timedelta(days=LIVE_DAYS)).isoformat()
+    pnl: dict[str, list[float]] = {}
+    for r in rows:
+        if r.get("source") == "intraday" and r.get("state") == "closed" and r.get("pnl") is not None \
+                and (r.get("day") or "") >= since:
+            pnl.setdefault((r.get("strategy") or {}).get("key") or "?", []).append(float(r["pnl"]))
+    out = {}
+    for k, p in pnl.items():
+        n, m = len(p), sum(p) / len(p)
+        sd = statistics.stdev(p) if n > 1 else 0.0
+        t = m / (sd / math.sqrt(n)) if sd > 0 else None
+        out[k] = {"trades": n, "pnl": _r(sum(p)), "t": _r(t), "since": since,
+                  "paused": n >= LIVE_MIN_TRADES and m < 0 and (t is None or t <= LIVE_T)}
+    return out
+
+
+def pnl_parts(rec: dict, spot: float | None, mid_exit: float | None, now: datetime) -> dict | None:
+    """Where a closed bought option's P&L came from, in rupees (they add up to its P&L):
+      move      the stock's move from entry to exit (the signal), at the entry's implied volatility
+      decay     time decay over the hold
+      vol       the change in implied volatility (and what the model misses)
+      spread    paid crossing the bid-ask: bought at the ask, sold at the bid
+      charges   brokerage, STT, exchange, GST, stamp
+    None for spreads / condors or a trade without the prices needed (closed at NSE's official close)."""
+    try:
+        legs, u = rec.get("legs") or [], rec.get("underlying") or {}
+        if rec.get("kind") != "debit" or len(legs) != 1 or not spot or mid_exit is None or not u.get("price") \
+                or not legs[0].get("iv"):
+            return None
+        leg, lot = legs[0], rec["lot"]
+        call, k, iv = leg["type"] == "CE", float(leg["strike"]), float(leg["iv"]) / 100
+        exp = date.fromisoformat(rec["expiry"])
+        t0 = opt.years_to_expiry(exp, datetime.fromisoformat(rec["opened_at"]))
+        t1 = opt.years_to_expiry(exp, now)
+        s0, s1 = float(u["price"]), float(spot)
+
+        def val(s_, t_):
+            return float(opt.black76(s_ * math.exp(R * t_), k, t_, R, iv, 1.0 if call else 0.0))
+        mid0 = float(leg.get("mid") or val(s0, t0))      # older trades did not store the mid paid around
+        move, decay = (val(s1, t1) - val(s0, t1)) * lot, (val(s0, t1) - val(s0, t0)) * lot
+        spread = ((mid0 - rec["entry"]) + (rec["exit"] - mid_exit)) * lot
+        vol = (mid_exit - mid0) * lot - move - decay
+        return {"move": _r(move), "decay": _r(decay), "vol": _r(vol), "spread": _r(spread),
+                "charges": _r(-(rec.get("charges") or 0.0))}
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
 
 
 def _lock():
@@ -308,7 +368,8 @@ def build_buy(source: str, uid: str, symbol: str, direction: str, und_stop: floa
     return {"id": f"{source}|{uid}", "source": source, "symbol": symbol, "direction": direction, "kind": "debit",
             "structure": f"Buy {side.upper()}", "legs": [{"action": "buy", "type": side.upper(), "strike": k,
                                                           "expiry": c["expiry"].isoformat(), "premium": _r(entry),
-                                                          "iv": _r(iv * 100, 1), "delta": _r(float(p["delta"]), 2)}],
+                                                          "mid": _r(float(p["mid"])), "iv": _r(iv * 100, 1),
+                                                          "delta": _r(float(p["delta"]), 2)}],
             "expiry": c["expiry"].isoformat(), "lot": int(lot), "entry": _r(entry), "stop": _r(stop), "target": _r(target),
             "capital": _r(entry * lot + ch_in), "max_loss": _r(max_loss), "max_gain": _r(max_gain),
             "charges_in": _r(ch_in), "underlying": {"price": _r(c["spot"]), "stop": _r(und_stop), "target": _r(und_target)},
@@ -428,6 +489,7 @@ def value_now(rec: dict, c: dict | None, mode: str = "mid") -> float | None:
 
 
 def _close(rec: dict, value: float, reason: str, now: datetime, src: str = "chain") -> None:
+    value = _r(value)                                    # the P&L from the exit price as shown (to the paisa)
     lot = rec["lot"]
     day = now.date()
     out_charges = 0.0
@@ -520,6 +582,7 @@ def refresh(intraday: dict | None = None, now: datetime | None = None, sources=(
         rule = evidence_rule()
         allowed = EVIDENCE[rule]
         rep["cancelled"] = tidy(rows, day, allowed)
+        paused = {k for k, v in live_record(rows, now.date()).items() if v["paused"]} if allowed is not None else set()
         skips: dict[str, set] = {k: set() for k in SKIP_REASONS}
         if mkt_open and (now.hour, now.minute) < SQUARE_OFF:
             new: list[dict] = []
@@ -535,12 +598,18 @@ def refresh(intraday: dict | None = None, now: datetime | None = None, sources=(
                     if allowed is not None and status not in allowed:
                         skips["lost" if status == LOST else "evidence"].add(tag)
                         continue
+                    if strat in paused:
+                        skips["lost_live"].add(tag)  # its own bought options keep losing: paused (LIVE_DAYS window)
+                        continue
                     if any(((r.get("strategy") or {}).get("key"), r["symbol"], r.get("direction")) == (strat, sym, x.get("side"))
                            for r in live):
                         skips["repeat"].add(tag)   # the same signal again (an OI build-up re-fires every bar)
                         continue
                     if any(r["symbol"] == sym and r.get("state") == "open" for r in live):
                         skips["stacked"].add(tag)
+                        continue
+                    if (now.hour, now.minute) >= NO_NEW_INTRADAY:
+                        skips["closing"].add(tag)    # minutes before the square-off: costs in full, no time to work
                         continue
                     late = late_min(now, x.get("entry_time"))
                     if late is not None and late > MAX_LATE_MIN:
@@ -616,6 +685,7 @@ def refresh(intraday: dict | None = None, now: datetime | None = None, sources=(
             if reason:
                 fill = value_now(rec, c, "close")
                 _close(rec, fill if fill is not None else v, reason, now)
+                rec["parts"] = pnl_parts(rec, c.get("spot"), v, now)
                 rep["closed"] += 1
         rep["open"] = sum(1 for r in rows if r.get("state") == "open")
         rep["skipped"] = {k: len(v) for k, v in skips.items() if v}
@@ -729,7 +799,9 @@ def settle_day(content: bytes, day: date) -> int:
                 n += 1
             else:
                 reason = _exit_rule(rec, total)
-                rec.update(mark=_r(total), marked_at=f"{day.isoformat()} close")
+                m = _r(total)                                    # the open P&L moves with the mark it is shown with
+                rec.update(mark=m, marked_at=f"{day.isoformat()} close",
+                           unrealized=_r(((m - rec["entry"]) if rec["kind"] == "debit" else (rec["entry"] - m)) * rec["lot"]))
                 if reason:
                     _close(rec, total, f"{reason} (at the close)", when, "nse close")
                     n += 1
@@ -753,12 +825,28 @@ def record(rows: list[dict]) -> list[dict]:
                     "open": sum(1 for r in rows if r.get("source") == src and r.get("state") == "open"),
                     "verdict": ("not enough trades yet" if len(done) < 20 else
                                 "made money so far" if sum(pnl) > 0 else "lost money so far"),
-                    "by_strategy": _by_strategy([r for r in rows if r.get("source") == src])})
+                    "by_strategy": _by_strategy([r for r in rows if r.get("source") == src],
+                                                live_record(rows, ist_now().date()) if src == "intraday" else {},
+                                                tested_status() if src == "intraday" else {})})
     return out
 
 
-def _by_strategy(rows: list[dict]) -> list[dict]:
-    """Each strategy's own record inside a source (cancelled trades never count)."""
+def tested_status() -> dict[str, str]:
+    """Each intraday strategy's status in its newest backtest (intraday.json): a trade stores the status it was opened
+    under, which a later backtest can change."""
+    try:
+        st = json.loads((RESULTS_DIR / "intraday.json").read_text(encoding="utf-8"))
+        return {str(x["key"]): str(x.get("status") or "untested") for x in st.get("strategies") or [] if x.get("key")}
+    except (OSError, ValueError, TypeError, KeyError):
+        return {}
+
+
+PARTS = ("move", "decay", "vol", "spread", "charges")
+
+
+def _by_strategy(rows: list[dict], live: dict | None = None, tested: dict | None = None) -> list[dict]:
+    """Each strategy's own record inside a source (cancelled trades never count): trades, wins, P&L, where that P&L
+    came from (the trades whose breakdown is known) and, for intraday strategies, the live record that pauses one."""
     keys: dict[str, dict] = {}
     for r in rows:
         if r.get("state") == "cancelled":
@@ -766,13 +854,19 @@ def _by_strategy(rows: list[dict]) -> list[dict]:
         st = r.get("strategy") or {}
         k = st.get("key") or "?"
         e = keys.setdefault(k, {"key": k, "name": st.get("name") or k, "status": st.get("status"), "trades": 0,
-                                "wins": 0, "pnl": 0.0, "open": 0})
+                                "wins": 0, "pnl": 0.0, "open": 0, "parts": None, "parts_n": 0, "live": None})
         if r.get("state") == "open":
             e["open"] += 1
         elif r.get("state") == "closed" and r.get("pnl") is not None:
             e["trades"] += 1
             e["wins"] += int(r["pnl"] > 0)
             e["pnl"] = _r(e["pnl"] + r["pnl"])
+            if r.get("parts"):
+                e["parts"] = {p: _r((e["parts"] or {}).get(p, 0.0) + (r["parts"].get(p) or 0.0)) for p in PARTS}
+                e["parts_n"] += 1
+    for k, e in keys.items():
+        e["live"] = (live or {}).get(k)
+        e["status"] = (tested or {}).get(k, e["status"])    # its newest backtest, not the one it was opened under
     return sorted(keys.values(), key=lambda e: (-e["trades"], e["name"]))
 
 

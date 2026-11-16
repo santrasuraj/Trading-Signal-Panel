@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Info, Layers, RefreshCw } from 'lucide-react'
-import { useOptionSignals, useRefreshOptionSignals, useVolTest, type OptRecord, type OptSignal, type OptSignalsView, type OptSource } from '@/api/optionSignals'
+import { useOptionSignals, useRefreshOptionSignals, useVolTest, type OptPnlParts, type OptRecord, type OptSignal, type OptSignalsView, type OptSource } from '@/api/optionSignals'
 import type { SignalProof } from '@/api/types'
 import { ProofBadge } from '@/components/badges'
 import { DataTable, type Col } from '@/components/DataTable'
@@ -42,6 +42,23 @@ const COLS: Col<OptSignal>[] = [
     : <span className="flex flex-col leading-tight"><span className="text-xs text-muted">{r.exit_reason}</span><Money v={r.pnl} signed color className="text-xs" /></span> },
 ]
 
+const PARTS: [keyof OptPnlParts, string, string][] = [
+  ['move', 'stock move', "What the stock's move from entry to exit was worth: the signal itself"],
+  ['decay', 'time decay', 'Premium lost to time over the hold'],
+  ['vol', 'volatility', 'The change in implied volatility (and what the pricing model misses)'],
+  ['spread', 'spread', 'Paid crossing the bid-ask: bought at the ask, sold at the bid'],
+  ['charges', 'charges', 'Brokerage, STT, exchange, SEBI, GST and stamp duty'],
+]
+
+/** Where a strategy's closed options made or lost their money. */
+function Parts({ p, n, of }: { p: OptPnlParts; n: number; of: number }) {
+  return (
+    <div className="mt-0.5 flex flex-wrap gap-x-2 pl-1 text-muted" title={n < of ? `Breakdown of ${n} of ${of} closed trades (older ones did not store it)` : 'Where the P&L came from'}>
+      {PARTS.map(([k, label, tip]) => <span key={k} title={tip}>{label} <Money v={p[k]} signed color /></span>)}
+    </div>
+  )
+}
+
 function Record({ rows }: { rows: OptRecord[] }) {
   return (
     <div className="grid gap-2 sm:grid-cols-3">
@@ -53,9 +70,16 @@ function Record({ rows }: { rows: OptRecord[] }) {
           {(r.by_strategy?.length ?? 0) > 0 && (
             <ul className="mt-1.5 space-y-0.5 border-t border-line pt-1.5">
               {r.by_strategy!.map((s) => (
-                <li key={s.key} className="flex items-center justify-between gap-2 text-2xs">
-                  <span className="flex min-w-0 items-center gap-1.5"><ProofBadge status={(PROOF.has(String(s.status)) ? s.status : 'untested') as SignalProof} /><span className="truncate" title={s.name}>{s.name}</span></span>
-                  <span className="whitespace-nowrap text-muted">{s.trades ? <>{s.wins}/{s.trades} won · <Money v={s.pnl} signed color /></> : 'no closed trade'}{s.open ? ` · ${s.open} open` : ''}</span>
+                <li key={s.key} className="text-2xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5"><ProofBadge status={(PROOF.has(String(s.status)) ? s.status : 'untested') as SignalProof} /><span className="truncate" title={s.name}>{s.name}</span></span>
+                    <span className="whitespace-nowrap text-muted">{s.trades ? <>{s.wins}/{s.trades} won · <Money v={s.pnl} signed color /></> : 'no closed trade'}{s.open ? ` · ${s.open} open` : ''}</span>
+                  </div>
+                  {s.live?.paused && (
+                    <div className="mt-0.5 pl-1 text-loss" title={`No new option from it while its options since ${day(s.live.since)} are clearly losing: trades leave this 30-day window as they age, and then it gets a new trial`}>
+                      Paused: its last {s.live.trades} options netted <Money v={s.live.pnl} signed />{s.live.t != null ? ` (t ${s.live.t.toFixed(1)})` : ''}
+                    </div>)}
+                  {s.parts && <Parts p={s.parts} n={s.parts_n ?? 0} of={s.trades} />}
                 </li>))}
             </ul>)}
         </div>))}
@@ -69,7 +93,7 @@ function NotTaken({ d }: { d: OptSignalsView }) {
   const rule = d.evidence?.rule === 'proven' ? 'only from strategies whose backtest beat costs' : d.evidence?.rule === 'all' ? 'from every strategy (research setting)' : "from every strategy except those that lost money in their backtest"
   return (
     <div className="border-b border-line px-4 py-2 text-2xs text-muted">
-      <span className="font-medium text-fg">Rules: </span>an option opens {rule}, once per strategy, stock and direction a day, and not while another option on that stock is open.
+      <span className="font-medium text-fg">Rules: </span>an option opens {rule}{d.evidence?.rule === 'all' ? '' : `, not from a strategy whose own options keep losing (${d.rules.live_min_trades ?? 10}+ closed in ${d.rules.live_days ?? 30} days)`}, once per strategy, stock and direction a day, not while another option on that stock is open, and not after {d.rules.no_new_intraday ?? '14:30'}.
       {sk.length > 0 && <> <span className="font-medium text-fg">Not taken{d.skipped_day ? ` on ${day(d.skipped_day)}` : ''}: </span>
         {sk.map(([k, v], i) => <span key={k} title={v.examples.join(', ')}>{i ? ' · ' : ''}{v.count} {v.label}{v.examples.length ? ` (${v.examples.slice(0, 3).join(', ')}${v.count > 3 ? ', …' : ''})` : ''}</span>)}.</>}
       {(d.cancelled ?? 0) > 0 && <> {d.cancelled} trade{d.cancelled === 1 ? '' : 's'} opened before these rules {d.cancelled === 1 ? 'was' : 'were'} cancelled and left out of the record.</>}

@@ -127,11 +127,17 @@ def view(source: str | None = None) -> dict:
             "evidence": {"rule": rule, "allowed": sorted(osg.EVIDENCE[rule]) if osg.EVIDENCE[rule] else None},
             "market_open": osg._market_open(now_ist()),
             "rules": {"delta_near": osg.DELTA_NEAR, "delta_month": osg.DELTA_MONTH, "iv_high": osg.IV_HIGH,
-                      "iv_low": osg.IV_LOW, "vol_target_pct": osg.VOL_TARGET_PCT, "vol_stop_pct": osg.VOL_STOP_PCT},
+                      "iv_low": osg.IV_LOW, "vol_target_pct": osg.VOL_TARGET_PCT, "vol_stop_pct": osg.VOL_STOP_PCT,
+                      "live_days": osg.LIVE_DAYS, "live_min_trades": osg.LIVE_MIN_TRADES, "live_t": osg.LIVE_T,
+                      "no_new_intraday": "%02d:%02d" % osg.NO_NEW_INTRADAY},
             "note": ("Practice only: nothing is sent to FYERS. A signal opens an option only if its strategy did not "
                      "lose money in its own backtest (config.yaml option_signals.evidence: not_lost; 'proven' = only "
-                     "strategies that beat costs), once per strategy, stock and direction a day, and not while another "
-                     "option on that stock is open. Entry at NSE's live ask (sold legs at the bid). Stop and target: the "
+                     f"strategies that beat costs) and its own bought options are not clearly losing ({osg.LIVE_MIN_TRADES}+ "
+                     f"closed in {osg.LIVE_DAYS} days, t-stat {osg.LIVE_T:g} or worse pauses it), once per strategy, stock "
+                     "and direction a day, not while another option on that stock is open and not after "
+                     f"{osg.NO_NEW_INTRADAY[0]}:{osg.NO_NEW_INTRADAY[1]:02d} (30 minutes before the square-off). Each closed "
+                     "trade's P&L is split into the stock's move, time decay, volatility, the spread and charges. "
+                     "Entry at NSE's live ask (sold legs at the bid). Stop and target: the "
                      "option's modelled move from now to the underlying's stop / target (its own implied volatility, "
                      "time decay included) added to the price paid - a guide, since volatility moves too. 'Untested' "
                      "means there is no history to test it on (past intraday OI and option prices are not stored): its "

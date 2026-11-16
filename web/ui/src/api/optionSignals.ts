@@ -19,7 +19,12 @@ export interface OptSignal {
   unrealized?: number | null; exit?: number | null; exit_reason?: string; exit_src?: string; closed_at?: string
   pnl?: number | null; ret_pct?: number | null; charges?: number | null
 }
-export interface OptStrategyRecord { key: string; name: string; status: string | null; trades: number; wins: number; pnl: number; open: number }
+/** Where closed bought options' P&L came from (rupees, they add up to it): the stock's move, time decay, volatility, the spread and charges. */
+export interface OptPnlParts { move: number; decay: number; vol: number; spread: number; charges: number }
+/** A strategy's closed options of the last few weeks; `paused` = clearly losing, no new option until it recovers. */
+export interface OptLiveRecord { trades: number; pnl: number; t: number | null; since: string; paused: boolean }
+export interface OptStrategyRecord { key: string; name: string; status: string | null; trades: number; wins: number; pnl: number; open: number
+  parts?: OptPnlParts | null; parts_n?: number; live?: OptLiveRecord | null }
 export interface OptRecord { source: OptSource; label: string; trades: number; win_rate: number | null; avg_ret_pct: number | null; pnl: number; open: number; verdict: string
   /** Each strategy's own live record inside the source (an untested strategy's only test). */
   by_strategy?: OptStrategyRecord[] }
@@ -32,7 +37,8 @@ export interface OptSignalsView {
   skipped?: Record<string, { label: string; count: number; examples: string[] }>; skipped_day?: string; cancelled?: number
   /** Which strategies may open an option (config.yaml option_signals.evidence). */
   evidence?: { rule: 'not_lost' | 'proven' | 'all'; allowed: string[] | null }
-  rules: { delta_near: number; delta_month: number; iv_high: number; iv_low: number; vol_target_pct: number; vol_stop_pct: number }
+  rules: { delta_near: number; delta_month: number; iv_high: number; iv_low: number; vol_target_pct: number; vol_stop_pct: number
+    live_days?: number; live_min_trades?: number; live_t?: number; no_new_intraday?: string }
 }
 export interface VolStats { trades: number; win_rate?: number; total?: number; avg?: number; max_drawdown?: number; profit_factor?: number | null; worst?: number; first?: string; last?: string }
 export interface VolTest { tests: { symbol: string; error?: string; days_with_rank?: number; high_days?: number; always?: VolStats; when_high?: VolStats; first?: string | null; last?: string | null }[]; note: string }

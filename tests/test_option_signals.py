@@ -45,6 +45,7 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(osg.opt, "expiries", lambda sym: ([EXP], 200))
     monkeypatch.setattr(osg, "_latest_scan", lambda: w["scan"])
     monkeypatch.setattr(osg, "evidence_rule", lambda cfg=None: w.get("rule", "not_lost"))
+    monkeypatch.setattr(osg, "tested_status", lambda: w.get("tested", {}))
     return w
 
 
@@ -463,3 +464,73 @@ def test_the_view_and_the_nightly_settlement_apply_the_rules_too(world, monkeypa
     osg.settle_day(bhavcopy([("RELIANCE", EXP.isoformat(), k, "CE", 61.5)], {"RELIANCE": 2540.0}), NOW.date())
     by = {r["id"]: r for r in osg.load()}
     assert by["intraday|dup"]["state"] == "cancelled" and by[first["id"]]["state"] == "closed"
+
+
+# ---- the live record, the closing half hour and where the P&L came from ------------------------------------------
+def _closed(key, pnl, day="2026-11-10", i=0):
+    return {"id": f"intraday|{key}|{day}|{i}", "source": "intraday", "symbol": f"S{i}", "direction": "LONG",
+            "day": day, "opened_at": f"{day}T10:00:00+05:30", "closed_at": f"{day}T11:00:00+05:30", "state": "closed",
+            "pnl": pnl, "strategy": {"key": key, "status": "untested"}}
+
+
+def test_a_strategy_whose_live_options_keep_losing_is_paused(world):
+    osg._save([_closed("oi_buildup", -500.0 - 40 * i, i=i) for i in range(10)])
+    rep = osg.refresh(intraday=isig(key="oi_buildup"), now=NOW, sources=("intraday",))
+    assert rep["opened"] == 0 and rep["skipped"] == {"lost_live": 1}
+    live = osg.live_record(osg.load(), NOW.date())["oi_buildup"]
+    assert live["trades"] == 10 and live["paused"] and live["t"] < -1
+    other = osg.refresh(intraday=isig(key="orb", sym="NIFTY"), now=NOW.replace(minute=1), sources=("intraday",))
+    assert other["opened"] == 1                                       # another strategy is not affected
+
+
+def test_a_live_record_too_short_or_not_clearly_losing_does_not_pause(world):
+    nine = [_closed("a", -800.0 - i, i=i) for i in range(9)]           # 9 losers: not enough trades yet
+    mixed = [_closed("b", p, i=i) for i, p in enumerate([-900, 1200, -700, 800, -600, 900, -1000, 700, -500, -150])]
+    old = [_closed("c", -900.0 - i, day="2026-10-01", i=i) for i in range(12)]    # older than LIVE_DAYS
+    live = osg.live_record(nine + mixed + old, NOW.date())
+    assert not live["a"]["paused"] and not live["b"]["paused"] and "c" not in live
+    world["rule"] = "all"                                             # research: no evidence rule at all
+    osg._save([_closed("oi_buildup", -500.0 - 40 * i, i=i) for i in range(10)])
+    assert osg.refresh(intraday=isig(key="oi_buildup"), now=NOW, sources=("intraday",))["opened"] == 1
+
+
+def test_no_new_intraday_option_in_the_last_half_hour(world):
+    rep = osg.refresh(intraday=isig(t="14:30"), now=NOW.replace(hour=14, minute=31), sources=("intraday",))
+    assert rep["opened"] == 0 and rep["skipped"] == {"closing": 1}
+    assert osg.refresh(intraday=isig(t="14:25"), now=NOW.replace(hour=14, minute=29),
+                       sources=("intraday",))["opened"] == 1
+
+
+def test_a_closed_option_says_where_its_pnl_came_from(world):
+    osg.refresh(intraday=isig(), now=NOW, sources=("intraday",))
+    (r,) = osg.load()
+    assert r["legs"][0]["mid"] < r["entry"]                           # bought at the ask, above the mid
+    world["chain"] = chain("RELIANCE", 2600.0, step=10, now=NOW.replace(hour=11))   # the stock ran to the target
+    osg.refresh(intraday=isig(), now=NOW.replace(hour=11), sources=("intraday",))
+    (r,) = osg.load()
+    p = r["parts"]
+    assert r["state"] == "closed" and set(p) == set(osg.PARTS)
+    assert sum(p.values()) == pytest.approx(r["pnl"], abs=0.05)       # the parts add up to the P&L
+    assert p["move"] > 0 and p["decay"] < 0 and p["spread"] < 0 and p["charges"] < 0
+    assert abs(p["vol"]) < 0.1 * abs(p["move"])                       # one IV all day: little left for volatility
+    rec = {x["source"]: x for x in osg.record(osg.load())}["intraday"]["by_strategy"][0]
+    assert rec["parts_n"] == 1 and rec["parts"] == pytest.approx(p) and rec["live"]["trades"] == 1
+
+
+def test_settlement_marks_an_open_option_and_its_open_pnl_together(world):
+    osg.refresh(intraday=isig(), now=NOW, sources=("intraday",))
+    (r,) = osg.load()
+    held = {**r, "id": "stock|y", "source": "stock", "stop": None, "target": None, "unrealized": 123.0}
+    osg._save([held])                                                  # a stock option held overnight
+    osg.settle_day(bhavcopy([("RELIANCE", EXP.isoformat(), r["legs"][0]["strike"], "CE", 61.5)],
+                            {"RELIANCE": 2540.0}), NOW.date())
+    (h,) = osg.load()
+    assert h["state"] == "open" and h["mark"] == 61.5 and h["marked_at"].endswith("close")
+    assert h["unrealized"] == pytest.approx((61.5 - h["entry"]) * h["lot"], abs=0.01)
+
+
+def test_the_record_shows_each_strategys_newest_backtest(world):
+    osg.refresh(intraday=isig(key="sweep_or15", status="untested"), now=NOW, sources=("intraday",))
+    world["tested"] = {"sweep_or15": "not-working"}                    # tonight's backtest: it lost
+    by = {x["source"]: x for x in osg.record(osg.load())}["intraday"]["by_strategy"]
+    assert by[0]["key"] == "sweep_or15" and by[0]["status"] == "not-working"

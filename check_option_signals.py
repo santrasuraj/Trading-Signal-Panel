@@ -11,9 +11,10 @@
             (per source and per strategy) add up from them
   trades    every trade kept: CE for LONG / PE for SHORT, the stock's NSE lot, capital, max loss, P&L, return, open P&L
             and a stop exit at or below the stop
-  pricing   trades opened since this copy was updated: a stop below the entry and a target above it, on NSE's 5-paise
-            tick, each equal to the option's modelled change (Black-76 here, with the trade's own IV, time decay of the
-            hold included) added to the price paid; the delta near the 0.55 asked for
+  pricing   trades opened since this copy was updated: no intraday one after 14:30; a stop below the entry and a
+            target above it, on NSE's 5-paise tick, each equal to the option's modelled change (Black-76 here, with
+            the trade's own IV, time decay of the hold included) added to the price paid; the delta near the 0.55 asked
+            for; each closed trade's breakdown (stock move, decay, volatility, spread, charges) adding up to its P&L
   signal    the underlying's stop and target were still on the right sides of its price when the option was bought
   settled   no intraday option still open from an earlier day (the nightly settlement ran)
 
@@ -237,12 +238,14 @@ def check_trades(rows: list[dict], fate: dict, today: str) -> None:
             if r.get("exit_reason") == "stop" and r.get("stop") is not None and \
                     (r["exit"] > r["stop"] + 1e-6 if debit else r["exit"] < r["stop"] - 1e-6):
                 bad["a stop exit at or past the stop"].append(f"{tag} (exit {r['exit']}, stop {r['stop']})")
+        if r.get("parts") and r.get("pnl") is not None and not near(sum(r["parts"].values()), r["pnl"], 0.1):
+            bad["P&L breakdown adds up"].append(f"{tag} ({sum(r['parts'].values()):.2f} vs {r['pnl']})")
         if r.get("state") == "open" and r.get("unrealized") is not None and r.get("mark") is not None:
             if not near(r["unrealized"], ((r["mark"] - entry) if debit else (entry - r["mark"])) * lot, 0.05):
                 bad["open P&L = (mark - entry) x lot"].append(tag)
     for name in ("CE for LONG, PE for SHORT", "NSE lot", "capital = premium x lot + charges", "max loss",
                  "P&L = (exit - entry) x lot - charges", "return = P&L / capital", "a stop exit at or past the stop",
-                 "open P&L = (mark - entry) x lot"):
+                 "open P&L = (mark - entry) x lot", "P&L breakdown adds up"):
         report(name, not bad[name], f"{len(bad[name])} wrong, e.g. {bad[name][:2]}" if bad[name] else "")
     print(f"           ({len(keep)} trades checked)")
 
@@ -254,6 +257,9 @@ def check_pricing(rows: list[dict], fate: dict, since: str) -> None:
     if not new:
         report("pricing", None, "no trade opened since the update yet: run this again after the next session's trades")
         return
+    closing = [f"{r['day']} {r['symbol']} {r['opened_at'][11:16]}" for r in new
+               if r["source"] == "intraday" and r["opened_at"][11:16] >= "14:30"]
+    report("no new intraday option after 14:30", not closing, ", ".join(closing[:4]))
     bad: dict[str, list[str]] = defaultdict(list)
     for r in new:
         tag = f"{r['day']} {r['symbol']}"
