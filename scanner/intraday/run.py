@@ -383,6 +383,7 @@ def _write_json(path, obj: dict) -> None:
 OI_KEY, OI_NAME = "oi_buildup", "F&O OI build-up (live)"
 OI_MAX_SIGNALS = 10
 OI_MAX_AGE_MIN = 20                  # a live OI snapshot older than this (the 5-minute job stopped) gives no signals
+OI_MIN_MOVE_PCT = 0.2                # a build-up needs the price to have moved: a flat stock is neither long nor short
 
 
 def _status_note(status: str) -> str:
@@ -422,6 +423,8 @@ def oi_buildup_signals(days_today: dict[str, Day], live_oi: dict | None, now, ca
         li = int(valid[-1])
         px = float(d.c[li])
         chg = (px / d.prev_close - 1) * 100
+        if abs(chg) < OI_MIN_MOVE_PCT:
+            continue                                     # unchanged price: rising OI says nothing about direction
         kind = fi.classify(chg, r.get("oi_chg_pct"))
         if kind not in ("long_buildup", "short_buildup"):
             continue

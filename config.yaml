@@ -181,6 +181,12 @@ options:
   interval_seconds: 60              # NSE updates its chain every few minutes; an unchanged chain is not stored twice
   risk_free_pct: 6.5                # for implied volatility (about the 91-day T-bill yield)
 
+# Options signals (Signals page > Options): which signals may open an option, by their strategy's backtest.
+# not_lost = all but the strategies that LOST money in their backtest (default); proven = only those that beat costs;
+# all = everything (research).
+option_signals:
+  evidence: not_lost
+
 # Big trades live in index futures / options (Options page): the 09:14 live service (FYERS WebSocket, needs today's
 # FYERS login) also streams these and keeps every large trade with its likely side. FYERS allows 100 live symbols:
 # these come off the stocks (default 2 futures + 18 NIFTY options = 20; stocks keep 80). futures: [] and options: []

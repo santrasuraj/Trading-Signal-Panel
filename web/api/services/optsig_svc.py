@@ -97,26 +97,46 @@ def _verdicts() -> dict:
     return {"day": day, "rows": [{k: r.get(k) for k in keep} for r in today], "track": track}
 
 
+def _skipped(day: str | None) -> dict:
+    """The signals not taken on `day`, by reason, with a few examples."""
+    d = (osg.load_skips().get(day) or {}) if day else {}
+    return {k: {"label": osg.SKIP_REASONS.get(k, k), "count": len(v),
+                "examples": [x.split("|")[1] + (" " + x.split("|")[2] if len(x.split("|")) > 2 else "") for x in v[:6]]}
+            for k, v in d.items() if v}
+
+
 def view(source: str | None = None) -> dict:
     rows = osg.load()
     today = now_ist().date().isoformat()
-    show = [r for r in rows if r.get("state") == "open" or r.get("day") == today]
+    allowed = osg.EVIDENCE[osg.evidence_rule()]
+    for d in sorted({r.get("day") for r in rows if r.get("source") == "intraday" and r.get("state") != "cancelled"} - {None}):
+        osg.tidy(rows, d, allowed)          # shown by the rules even before the live loop has re-saved the journal
+    live = [r for r in rows if r.get("state") != "cancelled"]
+    show = [r for r in live if r.get("state") == "open" or r.get("day") == today]
     if not show:                                     # weekend / before the first signal: the last session's
-        last = max((r["day"] for r in rows), default=None)
-        show = [r for r in rows if r.get("day") == last]
+        last = max((r["day"] for r in live), default=None)
+        show = [r for r in live if r.get("day") == last]
     if source in osg.SOURCES:
         show = [r for r in show if r["source"] == source]
     show.sort(key=lambda r: (r.get("state") != "open", r.get("opened_at") or ""), reverse=False)
+    shown_day = max((r["day"] for r in show), default=today)
+    rule = osg.evidence_rule()
     return {"signals": show, "record": osg.record(rows), "verdicts": _verdicts(), "loop": dict(_state),
+            "skipped": _skipped(shown_day), "skipped_day": shown_day,
+            "cancelled": sum(1 for r in rows if r.get("state") == "cancelled" and r.get("day") == shown_day),
+            "evidence": {"rule": rule, "allowed": sorted(osg.EVIDENCE[rule]) if osg.EVIDENCE[rule] else None},
             "market_open": osg._market_open(now_ist()),
             "rules": {"delta_near": osg.DELTA_NEAR, "delta_month": osg.DELTA_MONTH, "iv_high": osg.IV_HIGH,
                       "iv_low": osg.IV_LOW, "vol_target_pct": osg.VOL_TARGET_PCT, "vol_stop_pct": osg.VOL_STOP_PCT},
-            "note": ("Practice only: nothing is sent to FYERS. Entry at NSE's live ask (sold legs at the bid); stop and "
-                     "target premiums are the option re-priced at the underlying's stop and target, a guide since "
-                     "volatility moves too. The directional sources can't be backtested on options here (no intraday "
-                     "option prices stored): each carries its strategy's backtest label and builds its own record "
-                     "below. Buying options loses money for most traders (SEBI, 2024: 93% of individual F&O traders "
-                     "lost money over three years).")}
+            "note": ("Practice only: nothing is sent to FYERS. A signal opens an option only if its strategy did not "
+                     "lose money in its own backtest (config.yaml option_signals.evidence: not_lost; 'proven' = only "
+                     "strategies that beat costs), once per strategy, stock and direction a day, and not while another "
+                     "option on that stock is open. Entry at NSE's live ask (sold legs at the bid). Stop and target: the "
+                     "option's modelled move from now to the underlying's stop / target (its own implied volatility, "
+                     "time decay included) added to the price paid - a guide, since volatility moves too. 'Untested' "
+                     "means there is no history to test it on (past intraday OI and option prices are not stored): its "
+                     "own record below is its test. Buying options loses money for most traders (SEBI, 2024: 93% of "
+                     "individual F&O traders lost money over three years).")}
 
 
 def vol_test() -> dict:

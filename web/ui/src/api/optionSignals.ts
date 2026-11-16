@@ -19,12 +19,19 @@ export interface OptSignal {
   unrealized?: number | null; exit?: number | null; exit_reason?: string; exit_src?: string; closed_at?: string
   pnl?: number | null; ret_pct?: number | null; charges?: number | null
 }
-export interface OptRecord { source: OptSource; label: string; trades: number; win_rate: number | null; avg_ret_pct: number | null; pnl: number; open: number; verdict: string }
+export interface OptStrategyRecord { key: string; name: string; status: string | null; trades: number; wins: number; pnl: number; open: number }
+export interface OptRecord { source: OptSource; label: string; trades: number; win_rate: number | null; avg_ret_pct: number | null; pnl: number; open: number; verdict: string
+  /** Each strategy's own live record inside the source (an untested strategy's only test). */
+  by_strategy?: OptStrategyRecord[] }
 export interface OptVerdictRow { symbol: string; expiry: string; verdict: string; side: string | null; strike: number | null; premium: number | null; breakeven: number | null; headline?: string | null; bias?: string | null; lot?: number | null; spot?: number | null }
 export interface OptSignalsView {
   signals: OptSignal[]; record: OptRecord[]; market_open: boolean; note: string
   verdicts: { day: string | null; rows: OptVerdictRow[]; track: Record<string, unknown> | null }
   loop: { last_run: string | null; last_error: string | null; runs?: number; last_trigger?: string | null }
+  /** Signals not opened as options on `skipped_day`, by reason (a lost strategy, a repeat, ...). */
+  skipped?: Record<string, { label: string; count: number; examples: string[] }>; skipped_day?: string; cancelled?: number
+  /** Which strategies may open an option (config.yaml option_signals.evidence). */
+  evidence?: { rule: 'not_lost' | 'proven' | 'all'; allowed: string[] | null }
   rules: { delta_near: number; delta_month: number; iv_high: number; iv_low: number; vol_target_pct: number; vol_stop_pct: number }
 }
 export interface VolStats { trades: number; win_rate?: number; total?: number; avg?: number; max_drawdown?: number; profit_factor?: number | null; worst?: number; first?: string; last?: string }

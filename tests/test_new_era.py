@@ -133,6 +133,12 @@ def test_no_oi_signal_from_small_changes_unwinding_stale_or_old_snapshots():
     assert _oi(up, live_oi(8.0, trade_date="2026-09-30")) == []             # yesterday's feed
 
 
+def test_no_oi_signal_while_the_price_is_unchanged():
+    flat = oi_day(np.linspace(100.15, 99.95, 20))                         # -0.05% on the day: no direction yet
+    assert _oi(flat, live_oi(12.0)) == []                                   # used to be a 'short build-up'
+    assert _oi(oi_day(np.linspace(99.8, 98.6, 20)), live_oi(12.0))[0]["side"] == "SHORT"
+
+
 # ---- the API serves every signal with its current label -------------------------------------------------------------
 def _sig(key, status=None):
     s = {"strategy_key": key, "strategy_name": key, "symbol": "X", "side": "LONG", "entry_time": "10:00", "entry": 100.0,

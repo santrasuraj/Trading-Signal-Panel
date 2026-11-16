@@ -59,6 +59,17 @@ SQUARE_OFF = (15, 0)
 MAX_LATE_MIN = 15.0         # an intraday signal becomes an option only this soon after its entry bar starts (the
                             # 5-minute task's signals arrive up to ~10 min after it; later, the price has moved on)
 CHAIN_TTL_S = 60
+# Which signals may open an option, by their strategy's backtest (config.yaml option_signals.evidence):
+#   not_lost  every strategy except those that LOST money in their backtest ("Lost in test") - the default: losing on the
+#             shares means losing more on options (premium decay, spreads); untested ones run as a labelled live test
+#   proven    only strategies whose backtest beat costs beyond luck ("working")
+#   all       everything (practice / research)
+EVIDENCE = {"not_lost": {"working", "mixed", "unknown", "untested"}, "proven": {"working"}, "all": None}
+DEFAULT_EVIDENCE = "not_lost"
+LOST = "not-working"
+SKIP_REASONS = {"lost": "their strategy lost money in its backtest", "evidence": "below the evidence rule",
+                "repeat": "a repeat of a trade already taken today", "stacked": "another option on the stock was open",
+                "late": "too late after the signal's bar", "no_option": "no liquid option near the target delta"}
 SOURCES = {"intraday": "From intraday signals", "stock": "From stock strategies", "volatility": "Volatility (IV rank)",
            "index": "Index verdicts"}
 _chains: dict = {}
@@ -78,6 +89,70 @@ def _save(rows: list[dict]) -> None:
     tmp = FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(rows[-5000:], default=str), encoding="utf-8")
     tmp.replace(FILE)
+
+
+def skips_file():
+    return FILE.with_name("option_signals_skips.json")
+
+
+def evidence_rule(cfg: dict | None = None) -> str:
+    """config.yaml option_signals.evidence (not_lost / proven / all); not_lost when missing or unknown."""
+    try:
+        if cfg is None:
+            from .settings import load_config
+            cfg = load_config()
+        v = str(((cfg or {}).get("option_signals") or {}).get("evidence") or DEFAULT_EVIDENCE).strip().lower()
+    except Exception:
+        v = DEFAULT_EVIDENCE
+    return v if v in EVIDENCE else DEFAULT_EVIDENCE
+
+
+def load_skips() -> dict:
+    try:
+        d = json.loads(skips_file().read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_skips(day: str, add: dict[str, set]) -> None:
+    """Signals not taken, per day and reason ("strategy|symbol|direction"), the last 10 days kept."""
+    d = load_skips()
+    cur = d.get(day) or {}
+    for reason, keys in add.items():
+        if keys:
+            cur[reason] = sorted(set(cur.get(reason) or []) | set(keys))
+    d[day] = cur
+    d = {k: d[k] for k in sorted(d)[-10:]}
+    tmp = skips_file().with_suffix(".tmp")
+    tmp.write_text(json.dumps(d), encoding="utf-8")
+    tmp.replace(skips_file())
+
+
+def tidy(rows: list[dict], day: str, allowed: set | None) -> int:
+    """Apply the one-trade-per-signal and evidence rules to `day`'s intraday options already in the journal: a repeat of
+    a trade already taken (same strategy, stock and direction), one opened while another option on the stock was
+    still open, or one from a strategy below the evidence rule is marked cancelled - kept for the audit, left out of
+    the record and the list. Returns how many were cancelled."""
+    busy: dict[str, str | None] = {}                     # symbol -> closed_at of the kept trade (None while open)
+    kept: set = set()
+    n = 0
+    mine = sorted((r for r in rows if r.get("source") == "intraday" and r.get("day") == day
+                   and r.get("state") != "cancelled"), key=lambda r: r.get("opened_at") or "")
+    for r in mine:
+        st = str((r.get("strategy") or {}).get("status") or "untested")
+        key = ((r.get("strategy") or {}).get("key"), r["symbol"], r.get("direction"))
+        held = r["symbol"] in busy and (busy[r["symbol"]] is None or busy[r["symbol"]] > (r.get("opened_at") or ""))
+        reason = ("lost" if st == LOST else "evidence") if allowed is not None and st not in allowed else \
+                 "repeat" if key in kept else "stacked" if held else None
+        if reason:
+            r.update(state="cancelled", cancel_reason=reason, exit_reason=f"not taken: {SKIP_REASONS[reason]}",
+                     unrealized=None, pnl=None, ret_pct=None)
+            n += 1
+        else:
+            kept.add(key)
+            busy[r["symbol"]] = r.get("closed_at")
+    return n
 
 
 def _lock():
@@ -177,6 +252,23 @@ def _reprice(c: dict, strike: float, iv: float, call: bool, spot_new: float, day
     return float(opt.black76(F_new, strike, T_new, R, iv, 1.0 if call else 0.0))
 
 
+TICK = 0.05
+
+
+def _tick(x: float) -> float:
+    """The nearest price on NSE's option tick (Rs 0.05)."""
+    return round(round(x / TICK) * TICK, 2)
+
+
+def _mid_iv(c: dict, strike: float, mid: float, call: bool) -> float | None:
+    """The implied volatility that prices the option at its mid (None when it cannot be solved)."""
+    if not (mid > 0):
+        return None
+    v = opt.implied_vol(np.array([mid]), c["F"], np.array([strike]), c["T"], R, np.array([1.0 if call else 0.0]))
+    v = float(np.asarray(v).ravel()[0])
+    return v if math.isfinite(v) and v > 0 else None
+
+
 def _r(x, nd=2):
     return None if x is None or (isinstance(x, float) and not math.isfinite(x)) else round(float(x), nd)
 
@@ -192,10 +284,18 @@ def build_buy(source: str, uid: str, symbol: str, direction: str, und_stop: floa
     p = _pick(legs_frame(c, side), target_delta)
     if p is None:
         return None
-    k, iv, entry = float(p["strike"]), float(p["iv"]), float(p["ask"])
+    k, entry = float(p["strike"]), float(p["ask"])
+    call = side == "ce"
+    # the IV that reproduces the option's own mid price (NSE's quoted IV can be stale or from another model, and then
+    # an absolute model price at the stop can even exceed the ask); the stop / target are the modelled CHANGE from now
+    # to the underlying's level - including the time decay of the hold - added to the price paid
+    iv = _mid_iv(c, k, float(p["mid"]), call) or float(p["iv"])
     days = HOLD_DAYS.get(source, 1.0)
-    stop = _reprice(c, k, iv, side == "ce", float(und_stop), days) if und_stop else None
-    target = _reprice(c, k, iv, side == "ce", float(und_target), days) if und_target else None
+    base = _reprice(c, k, iv, call, c["spot"], 0.0)
+    stop = entry + _reprice(c, k, iv, call, float(und_stop), days) - base if und_stop else None
+    target = entry + _reprice(c, k, iv, call, float(und_target), days) - base if und_target else None
+    stop = _tick(max(stop, TICK)) if stop is not None else None          # orders go in on NSE's 5-paise tick
+    target = _tick(target) if target is not None else None
     if stop is not None and stop >= entry:
         stop = None                                              # the stop would not cost anything: no premium stop
     if target is not None and target <= entry:
@@ -416,16 +516,36 @@ def refresh(intraday: dict | None = None, now: datetime | None = None, sources=(
         lots = ov.lot_sizes()
         mkt_open = _market_open(now)
         sig = intraday if intraday is not None else _intraday_file()
+        day = now.date().isoformat()
+        rule = evidence_rule()
+        allowed = EVIDENCE[rule]
+        rep["cancelled"] = tidy(rows, day, allowed)
+        skips: dict[str, set] = {k: set() for k in SKIP_REASONS}
         if mkt_open and (now.hour, now.minute) < SQUARE_OFF:
             new: list[dict] = []
             if "intraday" in sources:
-                for x in _intraday(sig, lots)[: MAX_NEW["intraday"] * 3]:
-                    uid = f"{now.date().isoformat()}|{x.get('strategy_key')}|{x.get('symbol')}|{x.get('entry_time')}"
+                for x in _intraday(sig, lots)[: MAX_NEW["intraday"] * 6]:
+                    uid = f"{day}|{x.get('strategy_key')}|{x.get('symbol')}|{x.get('entry_time')}"
                     if f"intraday|{uid}" in have or sum(1 for r in new if r["source"] == "intraday") >= MAX_NEW["intraday"]:
+                        continue
+                    sym, strat, status = str(x["symbol"]), x.get("strategy_key"), str(x.get("strategy_status") or "untested")
+                    tag = f"{strat}|{sym}|{x.get('side')}"
+                    live = [r for r in rows + new if r.get("source") == "intraday" and r.get("day") == day
+                            and r.get("state") != "cancelled"]
+                    if allowed is not None and status not in allowed:
+                        skips["lost" if status == LOST else "evidence"].add(tag)
+                        continue
+                    if any(((r.get("strategy") or {}).get("key"), r["symbol"], r.get("direction")) == (strat, sym, x.get("side"))
+                           for r in live):
+                        skips["repeat"].add(tag)   # the same signal again (an OI build-up re-fires every bar)
+                        continue
+                    if any(r["symbol"] == sym and r.get("state") == "open" for r in live):
+                        skips["stacked"].add(tag)
                         continue
                     late = late_min(now, x.get("entry_time"))
                     if late is not None and late > MAX_LATE_MIN:
-                        continue                   # too late to take at the signal's price
+                        skips["late"].add(tag)     # too late to take at the signal's price
+                        continue
                     try:
                         r = build_buy("intraday", uid, str(x["symbol"]), x["side"], x.get("stop"), x.get("target"), "near",
                                       DELTA_NEAR, {"key": x.get("strategy_key"), "name": x.get("strategy_name"),
@@ -437,6 +557,8 @@ def refresh(intraday: dict | None = None, now: datetime | None = None, sources=(
                         r = None
                     if r:
                         new.append(r)
+                    else:
+                        skips["no_option"].add(tag)
             if "stock" in sources:
                 lt = _latest_scan()
                 scan = str(lt.get("scan_id") or lt.get("generated_at") or "")[:16]
@@ -470,14 +592,16 @@ def refresh(intraday: dict | None = None, now: datetime | None = None, sources=(
             v = value_now(rec, c)
             if v is None:
                 continue
-            rec.update(mark=_r(v), marked_at=c["time"],
+            v = _r(v)                                    # the open P&L from the mark as shown
+            rec.update(mark=v, marked_at=c["time"],
                        unrealized=_r(((v - rec["entry"]) if rec["kind"] == "debit" else (rec["entry"] - v)) * rec["lot"]))
             reason = _exit_rule(rec, v)
             if rec["source"] == "intraday":
                 if (now.hour, now.minute) >= SQUARE_OFF:
                     reason = reason or "square-off 15:00"
                 elif sig:
-                    _d, strat, symb, et = rec["id"].split("|", 1)[1].split("|")
+                    st_ = rec.get("strategy") or {}
+                    strat, symb, et = st_.get("key"), rec["symbol"], st_.get("entry_time")
                     closed = [x for x in sig.get("signals") or [] if x.get("strategy_key") == strat and x.get("symbol") == symb
                               and x.get("entry_time") == et and x.get("state") == "closed"]
                     if closed:
@@ -494,7 +618,10 @@ def refresh(intraday: dict | None = None, now: datetime | None = None, sources=(
                 _close(rec, fill if fill is not None else v, reason, now)
                 rep["closed"] += 1
         rep["open"] = sum(1 for r in rows if r.get("state") == "open")
+        rep["skipped"] = {k: len(v) for k, v in skips.items() if v}
         _save(rows)
+        if any(skips.values()):
+            _save_skips(day, skips)
     finally:
         lk.release()
     return rep
@@ -572,6 +699,7 @@ def settle_day(content: bytes, day: date) -> int:
     n = 0
     try:
         rows = load()
+        tidy(rows, day.isoformat(), EVIDENCE[evidence_rule()])   # never settle a repeat or a lost strategy's trade
         when = datetime.combine(day, datetime.min.time()).replace(hour=15, minute=30, tzinfo=ist_now().tzinfo)
         for rec in rows:
             if rec.get("state") != "open" or rec["day"] > day.isoformat():
@@ -624,8 +752,28 @@ def record(rows: list[dict]) -> list[dict]:
                     "pnl": _r(sum(pnl)) if pnl else 0.0,
                     "open": sum(1 for r in rows if r.get("source") == src and r.get("state") == "open"),
                     "verdict": ("not enough trades yet" if len(done) < 20 else
-                                "made money so far" if sum(pnl) > 0 else "lost money so far")})
+                                "made money so far" if sum(pnl) > 0 else "lost money so far"),
+                    "by_strategy": _by_strategy([r for r in rows if r.get("source") == src])})
     return out
+
+
+def _by_strategy(rows: list[dict]) -> list[dict]:
+    """Each strategy's own record inside a source (cancelled trades never count)."""
+    keys: dict[str, dict] = {}
+    for r in rows:
+        if r.get("state") == "cancelled":
+            continue
+        st = r.get("strategy") or {}
+        k = st.get("key") or "?"
+        e = keys.setdefault(k, {"key": k, "name": st.get("name") or k, "status": st.get("status"), "trades": 0,
+                                "wins": 0, "pnl": 0.0, "open": 0})
+        if r.get("state") == "open":
+            e["open"] += 1
+        elif r.get("state") == "closed" and r.get("pnl") is not None:
+            e["trades"] += 1
+            e["wins"] += int(r["pnl"] > 0)
+            e["pnl"] = _r(e["pnl"] + r["pnl"])
+    return sorted(keys.values(), key=lambda e: (-e["trades"], e["name"]))
 
 
 # ------------------------------------------------------------------ the volatility backtest (NIFTY / BANKNIFTY)

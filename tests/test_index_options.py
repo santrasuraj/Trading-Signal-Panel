@@ -194,3 +194,12 @@ def test_the_scan_fetches_any_configured_index_chain_still_missing(monkeypatch):
     assert calls == [["NIFTY", "FINNIFTY"]] and "fetched 0 missing index chain(s)" in logs[0]   # indices only
     calls.clear()
     assert ov.record_stored_chains(frames, {}, log=logs.append, fetch_missing=False) == 0 and calls == []
+
+
+def test_the_plan_prices_from_the_premium_paid_even_when_the_model_disagrees():
+    c = _fwd_chain()
+    model = ov.premium_at(c, 25000.0, "ce", 30.0, 25000.0, 0.0)        # a 30% IV says about 2x what the market asks
+    pick = {"strike": 25000.0, "side": "ce", "iv_pct": 30.0, "premium": round(model * 0.5, 2)}
+    p = ov.plan(c, pick, {"stop_underlying": 24900.0, "target_underlying": 25300.0}, 65, 5)
+    assert p["stop"] is not None and p["stop"] < p["entry"]          # the stop is there (it used to be dropped)
+    assert p["target"] is None or p["target"] > p["entry"]           # 7 of 10 days of decay at 30% IV: maybe no gain

@@ -564,6 +564,12 @@ def _option_signals_pass(st: dict, now: datetime, events: list) -> None:
         if rec is None:
             continue
         pos.update(mark=rec.get("mark"), unrealized=rec.get("unrealized"))
+        if rec.get("state") == "cancelled":             # the signal was not a real trade (a repeat, or a lost strategy)
+            book["signals_open"].pop(sid)
+            st["_dirty"] = True
+            events.append(_event(st, now, "skip", f"{pos['symbol']} {pos['structure']} dropped: {rec.get('exit_reason')}",
+                                 symbol=pos["symbol"], strategy=f"options_{pos['source']}"))
+            continue
         if rec.get("state") == "closed":
             done = {**pos, "exit": rec.get("exit"), "exit_reason": rec.get("exit_reason"), "pnl": rec.get("pnl"),
                     "ret_pct": rec.get("ret_pct"), "closed_at": rec.get("closed_at")}

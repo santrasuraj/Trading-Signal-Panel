@@ -44,13 +44,15 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(osg, "get_chain", lambda *a, **k: w["chain"])
     monkeypatch.setattr(osg.opt, "expiries", lambda sym: ([EXP], 200))
     monkeypatch.setattr(osg, "_latest_scan", lambda: w["scan"])
+    monkeypatch.setattr(osg, "evidence_rule", lambda cfg=None: w.get("rule", "not_lost"))
     return w
 
 
-def isig(state="open", reason=None, side="LONG", stop=2450.0, target=2560.0):
-    return {"signals": [{"strategy_key": "sweep_pdhl", "strategy_name": "PDH/PDL sweep", "symbol": "RELIANCE",
-                         "side": side, "entry_time": "10:00", "stop": stop, "target": target, "state": state,
-                         "reason": reason, "strategy_status": "untested", "proven": False}]}
+def isig(state="open", reason=None, side="LONG", stop=2450.0, target=2560.0, key="sweep_pdhl", status="untested",
+         t="10:00", sym="RELIANCE"):
+    return {"signals": [{"strategy_key": key, "strategy_name": key, "symbol": sym,
+                         "side": side, "entry_time": t, "stop": stop, "target": target, "state": state,
+                         "reason": reason, "strategy_status": status, "proven": status == "working"}]}
 
 
 # ---- picking the expiry -------------------------------------------------------------------------------------------
@@ -186,8 +188,7 @@ def test_intraday_options_follow_the_strategy_exit_and_square_off_at_15(world):
     (r,) = osg.load()
     assert r["exit_reason"] == "strategy exit (trend exit)"
     later = NOW.replace(hour=12)
-    sig = isig()
-    sig["signals"][0]["entry_time"] = "12:00"
+    sig = isig(side="SHORT", stop=2550.0, target=2440.0, t="12:00")      # a new trade: the other direction
     osg.refresh(intraday=sig, now=later, sources=("intraday",))
     osg.refresh(intraday=sig, now=later.replace(hour=15, minute=0), sources=("intraday",))
     assert [x["exit_reason"] for x in osg.load()] == ["strategy exit (trend exit)", "square-off 15:00"]
@@ -368,3 +369,97 @@ def test_signals_routes(world, monkeypatch):
     assert r.status_code == 200 and isinstance(r.json()["signals"], list)
     assert c.get("/api/options/signals?source=intraday").status_code == 200
     assert c.get("/api/options/vol-test").json() == {"tests": [], "note": "n"}
+
+
+# ---- the rules: evidence, one trade per signal, priced stops ----------------------------------------------------
+def test_a_strategy_that_lost_in_its_backtest_never_opens_an_option(world):
+    rep = osg.refresh(intraday=isig(status="not-working"), now=NOW, sources=("intraday",))
+    assert rep["opened"] == 0 and osg.load() == [] and rep["skipped"] == {"lost": 1}
+    assert osg.load_skips()[NOW.date().isoformat()]["lost"] == ["sweep_pdhl|RELIANCE|LONG"]
+    assert osg.refresh(intraday=isig(status="untested"), now=NOW, sources=("intraday",))["opened"] == 1   # not_lost
+
+
+def test_proven_only_takes_just_working_strategies(world):
+    world["rule"] = "proven"
+    assert osg.refresh(intraday=isig(status="untested"), now=NOW, sources=("intraday",))["skipped"] == {"evidence": 1}
+    assert osg.refresh(intraday=isig(status="working", key="orb"), now=NOW, sources=("intraday",))["opened"] == 1
+
+
+def test_a_re_firing_signal_opens_one_option_not_one_per_bar(world):
+    for i, t in enumerate(("10:00", "10:05", "10:10")):               # an OI build-up re-fires on every bar
+        osg.refresh(intraday=isig(key="oi_buildup", t=t), now=NOW.replace(minute=i * 5 + 1), sources=("intraday",))
+    assert len(osg.load()) == 1
+    other = isig(key="sweep_or15", t="10:15")                         # another strategy, same stock, one still open
+    rep = osg.refresh(intraday=other, now=NOW.replace(minute=16), sources=("intraday",))
+    assert rep["opened"] == 0 and rep["skipped"] == {"stacked": 1}
+
+
+def test_todays_repeats_and_lost_strategies_already_in_the_journal_are_cancelled(world):
+    osg.refresh(intraday=isig(key="oi_buildup"), now=NOW, sources=("intraday",))
+    (first,) = osg.load()
+    dup = {**first, "id": "intraday|dup", "opened_at": NOW.replace(minute=5).isoformat()}
+    lost = {**first, "id": "intraday|lost", "symbol": "NIFTY",
+            "strategy": {**first["strategy"], "key": "x", "status": "not-working"}}
+    old = {**first, "id": "intraday|old", "day": "2026-11-13", "opened_at": "2026-11-13T10:00:00+05:30"}
+    osg._save([first, dup, lost, old])
+    rep = osg.refresh(intraday={"signals": []}, now=NOW.replace(minute=6), sources=("intraday",))
+    by = {r["id"]: r for r in osg.load()}
+    assert rep["cancelled"] == 2 and by[first["id"]]["state"] == "open" and by["intraday|old"]["state"] == "open"
+    assert by["intraday|dup"]["state"] == "cancelled" and by["intraday|dup"]["cancel_reason"] == "repeat"
+    assert by["intraday|lost"]["cancel_reason"] == "lost" and by["intraday|lost"]["pnl"] is None
+    rec = {r["source"]: r for r in osg.record(osg.load())}["intraday"]
+    assert rec["open"] == 2 and sum(x["open"] for x in rec["by_strategy"]) == 2     # cancelled ones never count
+
+
+def test_stop_and_target_are_priced_from_the_price_paid_even_when_the_quoted_iv_is_off(world):
+    c = chain()
+    c["df"]["ce_iv_nse"] = 40.0                                       # the quoted IV far above what prices imply (16%)
+    world["chain"] = c
+    r = osg.build_buy("intraday", "u", "NIFTY", "LONG", 24980.0, 25100.0, "near", 0.55, {}, NOW, 65)
+    assert r["stop"] is not None and r["stop"] < r["entry"] < r["target"]
+    assert r["entry"] - r["stop"] < 0.6 * 20 * 1.2                    # about delta x the 20-point move, not more
+
+
+def test_view_hides_cancelled_trades_and_reports_what_was_not_taken(world, monkeypatch):
+    from scanner import option_verdict as ov
+    from web.api.services import optsig_svc
+    monkeypatch.setattr(ov, "load_journal", lambda: [])
+    monkeypatch.setattr(optsig_svc, "now_ist", lambda: NOW)
+    osg.refresh(intraday=isig(key="oi_buildup"), now=NOW, sources=("intraday",))
+    osg.refresh(intraday=isig(key="oi_buildup", t="10:05"), now=NOW.replace(minute=6), sources=("intraday",))
+    osg.refresh(intraday=isig(key="sweep", status="not-working", sym="NIFTY"), now=NOW.replace(minute=7),
+                sources=("intraday",))
+    v = optsig_svc.view()
+    assert len(v["signals"]) == 1 and v["evidence"]["rule"] == "not_lost"
+    assert v["skipped"]["repeat"]["count"] == 1 and v["skipped"]["lost"]["examples"] == ["NIFTY LONG"]
+
+
+def test_auto_trader_drops_a_cancelled_signal_without_pnl(monkeypatch):
+    from web.api.services import autotrade_svc as at
+    rec = {"id": "intraday|1", "source": "intraday", "symbol": "ABB", "structure": "Buy PE", "kind": "debit",
+           "expiry": EXP.isoformat(), "lot": 125, "entry": 200.0, "stop": 150.0, "target": 300.0, "capital": 25035.0,
+           "max_loss": 6300.0, "mark": 200.0, "day": NOW.date().isoformat(), "state": "open",
+           "legs": [{"action": "buy", "type": "PE", "strike": 7000.0}]}
+    journal = [rec]
+    monkeypatch.setattr(osg, "load", lambda: journal)
+    st = {"options": {}, "settings": {"option_signals": True, "max_option_positions": 5}, "log": []}
+    ev: list = []
+    at._option_signals_pass(st, NOW, ev)
+    journal[0] = {**rec, "state": "cancelled", "exit_reason": "not taken: a repeat of a trade already taken today"}
+    at._option_signals_pass(st, NOW.replace(minute=5), ev)
+    assert st["options"]["signals_open"] == {} and st["options"]["signals_closed"] == [] and ev[-1]["kind"] == "skip"
+
+
+def test_the_view_and_the_nightly_settlement_apply_the_rules_too(world, monkeypatch):
+    from scanner import option_verdict as ov
+    from web.api.services import optsig_svc
+    monkeypatch.setattr(ov, "load_journal", lambda: [])
+    monkeypatch.setattr(optsig_svc, "now_ist", lambda: NOW.replace(hour=18))
+    osg.refresh(intraday=isig(key="oi_buildup"), now=NOW, sources=("intraday",))
+    (first,) = osg.load()
+    osg._save([first, {**first, "id": "intraday|dup", "opened_at": NOW.replace(minute=5).isoformat()}])  # old-code repeat
+    assert len(optsig_svc.view()["signals"]) == 1                    # shown by the rules before any refresh
+    k = first["legs"][0]["strike"]
+    osg.settle_day(bhavcopy([("RELIANCE", EXP.isoformat(), k, "CE", 61.5)], {"RELIANCE": 2540.0}), NOW.date())
+    by = {r["id"]: r for r in osg.load()}
+    assert by["intraday|dup"]["state"] == "cancelled" and by[first["id"]]["state"] == "closed"

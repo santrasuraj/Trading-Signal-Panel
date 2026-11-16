@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Info, Layers, RefreshCw } from 'lucide-react'
-import { useOptionSignals, useRefreshOptionSignals, useVolTest, type OptRecord, type OptSignal, type OptSource } from '@/api/optionSignals'
+import { useOptionSignals, useRefreshOptionSignals, useVolTest, type OptRecord, type OptSignal, type OptSignalsView, type OptSource } from '@/api/optionSignals'
 import type { SignalProof } from '@/api/types'
 import { ProofBadge } from '@/components/badges'
 import { DataTable, type Col } from '@/components/DataTable'
@@ -26,7 +26,7 @@ const COLS: Col<OptSignal>[] = [
   { id: 'sym', header: 'Underlying', value: (r) => r.symbol, sticky: true, mobile: 'primary', cell: (r) => <Link to={`/options/${r.symbol}`} className="font-semibold hover:underline">{r.symbol}</Link> },
   { id: 'src', header: 'From', value: (r) => `${SRC[r.source]} ${r.strategy.name ?? ''}`, cell: (r) => (
     <span className="flex flex-col leading-tight"><span className="text-xs">{r.strategy.name ?? SRC[r.source]}</span><span className="text-2xs text-muted">{SRC[r.source]}{r.strategy.entry_time ? ` · ${r.strategy.entry_time}` : ''}</span></span>) },
-  { id: 'proof', header: 'Evidence', title: "The underlying strategy's backtest (volatility: untested; see its backtest below)", value: (r) => String(r.strategy.status), cell: (r) => <ProofBadge status={(PROOF.has(String(r.strategy.status)) ? r.strategy.status : 'untested') as SignalProof} /> },
+  { id: 'proof', header: 'Evidence', title: "The strategy's own backtest on the shares. Untested = no history to test it on (past intraday OI and option prices are not stored): its live record below is its test. A strategy that lost money in its backtest never opens an option.", value: (r) => String(r.strategy.status), cell: (r) => <ProofBadge status={(PROOF.has(String(r.strategy.status)) ? r.strategy.status : 'untested') as SignalProof} /> },
   { id: 'trade', header: 'Trade', value: (r) => r.structure, mobile: 'secondary', cell: (r) => (
     <span className="flex flex-col leading-tight"><span className={cn('text-xs font-semibold', r.direction === 'LONG' ? 'text-profit' : r.direction === 'SHORT' ? 'text-loss' : 'text-fg')}>{r.structure}</span><span className="num text-2xs text-muted">{contract(r)}</span></span>) },
   { id: 'entry', header: 'Entry ₹', title: 'Premium per unit: paid (buys, at the ask) or collected (credit, sold at the bid)', align: 'right', value: (r) => r.entry, cell: (r) => <span className="num">{rs(r.entry)}{r.kind === 'credit' ? <span className="text-2xs text-muted"> cr</span> : null}</span> },
@@ -50,7 +50,29 @@ function Record({ rows }: { rows: OptRecord[] }) {
           <div className="text-xs font-semibold">{r.label}</div>
           <div className="mt-0.5 flex items-baseline justify-between gap-2"><Money v={r.pnl} signed color className="text-base font-semibold" /><span className="text-2xs text-muted">{r.trades} closed · {r.open} open</span></div>
           <div className="text-2xs text-muted">{r.trades ? `${r.win_rate?.toFixed(0)}% won · average ${r.avg_ret_pct != null ? `${r.avg_ret_pct > 0 ? '+' : ''}${r.avg_ret_pct.toFixed(1)}%` : '—'} on capital · ` : ''}{r.verdict}</div>
+          {(r.by_strategy?.length ?? 0) > 0 && (
+            <ul className="mt-1.5 space-y-0.5 border-t border-line pt-1.5">
+              {r.by_strategy!.map((s) => (
+                <li key={s.key} className="flex items-center justify-between gap-2 text-2xs">
+                  <span className="flex min-w-0 items-center gap-1.5"><ProofBadge status={(PROOF.has(String(s.status)) ? s.status : 'untested') as SignalProof} /><span className="truncate" title={s.name}>{s.name}</span></span>
+                  <span className="whitespace-nowrap text-muted">{s.trades ? <>{s.wins}/{s.trades} won · <Money v={s.pnl} signed color /></> : 'no closed trade'}{s.open ? ` · ${s.open} open` : ''}</span>
+                </li>))}
+            </ul>)}
         </div>))}
+    </div>
+  )
+}
+
+/** What the rules kept from becoming an option today, and why. */
+function NotTaken({ d }: { d: OptSignalsView }) {
+  const sk = Object.entries(d.skipped ?? {}).sort((a, b) => b[1].count - a[1].count)
+  const rule = d.evidence?.rule === 'proven' ? 'only from strategies whose backtest beat costs' : d.evidence?.rule === 'all' ? 'from every strategy (research setting)' : "from every strategy except those that lost money in their backtest"
+  return (
+    <div className="border-b border-line px-4 py-2 text-2xs text-muted">
+      <span className="font-medium text-fg">Rules: </span>an option opens {rule}, once per strategy, stock and direction a day, and not while another option on that stock is open.
+      {sk.length > 0 && <> <span className="font-medium text-fg">Not taken{d.skipped_day ? ` on ${day(d.skipped_day)}` : ''}: </span>
+        {sk.map(([k, v], i) => <span key={k} title={v.examples.join(', ')}>{i ? ' · ' : ''}{v.count} {v.label}{v.examples.length ? ` (${v.examples.slice(0, 3).join(', ')}${v.count > 3 ? ', …' : ''})` : ''}</span>)}.</>}
+      {(d.cancelled ?? 0) > 0 && <> {d.cancelled} trade{d.cancelled === 1 ? '' : 's'} opened before these rules {d.cancelled === 1 ? 'was' : 'were'} cancelled and left out of the record.</>}
     </div>
   )
 }
@@ -91,6 +113,7 @@ export function OptionSignals() {
           <Segmented<'all' | OptSource> ariaLabel="Source" size="xs" value={src} onChange={setSrc} items={[{ id: 'all', label: 'All' }, { id: 'intraday', label: 'Intraday' }, { id: 'stock', label: 'Stocks' }, { id: 'volatility', label: 'Volatility' }, { id: 'index', label: 'Index verdicts' }]} />
           <Button size="sm" variant="subtle" icon={<RefreshCw className="h-3.5 w-3.5" />} loading={refresh.isPending} disabled={!d?.market_open} title={d?.market_open ? 'Check NSE\'s chains now' : 'Market closed'} onClick={() => refresh.mutate()}>Check now</Button>
         </>} flush>
+        {d && src !== 'index' && <NotTaken d={d} />}
         {src === 'index' ? <div className="p-3"><IndexOptions /></div>
           : q.error ? <ErrorState compact error={q.error} /> : !d ? <SkeletonRows rows={6} />
           : rows.length === 0 ? <EmptyState compact title={d.market_open ? 'No options signal yet today.' : 'No options signal in the last session.'}>

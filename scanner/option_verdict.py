@@ -198,8 +198,13 @@ def plan(c: dict, pick: dict, exit_: dict | None, lot: int | None, horizon: int 
     days = float(c.get("days_to_expiry") or 0)
     hold = min(float(horizon or 5) * 7 / 5, max(days - 0.5, 0.0))      # trading days -> calendar days, before expiry
     k, side, iv, prem = pick["strike"], pick["side"], pick.get("iv_pct"), pick["premium"]
-    stop = premium_at(c, k, side, iv, (exit_ or {}).get("stop_underlying"), min(1.0, hold))
-    target = premium_at(c, k, side, iv, (exit_ or {}).get("target_underlying"), hold)
+    # the modelled CHANGE from now to the underlying's level (with the decay of the hold) added to the price paid: an
+    # absolute model price can sit above the ask when the quoted IV and the market price disagree
+    base = premium_at(c, k, side, iv, c.get("spot"), 0.0)
+    at_stop = premium_at(c, k, side, iv, (exit_ or {}).get("stop_underlying"), min(1.0, hold))
+    at_tgt = premium_at(c, k, side, iv, (exit_ or {}).get("target_underlying"), hold)
+    stop = max(prem + at_stop - base, 0.05) if at_stop is not None and base is not None else None
+    target = prem + at_tgt - base if at_tgt is not None and base is not None else None
     stop = stop if stop is not None and stop < prem else None           # a "stop" above the entry is no stop
     target = target if target is not None and target > prem else None
     cost = buy_cost(prem, lot)
@@ -208,7 +213,8 @@ def plan(c: dict, pick: dict, exit_: dict | None, lot: int | None, horizon: int 
             "capital": _r(cost * per) if lot else None, "max_loss": _r(cost * per) if lot else None,
             "loss_at_stop": _r((cost - sell_value(stop, lot)) * per) if lot and stop else None,
             "gain_at_target": _r((sell_value(target, lot) - cost) * per) if lot and target else None,
-            "basis": "Black-76 at the option's IV; the stop / target are the underlying's levels re-priced"}
+            "basis": "the option's Black-76 move (its IV, the hold's time decay included) from now to the underlying's "
+                     "stop / target, added to the price paid"}
 
 
 def _compact(x: dict | None) -> dict | None:
