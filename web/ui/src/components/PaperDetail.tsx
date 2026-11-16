@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { usePaper, usePaperDetail } from '@/api/hooks'
+import { useLiveQuotes, usePaper, usePaperDetail } from '@/api/hooks'
 import type { PaperPosition, PaperSummary, PaperTrade } from '@/api/types'
 import { TonePill } from './badges'
 import { LinesChart, type LineDef } from './charts/LinesChart'
@@ -12,6 +12,7 @@ import { KpiStrip, KpiTile } from './domain'
 import { EmptyState, ErrorState, SkeletonChart, SkeletonKpis } from './feedback'
 import { Money, Pct, Price, Qty, Risk } from './num'
 import { Card } from './ui'
+import { PriceStamp } from './LivePrice'
 import { date, money, pct, pts } from '@/lib/format'
 
 export function verdictLabel(p: Pick<PaperSummary, 'days' | 'level'>, minDays = 21): string {
@@ -23,6 +24,15 @@ export function PaperDetailView({ k }: { k: string }) {
   const q = usePaperDetail(k)
   const minDays = usePaper().data?.min_days_to_judge ?? 21   // server config, same threshold as the Paper list
   const nav = useNavigate()
+  // open positions marked to the live price while the market is open (the server's figures are at the last close)
+  const lq = useLiveQuotes(q.data?.open.map((r) => r.symbol) ?? [])
+  const open = useMemo(() => (q.data?.open ?? []).map((r) => {
+    const px = lq.quotes[r.symbol]?.price
+    if (px == null || r.last_price == null || r.qty == null) return r
+    const pnl = (r.pnl ?? 0) + r.qty * (px - r.last_price)
+    const cost = r.value != null && r.pnl != null ? r.value - r.pnl : null
+    return { ...r, last_price: px, value: r.qty * px, pnl, ret_pct: cost ? (pnl / cost) * 100 : r.ret_pct }
+  }), [q.data, lq.quotes])
   const lines: LineDef[] = useMemo(() => {
     const e = q.data?.equity
     if (!e) return []
@@ -66,10 +76,10 @@ export function PaperDetailView({ k }: { k: string }) {
       {/* five fixed columns from md: auto-fit wrapped it 4 + 1 at 800 px */}
       <KpiStrip gridClass="md:grid-cols-5">
         <KpiTile label="Paper value" value={<Money compact v={s.equity} />} sub={<Pct v={s.return_pct} />} />
-        <KpiTile label="Nifty 500" value={pct(s.n500_pct)} sub={`same days · Nifty 50 ${pct(s.nifty_pct)}`} />
+        <KpiTile label="Nifty 500" value={pct(s.n500_pct)} sub={`same days · Nifty\u00A050\u00A0${pct(s.nifty_pct)}`} />
         <KpiTile label="Backtest expected" value={pct(s.expected_pct)} sub={s.expected_range_pct ? <>range <span className="whitespace-nowrap">{pct(s.expected_range_pct[0])} to {pct(s.expected_range_pct[1])}</span></> : null} />
         <KpiTile label="Worst drop" value={<Risk v={s.max_dd_pct} />} />
-        <KpiTile label="Charges + slippage" value={<Money compact v={s.fees + s.slippage} />} sub={`${s.trades} closed · ${s.open} open · ${s.pending} pending`} />
+        <KpiTile label="Charges + slippage" value={<Money compact v={s.fees + s.slippage} />} sub={`${s.trades}\u00A0closed · ${s.open}\u00A0open · ${s.pending}\u00A0pending`} />
       </KpiStrip>
       <Card title="Verdict" right={<TonePill tone={s.level}>{verdictLabel(s, minDays)}</TonePill>}>
         <p className="text-[13px] leading-6 text-fg">{s.verdict}</p>
@@ -93,8 +103,8 @@ export function PaperDetailView({ k }: { k: string }) {
           ))}</ul>
         </Card>
       )}
-      <Card title={`Open positions (${d.open.length})`} flush>
-        <DataTable id="paper.open" data={d.open} columns={openCols} rowKey={(r) => r.symbol} onRowClick={(r) => nav(`/chart/${r.symbol}`)} empty={<EmptyState compact title="No open paper positions" />} />
+      <Card title={`Open positions (${d.open.length})`} subtitle={lq.data ? <>Marked to the live price · <PriceStamp q={Object.values(lq.quotes)[0]} session={lq.data.session} /></> : undefined} flush>
+        <DataTable id="paper.open" data={open} columns={openCols} rowKey={(r) => r.symbol} onRowClick={(r) => nav(`/chart/${r.symbol}`)} empty={<EmptyState compact title="No open paper positions" />} />
       </Card>
       <Card title={`Closed trades (${d.trades.length})`} flush>
         <DataTable id="paper.trades" data={d.trades} columns={tradeCols} rowKey={(r) => `${r.symbol}${r.entry_date}${r.exit_date}`} pageSize={50} exportName={`paper-${k}-trades`} empty={<EmptyState compact title="No closed paper trades yet" />} />

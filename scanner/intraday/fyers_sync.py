@@ -18,6 +18,8 @@ Bookkeeping rules:
 Budget (Standard plan, 5-minute bars, <=100 days per request):
   backfill 1 year x 150 symbols = 150 x 4 = 600 calls  ~ 14 minutes, 13% of the daily limit
   daily archive               = 150 x 1 = 150 calls  ~ 4 minutes
+1-minute bars (config.yaml intraday.one_minute_days, 60 by default) keep their own bookkeeping
+(fyers_sync_1m.json): a 60-day backfill is 150 calls once, then 150 a day after the 5-minute archive.
 """
 from __future__ import annotations
 
@@ -42,14 +44,14 @@ MAX_TRIES = 3                     # failing days before a failing chunk is accep
 MAX_FAILS_IN_A_ROW = 5            # this many symbols failing in a row = FYERS/network down: stop for now
 
 
-def _state_path(root):
-    return root / SYNC_FILE_NAME
+def _state_path(root, resolution: str = "5"):
+    return root / (SYNC_FILE_NAME if resolution == "5" else SYNC_FILE_NAME.replace(".json", f"_{resolution}m.json"))
 
 
-def load_state(root) -> dict:
+def load_state(root, resolution: str = "5") -> dict:
     """{'symbols': {sym: {'from', 'to'}}, 'failed': {sym: {'tries', 'day', 'message'}}}."""
     try:
-        state = json.loads(_state_path(root).read_text(encoding="utf-8"))
+        state = json.loads(_state_path(root, resolution).read_text(encoding="utf-8"))
     except Exception:
         state = {}
     if not isinstance(state, dict):
@@ -60,8 +62,8 @@ def load_state(root) -> dict:
     return state
 
 
-def _save_state(root, state: dict) -> None:
-    p = _state_path(root)
+def _save_state(root, state: dict, resolution: str = "5") -> None:
+    p = _state_path(root, resolution)
     tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")   # per process: a scan and a scheduled sync can overlap
     tmp.write_text(json.dumps(state, indent=0), encoding="utf-8")
     idata._replace(tmp, p)    # retries: on Windows os.replace fails while the web API is reading the file
@@ -208,7 +210,7 @@ def sync(provider, symbols: list[str], root, days: int = 365, resolution: str = 
 def _sync(provider, symbols, root, days, start, end, resolution, progress, log) -> dict:
     iv = resolution + "m"
     store = idata.IntradayStore(root / "bars")
-    state = load_state(root)
+    state = load_state(root, resolution)
     have_all, fails = state["symbols"], state["failed"]
     today = ist_now().date().isoformat()
     pending: list[tuple[str, date, date]] = []
@@ -236,7 +238,7 @@ def _sync(provider, symbols, root, days, start, end, resolution, progress, log) 
                 lo, hi = min(lo, p_lo), max(hi, p_hi)
             have_all[sym] = {"from": lo.isoformat(), "to": hi.isoformat()}
         pending.clear()
-        _save_state(root, state)
+        _save_state(root, state, resolution)
 
     try:
         for i, sym in enumerate(symbols, 1):

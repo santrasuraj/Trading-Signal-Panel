@@ -2,8 +2,11 @@
 
 import { useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useScreener, useSparklines } from '@/api/hooks'
+import { useLiveQuotes, useScreener, useSparklines } from '@/api/hooks'
 import { isFailure } from '@/api/client'
+import { MAX_STREAM_SYMBOLS, type LiveQuote } from '@/api/liveQuotes'
+import { stampText } from '@/components/LivePrice'
+import { cn } from '@/lib/csv'
 import type { ScreenerPreset, ScreenerRow } from '@/api/types'
 import { ResultsChip } from '@/components/badges'
 import { Sparkline } from '@/components/charts/svg'
@@ -27,9 +30,15 @@ const PRESETS: { id: ScreenerPreset; label: string; help: string }[] = [
 // the column that explains why a stock is in each preset is shown by default for that preset
 const PRESET_COLUMN: Partial<Record<ScreenerPreset, string>> = { volume: 'vr', near_high: 'hi', low_vol: 'vol' }
 
-function columns(spark: Record<string, (number | null)[]> | undefined, preset: ScreenerPreset): Col<ScreenerRow>[] {
+function columns(spark: Record<string, (number | null)[]> | undefined, preset: ScreenerPreset, live: Record<string, LiveQuote>): Col<ScreenerRow>[] {
   const today = todayIST()
   const show = PRESET_COLUMN[preset]
+  const dot = (sym: string) => {
+    const q = live[sym]
+    if (!q) return null
+    const tone = q.source === 'yahoo' ? 'bg-loss' : q.source === 'close' ? 'bg-faint' : 'bg-profit'
+    return <span className={cn('mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle', tone)} title={stampText(q, undefined).title} />
+  }
   return [
     { id: 'rank', header: '#', align: 'right', value: (r) => r.momentum_rank, cell: (r) => <span className="num text-muted">{r.momentum_rank ?? '—'}</span>, width: 48, title: 'Momentum rank' },
     {
@@ -38,7 +47,7 @@ function columns(spark: Record<string, (number | null)[]> | undefined, preset: S
       cell: (r) => <SymbolCell symbol={r.symbol} company={r.company} extra={<>{r.you_hold && <Chip className="tint-accent h-4 px-1.5 text-[10px] text-accent">held</Chip>}{r.in_models.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-accent" title={`In model: ${r.in_models.join(', ')}`} />}</>} />,
     },
     { id: 'ind', header: 'Sector', value: (r) => r.industry, cell: (r) => <span className="block max-w-[150px] truncate text-muted 2xl:max-w-[240px]" title={r.industry ?? ''}>{r.industry ?? '—'}</span>, hideBelow: 960 },
-    { id: 'price', header: 'Price ₹', align: 'right', value: (r) => r.price, cell: (r) => <Price v={r.price} />, mobile: 'value' },
+    { id: 'price', header: 'Price ₹', align: 'right', value: (r) => r.price, cell: (r) => <>{dot(r.symbol)}<Price v={r.price} /></>, mobile: 'value' },
     { id: 'd1', header: '1D', align: 'right', value: (r) => r.change_pct, cell: (r) => <Pct v={r.change_pct} dp={2} />, mobile: 'change' },
     { id: 'w1', header: '1W', align: 'right', value: (r) => r.ret_1w_pct, cell: (r) => <Pct v={r.ret_1w_pct} />, defaultHidden: true },
     { id: 'm1', header: '1M', align: 'right', value: (r) => r.ret_1m_pct, cell: (r) => <Pct v={r.ret_1m_pct} />, hideBelow: 1400 },
@@ -70,8 +79,14 @@ export default function Screener() {
   const q = useScreener({ preset, industry: industries.join(',') || undefined, in_models: inModels || undefined, results_within: resultsSoon ? 7 : undefined })
   const syms = useMemo(() => q.data?.rows.map((r) => r.symbol) ?? [], [q.data])
   const spark = useSparklines(syms)
+  // live price and day change for the first 100 rows (the stream's limit); rankings stay the scan's
+  const lq = useLiveQuotes(syms.slice(0, MAX_STREAM_SYMBOLS))
+  const rows = useMemo(() => (q.data?.rows ?? []).map((r) => {
+    const x = lq.quotes[r.symbol]
+    return x ? { ...r, price: x.price, change_pct: x.change_pct } : r
+  }), [q.data, lq.quotes])
   const nav = useNavigate()
-  const cols = useMemo(() => columns(spark.data?.series, preset), [spark.data, preset])
+  const cols = useMemo(() => columns(spark.data?.series, preset, lq.quotes), [spark.data, preset, lq.quotes])
   // every industry of the liquid list comes with the response (no second preset=all download just for the menu)
   const industryList = useMemo(() => q.data?.industries ?? [...new Set((q.data?.rows ?? []).map((r) => r.industry).filter(Boolean) as string[])].sort(), [q.data])
   const unavailable = isFailure(q.error) && q.error.code === 'FEATURE_UNAVAILABLE'
@@ -94,7 +109,7 @@ export default function Screener() {
         ) : (
           <DataTable
             id="screener"
-            data={q.data.rows}
+            data={rows}
             columns={cols}
             rowKey={(r) => r.symbol}
             onRowClick={(r) => nav(`/chart/${r.symbol}`)}
@@ -120,7 +135,7 @@ export default function Screener() {
           />
         )}
       </Card>
-      <p className="mt-2 text-2xs text-faint">Rankings use the last scan's prices{q.data?.as_of.live ? ", including today's still-forming (provisional) candle" : ' (official closes)'}. Click a row for the chart; j/k to move, Enter to open, / to filter.</p>
+      <p className="mt-2 text-2xs text-faint">Rankings use the last scan's prices{q.data?.as_of.live ? ", including today's still-forming (provisional) candle" : ' (official closes)'}. While the market is open, Price and 1D of the first {MAX_STREAM_SYMBOLS} rows follow the live price (green dot: FYERS real time, red: Yahoo ~15 min delayed). Click a row for the chart; j/k to move, Enter to open, / to filter.</p>
     </div>
   )
 }

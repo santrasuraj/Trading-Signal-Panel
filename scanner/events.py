@@ -82,6 +82,16 @@ def _cached(name: str, max_age_s: float, fetch, expect=list):
     return data
 
 
+def _nse_date(value) -> date | None:
+    """An NSE 'DD-Mon-YYYY' date, or None when it is blank or unreadable. A blank string parses to NaT
+    without raising, and NaT can't be compared with a date, so it must be caught here, not by the caller."""
+    try:
+        d = pd.to_datetime(str(value if value is not None else "").strip().title(), format="%d-%b-%Y")
+    except (ValueError, TypeError):
+        return None
+    return None if pd.isna(d) else d.date()
+
+
 def upcoming_results(symbols, today: date, days: int = 14) -> tuple[dict[str, str], str]:
     """{symbol: 'YYYY-MM-DD'} of the next results board meeting within `days`, and a status note."""
     def fetch():
@@ -100,9 +110,8 @@ def upcoming_results(symbols, today: date, days: int = 14) -> tuple[dict[str, st
         sym = str(r.get("symbol", "")).strip()
         if sym not in wanted or "result" not in str(r.get("purpose", "")).lower():
             continue
-        try:
-            d = pd.to_datetime(str(r.get("date", "")).strip().title(), format="%d-%b-%Y").date()
-        except (ValueError, TypeError):
+        d = _nse_date(r.get("date"))
+        if d is None:
             continue
         if today <= d <= today + timedelta(days=days) and (sym not in out or d.isoformat() < out[sym]):
             out[sym] = d.isoformat()
@@ -135,9 +144,8 @@ def results_history(start: date, end: date, log=print) -> dict[str, list[str]]:
         for r in rows:
             if not isinstance(r, dict) or "result" not in str(r.get("purpose", "")).lower():
                 continue
-            try:
-                d = pd.to_datetime(str(r.get("date", "")).strip().title(), format="%d-%b-%Y").date()
-            except (ValueError, TypeError):
+            d = _nse_date(r.get("date"))
+            if d is None:
                 continue
             out.setdefault(str(r.get("symbol", "")).strip(), set()).add(d.isoformat())
         month = nxt
@@ -156,10 +164,46 @@ def trading_holidays(year: int) -> set[str]:
     for r in rows if isinstance(rows, list) else []:
         if not isinstance(r, dict):
             continue
-        try:
-            d = pd.to_datetime(str(r.get("tradingDate", "")).strip().title(), format="%d-%b-%Y").date()
-        except (ValueError, TypeError):
+        d = _nse_date(r.get("tradingDate"))
+        if d is None:
             continue
         if d.year == year:
             out.add(d.isoformat())
+    return out
+
+
+def holiday_list(year: int) -> list[dict]:
+    """[{date, name}] of NSE's equity trading holidays in `year` (empty if unavailable), oldest first."""
+    try:
+        raw = _cached(f"holidays_{year}.json", 7 * 86400, lambda: _get_json("holiday-master", {"type": "trading"}),
+                      expect=dict)
+    except Exception:
+        return []
+    out = {}
+    rows = raw.get("CM", [])
+    for r in rows if isinstance(rows, list) else []:
+        if isinstance(r, dict):
+            d = _nse_date(r.get("tradingDate"))
+            if d is not None and d.year == year:
+                name = str(r.get("description") or "Market holiday").strip()
+                out[d.isoformat()] = name[:-1] + " (Muhurat trading in the evening)" if name.endswith("*") else name
+    return [{"date": k, "name": out[k]} for k in sorted(out)]
+
+
+def board_meetings(today: date, days: int) -> list[dict]:
+    """[{symbol, date, purpose}] of NSE's event calendar from `today` for `days` days (results, dividends, bonus,
+    fund raising...), cached for 6 hours under its own name (upcoming_results keeps its 14-day file). Raises when
+    NSE can't be reached and nothing is cached."""
+    def fetch():
+        return _get_json("event-calendar", {"index": "equities", "from_date": today.strftime("%d-%m-%Y"),
+                                            "to_date": (today + timedelta(days=days)).strftime("%d-%m-%Y")})
+    rows = _cached(f"events_{today:%Y%m%d}_{days}d.json", 6 * 3600, fetch)
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        d = _nse_date(r.get("date"))
+        sym = str(r.get("symbol", "")).strip().upper()
+        if d is not None and sym and today <= d <= today + timedelta(days=days):
+            out.append({"symbol": sym, "date": d.isoformat(), "purpose": str(r.get("purpose") or "").strip()})
     return out

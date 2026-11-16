@@ -60,7 +60,7 @@ export function StatusBar() {
           <span>No scan yet</span>
         )}
       </div>
-      <Link to="/settings/about" className="shrink-0 hover:text-fg">Research tool · not investment advice</Link>
+      <Link to="/settings/about" className="shrink-0 hover:text-fg" title="Personal research tool: what it is and is not">About</Link>
     </footer>
   )
 }

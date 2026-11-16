@@ -71,12 +71,17 @@ class FyersStatus(Model):
     verified_at: ISODateTime | None = None
     user_name: str | None = None
     redirect_uri: str
-    login_modes: list[Literal["paste", "window"]]
+    login_modes: list[Literal["direct", "paste", "window"]]
+    # who receives Fyers' redirect: this app's own callback (one click), a one-shot listener on a free local port
+    # (one click), or nobody here (the port is taken, e.g. Docker on 8000: paste the address)
+    direct_mode: Literal["app", "listener", "paste"]
+    callback_url: str                             # this app's callback, to register as the Fyers app's Redirect URL
     note: str
 
 
 class AppStatus(Model):
     server_version: str
+    ui_build: str | None = None         # the served build's entry script: a tab from an older build offers to reload
     latest: AsOf | None = None          # null => onboarding
     scan: ScanStatus
     fyers: FyersStatus

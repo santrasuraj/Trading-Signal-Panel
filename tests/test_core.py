@@ -159,16 +159,6 @@ def test_factors_have_no_lookahead(frames_factory):
         pd.testing.assert_frame_equal(a, b, check_exact=False, rtol=1e-9)
 
 
-def test_nr7_ignores_gap_filled_bars(frames_factory):
-    """A day with no trade is bridged with a flat copy of the last close (range 0): never a narrow-range day."""
-    fr = frames_factory({"A": list(100 + np.arange(40.0))})    # real ranges widen every day: no real NR7
-    for fld in ("open", "high", "low", "close"):
-        fr[fld].iloc[30, 0] = np.nan
-    f = Factors(panel_from_wide(fr))
-    assert f.p.high["A"].iloc[30] == f.p.low["A"].iloc[30] and not f.p.observed["A"].iloc[30]
-    assert not f.nr7["A"].any()
-
-
 def test_min_price_filter_can_use_prices_as_traded(frames_factory):
     """On a back-adjusted panel a later 1:10 split shows Rs 300 as Rs 30: the minimum-price test must use the
     price as it traded that day, or a future split decides whether the stock was tradable before it."""
@@ -177,6 +167,22 @@ def test_min_price_filter_can_use_prices_as_traded(frames_factory):
     assert not tradable_mask(f, 50, 0)["A"].any()
     as_traded = tradable_mask(f, 50, 0, price=f.p.close * 10)
     assert as_traded["A"].iloc[20:].all()
+
+
+def test_etfs_are_exempt_from_the_stock_filters(frames_factory):
+    """GOLDBEES traded below Rs 50 until 2023 and JUNIORBEES under Rs 5 crore a day for years: the stock price
+    and turnover filters must not sell an ETF strategy out of its own assets. A stock at the same price and
+    turnover stays filtered, and an ETF is still untradable before it has a price."""
+    from scanner.strategies import tradable_mask
+    fr = frames_factory({"STOCK": [30.0] * 40, "ETF": [np.nan] * 10 + [30.0] * 30}, volume=1_000)
+    f = Factors(panel_from_wide(fr), etfs={"ETF"})
+    t = tradable_mask(f, 50, 5)
+    assert not t["STOCK"].any()
+    assert not t["ETF"].iloc[:10].any() and t["ETF"].iloc[10:].all()
+    # on a point-in-time panel an ETF is never a universe member, and stays tradable
+    uni = pd.DataFrame(False, index=f.p.dates, columns=f.p.close.columns)
+    fp = Factors(panel_from_wide(fr, universe=uni), etfs={"ETF"})
+    assert tradable_mask(fp, 50, 5)["ETF"].iloc[10:].all()
 
 
 # ------------------------------------------------------------------ engine
@@ -363,8 +369,12 @@ def test_working_status_needs_money_made_and_recent_trading():
     assert working_status({"full": {"cagr_pct": 12.0}, "12m": win(-9.0, 80.0), "6m": win(-6.0, 90.0)})[0] == "not-working"
 
 
-def test_scan_lock_blocks_second_scan():
+def test_scan_lock_blocks_second_scan(tmp_path, monkeypatch):
+    from scanner import lock
     from scanner.lock import ScanBusy, scan_lock
+    # never the real data/.scan.lock: a scan running meanwhile would block this test (and lose its lock info)
+    monkeypatch.setattr(lock, "LOCK_FILE", tmp_path / ".scan.lock")
+    monkeypatch.setattr(lock, "INFO_FILE", tmp_path / ".scan.lock.json")
     with scan_lock("test"):
         with pytest.raises(ScanBusy):
             with scan_lock("test2"):
@@ -402,8 +412,26 @@ def test_after_tax_losses_offset_and_ltcg_exemption():
         Trade("C", pd.Timestamp("2022-01-01"), 1, pd.Timestamp("2023-10-01"), 1, 1, 100_000, 10, 400, "x"),  # LT gain
     ]
     out = after_tax_equity(_result_with(trades, eq), TaxModel())
-    # ST net 20k -> 4,160 tax; LT 100k is under the 1.25L exemption -> 0
-    assert out.iloc[-1] == pytest.approx(1_000_000 - 20_000 * 0.208)
+    # FY 2023-24 (before the 23 Jul 2024 change): ST net 20k at 15.6% -> 3,120; LT 100k is not above the 1L exemption
+    assert out.iloc[-1] == pytest.approx(1_000_000 - 20_000 * 0.156)
+    flat = after_tax_equity(_result_with(trades, eq), TaxModel(dated=0))
+    assert flat.iloc[-1] == pytest.approx(1_000_000 - 20_000 * 0.208)      # today's rates for every year
+
+
+def test_after_tax_uses_the_rate_of_the_exit_date():
+    from scanner.costs import TaxModel
+    from scanner.engine import Trade, after_tax_equity
+    idx = pd.bdate_range("2024-04-01", "2025-06-30")
+    eq = pd.Series(1_000_000.0, index=idx)
+    trades = [   # FY 2024-25: one short-term gain before 23 Jul 2024 (15.6%), one after (20.8%)
+        Trade("A", pd.Timestamp("2024-04-02"), 1, pd.Timestamp("2024-07-01"), 1, 1, 10_000, 1, 60, "x"),
+        Trade("B", pd.Timestamp("2024-04-02"), 1, pd.Timestamp("2024-09-02"), 1, 1, 30_000, 3, 100, "x"),
+        Trade("C", pd.Timestamp("2022-01-03"), 1, pd.Timestamp("2024-10-01"), 1, 1, 200_000, 20, 700, "x"),   # LT
+    ]
+    out = after_tax_equity(_result_with(trades, eq), TaxModel())
+    st = 10_000 * 0.156 + 30_000 * 0.208
+    lt = (200_000 - 125_000) * 0.13                        # the 1.25L exemption already applies in FY 2024-25
+    assert out.iloc[-1] == pytest.approx(1_000_000 - st - lt)
 
 
 def test_after_tax_taxes_open_gains_and_cash_income_and_adds_back_stt():

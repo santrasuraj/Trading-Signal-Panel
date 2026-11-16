@@ -6,6 +6,7 @@ are dropped (never forward-filled). Weekly bars are stamped with the LAST TRADIN
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from scanner.indicators import add_indicators
@@ -16,7 +17,16 @@ from ..util import num, ser_list
 
 RANGE_DAYS = {"3m": 92, "6m": 183, "1y": 366, "2y": 731, "5y": 1827, "max": None}
 INDICATORS = ("sma20", "sma50", "sma200", "ema21", "bb_upper", "bb_mid", "bb_lower", "rsi14", "macd",
-              "macd_signal", "macd_hist", "vol_avg20")
+              "macd_signal", "macd_hist", "vol_avg20",
+              # overlays on the price pane
+              "ema9", "ema50", "ema200", "sma100", "supertrend", "dc_upper", "dc_lower", "kc_upper", "kc_mid", "kc_lower",
+              # oscillator panes
+              "stoch_k", "stoch_d", "adx14", "plus_di", "minus_di", "atr14", "obv", "cci20", "mfi14", "willr14", "roc12",
+              # Ichimoku (9, 26, 52; the cloud drawn where it applies: 26 bars after it is computed), Parabolic SAR,
+              # Aroon 25
+              "ichi_tenkan", "ichi_kijun", "ichi_span_a", "ichi_span_b", "psar", "aroon_up", "aroon_down",
+              # the weekly chart's SMA 10 / 30 and RSI 14 on the daily chart (each week's value from its last day on)
+              "w_sma10", "w_sma30", "w_rsi14")
 DEFAULT_INDICATORS = ("sma20", "sma50", "sma200", "rsi14")
 
 
@@ -24,8 +34,14 @@ def bars_frame(symbol: str) -> pd.DataFrame:
     frames = data.store()
     c = frames["close"]
     if symbol not in c.columns:
-        raise ApiException("NOT_FOUND", f"Symbol '{symbol}' not found in the price store.",
-                           "Run a scan, or check the NSE symbol (e.g. M&M).")
+        # not in the daily store (an index such as BANKNIFTY, a stock outside the scan universe): fetched on demand
+        from . import ondemand_bars
+        df, _src = ondemand_bars.daily(symbol)
+        if df is None or df.empty:
+            raise ApiException("NOT_FOUND", f"Symbol '{symbol}' not found in the price store or on Yahoo.",
+                               "Check the NSE symbol (e.g. M&M).")
+        df.attrs["source"] = "yahoo"
+        return df
     df = pd.DataFrame({f: frames[f][symbol] for f in ("open", "high", "low", "close", "volume")}).dropna(subset=["close"])
     if df.empty:
         raise not_found(f"Price history for '{symbol}'")
@@ -33,6 +49,42 @@ def bars_frame(symbol: str) -> pd.DataFrame:
     for f in ("open", "high", "low"):
         df[f] = df[f].fillna(df["close"])
     return df
+
+
+def psar(df: pd.DataFrame, step: float = 0.02, max_af: float = 0.2) -> pd.Series:
+    """Wilder's Parabolic SAR (0.02 / 0.2)."""
+    h, lo = df["high"].to_numpy(dtype=float), df["low"].to_numpy(dtype=float)
+    n = len(h)
+    out = np.full(n, np.nan)
+    if n < 3:
+        return pd.Series(out, index=df.index)
+    up = h[1] >= h[0]
+    sar, ep, af = (lo[0], h[1], step) if up else (h[0], lo[1], step)
+    for i in range(1, n):
+        sar = sar + af * (ep - sar)
+        if up:
+            sar = min(sar, lo[i - 1], lo[i - 2] if i > 1 else lo[i - 1])
+            if lo[i] < sar:
+                up, sar, ep, af = False, ep, lo[i], step
+            elif h[i] > ep:
+                ep, af = h[i], min(af + step, max_af)
+        else:
+            sar = max(sar, h[i - 1], h[i - 2] if i > 1 else h[i - 1])
+            if h[i] > sar:
+                up, sar, ep, af = True, ep, h[i], step
+            elif lo[i] < ep:
+                ep, af = lo[i], min(af + step, max_af)
+        out[i] = sar
+    return pd.Series(out, index=df.index)
+
+
+def monthly(df: pd.DataFrame) -> pd.DataFrame:
+    g = df.groupby(df.index.to_period("M"))
+    m = pd.DataFrame({"open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
+                      "close": g["close"].last(), "volume": g["volume"].sum()})
+    last_day = pd.Series(df.index, index=df.index).groupby(df.index.to_period("M")).last()
+    m.index = pd.DatetimeIndex(last_day.reindex(m.index).values, name="date")
+    return m
 
 
 def weekly(df: pd.DataFrame) -> pd.DataFrame:
@@ -44,6 +96,19 @@ def weekly(df: pd.DataFrame) -> pd.DataFrame:
     return w
 
 
+def higher_tf(df: pd.DataFrame) -> pd.DataFrame:
+    """Weekly SMA 10 / 30 and RSI 14 laid on daily bars: a week's value shows from its last day on (the current
+    week's from today, as the weekly chart shows it now); earlier days of a week carry the week before's."""
+    w = weekly(df)
+    c = w["close"]
+    d = c.diff()
+    up, dn = d.clip(lower=0), -d.clip(upper=0)
+    rs = _wilder(up, 14) / _wilder(dn, 14).replace(0, np.nan)
+    wk = pd.DataFrame({"w_sma10": c.rolling(10, min_periods=10).mean(), "w_sma30": c.rolling(30, min_periods=30).mean(),
+                       "w_rsi14": 100 - 100 / (1 + rs)}, index=w.index)
+    return wk.reindex(df.index, method="ffill")
+
+
 def with_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out = add_indicators(df)
     out["rsi14"] = out["rsi"]
@@ -52,21 +117,108 @@ def with_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["bb_upper"] = out["sma20"] + 2 * std
     out["bb_lower"] = out["sma20"] - 2 * std
     out["macd_hist"] = out["macd"] - out["macd_signal"]
+    return extra_indicators(df, out)
+
+
+def _wilder(x: pd.Series, n: int) -> pd.Series:
+    return x.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+
+
+def supertrend(df: pd.DataFrame, n: int = 10, mult: float = 3.0) -> pd.Series:
+    """Supertrend (10, 3): the trailing band the close has to cross to flip the trend."""
+    h, lo, c = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
+    prev = np.roll(c, 1)
+    prev[0] = c[0]
+    tr = np.maximum(h - lo, np.maximum(np.abs(h - prev), np.abs(lo - prev)))
+    atr = pd.Series(tr).ewm(alpha=1 / n, adjust=False, min_periods=n).mean().to_numpy()
+    mid = (h + lo) / 2
+    up, dn = mid + mult * atr, mid - mult * atr
+    st = np.full(len(c), np.nan)
+    fu, fd, trend = np.nan, np.nan, 1
+    for i in range(len(c)):
+        if np.isnan(atr[i]):
+            continue
+        fu = up[i] if np.isnan(fu) or up[i] < fu or c[i - 1] > fu else fu
+        fd = dn[i] if np.isnan(fd) or dn[i] > fd or c[i - 1] < fd else fd
+        if trend == 1 and c[i] < fd:
+            trend = -1
+        elif trend == -1 and c[i] > fu:
+            trend = 1
+        st[i] = fd if trend == 1 else fu
+    return pd.Series(st, index=df.index)
+
+
+def extra_indicators(df: pd.DataFrame, out: pd.DataFrame) -> pd.DataFrame:
+    """The chart's other indicators (textbook parameters, no tuning)."""
+    h, lo, c, v = df["high"], df["low"], df["close"], df["volume"].fillna(0.0)
+    out["ema9"] = c.ewm(span=9, adjust=False, min_periods=9).mean()
+    out["ema50"] = c.ewm(span=50, adjust=False, min_periods=50).mean()
+    out["ema200"] = c.ewm(span=200, adjust=False, min_periods=200).mean()
+    out["sma100"] = c.rolling(100, min_periods=100).mean()
+    out["supertrend"] = supertrend(df)
+    out["dc_upper"] = h.rolling(20, min_periods=20).max()
+    out["dc_lower"] = lo.rolling(20, min_periods=20).min()
+    prev = c.shift(1)
+    tr = pd.concat([h - lo, (h - prev).abs(), (lo - prev).abs()], axis=1).max(axis=1)
+    atr10 = _wilder(tr, 10)
+    out["kc_mid"] = c.ewm(span=20, adjust=False, min_periods=20).mean()
+    out["kc_upper"] = out["kc_mid"] + 2 * atr10
+    out["kc_lower"] = out["kc_mid"] - 2 * atr10
+    ll, hh = lo.rolling(14, min_periods=14).min(), h.rolling(14, min_periods=14).max()
+    rng = (hh - ll).replace(0, np.nan)
+    k = ((c - ll) / rng * 100).rolling(3, min_periods=3).mean()      # slow %K (14, 3)
+    out["stoch_k"], out["stoch_d"] = k, k.rolling(3, min_periods=3).mean()
+    out["willr14"] = (hh - c) / rng * -100
+    up_move, down_move = h.diff(), -lo.diff()
+    pdm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    mdm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+    atr14 = _wilder(tr, 14)
+    out["atr14"] = atr14
+    out["plus_di"] = 100 * _wilder(pdm, 14) / atr14.replace(0, np.nan)
+    out["minus_di"] = 100 * _wilder(mdm, 14) / atr14.replace(0, np.nan)
+    dx = 100 * (out["plus_di"] - out["minus_di"]).abs() / (out["plus_di"] + out["minus_di"]).replace(0, np.nan)
+    out["adx14"] = _wilder(dx, 14)
+    out["obv"] = (np.sign(c.diff()).fillna(0) * v).cumsum()
+    tp = (h + lo + c) / 3
+    md = pd.Series(np.nan, index=tp.index)
+    if len(tp) >= 20:                                      # mean absolute deviation over 20 bars, vectorised
+        w = np.lib.stride_tricks.sliding_window_view(tp.to_numpy(dtype=float), 20)
+        md.iloc[19:] = np.abs(w - w.mean(axis=1, keepdims=True)).mean(axis=1)
+    out["cci20"] = (tp - tp.rolling(20, min_periods=20).mean()) / (0.015 * md.replace(0, np.nan))
+    mf = tp * v
+    pos = mf.where(tp > tp.shift(1), 0.0).rolling(14, min_periods=14).sum()
+    neg = mf.where(tp < tp.shift(1), 0.0).rolling(14, min_periods=14).sum()
+    out["mfi14"] = 100 - 100 / (1 + pos / neg.replace(0, np.nan))
+    out["roc12"] = (c / c.shift(12) - 1) * 100
+    mid = lambda n: (h.rolling(n, min_periods=n).max() + lo.rolling(n, min_periods=n).min()) / 2  # noqa: E731
+    out["ichi_tenkan"], out["ichi_kijun"] = mid(9), mid(26)
+    out["ichi_span_a"] = ((out["ichi_tenkan"] + out["ichi_kijun"]) / 2).shift(26)
+    out["ichi_span_b"] = mid(52).shift(26)
+    out["psar"] = psar(df)
+    since_hi = h.rolling(26, min_periods=26).apply(lambda x: 25 - int(np.argmax(x)), raw=True)
+    since_lo = lo.rolling(26, min_periods=26).apply(lambda x: 25 - int(np.argmin(x)), raw=True)
+    out["aroon_up"], out["aroon_down"] = 100 * (25 - since_hi) / 25, 100 * (25 - since_lo) / 25
     return out
 
 
 def build(symbol: str, tf: str, rng: str, indicators: list[str]) -> dict:
     lt = data.latest() or {}
     df = bars_frame(symbol)
+    fetched = df.attrs.get("source")                    # "yahoo" when the daily store doesn't have the symbol
     source_date = df.index[-1].date().isoformat()
     if tf == "1w":
         df = weekly(df)
+    elif tf == "1mo":
+        df = monthly(df)
     full = with_indicators(df)
+    if tf == "1d" and any(k.startswith("w_") for k in indicators):
+        full = full.join(higher_tf(df))
     days = RANGE_DAYS[rng]
     view = full if days is None else full[full.index >= full.index[-1] - pd.Timedelta(days=days)]
     first = view.index[0].date().isoformat()
     t = [d.date().isoformat() for d in view.index]
-    kind = data.symbol_kind(symbol)
+    from . import ondemand_bars
+    kind = "index" if ondemand_bars.is_index(symbol) else data.symbol_kind(symbol)
     meta = data.symbol_meta().get(symbol, {})
     out_ind = {k: ser_list(view[k], 4) for k in indicators if k in view.columns}
     markers, lines, avail = _markers_and_lines(symbol, lt, first, t, tf)
@@ -82,14 +234,14 @@ def build(symbol: str, tf: str, rng: str, indicators: list[str]) -> dict:
     for d in past:
         markers.append({"t": _snap(d, t), "position": "belowBar", "shape": "circle", "kind": "results", "tone": "neutral",
                         "text": "R", "detail": f"Results {d}", "strategy_key": None})
-    year = full.iloc[-252 if tf == "1d" else -52:]
+    year = full.iloc[-252 if tf == "1d" else -52 if tf == "1w" else -12:]
     lines.append({"price": num(year["high"].max(), 2), "label": "52w high", "strategy_key": None, "kind": "high_52w"})
     lines.append({"price": num(year["low"].min(), 2), "label": "52w low", "strategy_key": None, "kind": "low_52w"})
     markers = [m for m in markers if m["t"] is not None]
     markers.sort(key=lambda m: m["t"])
     return {
         "symbol": symbol, "company": meta.get("company"), "industry": meta.get("industry"), "kind": kind,
-        "tf": tf, "range": rng, "adjusted": True, "source_date": source_date,
+        "tf": tf, "range": rng, "adjusted": fetched is None, "source_date": source_date, "fetched": fetched,
         "bars": {"t": t, "o": ser_list(view["open"], 2), "h": ser_list(view["high"], 2), "l": ser_list(view["low"], 2),
                  "c": ser_list(view["close"], 2), "v": [0.0] * len(view) if kind == "index" else ser_list(view["volume"], 0)},
         "indicators": out_ind, "markers": markers, "price_lines": [x for x in lines if x["price"] is not None],

@@ -1,9 +1,11 @@
 // TanStack Query hooks (spec 6.1 / 7). Scan-derived data never goes stale on a timer: the ScanWatcher in the shell
 // invalidates every query when /api/status reports a new scan_id. Only /api/status polls.
 
+import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
 import { api, isFailure, type ChartParams, type ScreenerParams, type TradesParams } from './client'
-import type { AppStatus, CurveRange, HoldingInput, IntradayResponse } from './types'
+import { MAX_STREAM_SYMBOLS, quoteStream, summarize, type LiveQuote } from './liveQuotes'
+import type { AppStatus, CurveRange, HoldingInput, IntradayResponse, TrackState } from './types'
 
 export const keys = {
   status: ['status'] as const,
@@ -21,6 +23,8 @@ export const keys = {
   stock: (s: string) => ['stock', s] as const,
   holdings: ['holdings'] as const,
   paper: ['paper'] as const,
+  trackRecord: (p: object) => ['signals', 'track', p] as const,
+  quotes: (s: string) => ['quotes', s] as const,
   paperDetail: (k: string) => ['paper', k] as const,
   movers: ['market', 'movers'] as const,
   sectors: ['market', 'sectors'] as const,
@@ -33,6 +37,7 @@ export const keys = {
   costs: (v: number) => ['costs', v] as const,
   dataHealth: ['data', 'health'] as const,
   intraday: ['intraday'] as const,
+  intradaySignals: ['intraday', 'signals'] as const,
 }
 
 /** Never retry client errors or missing features; retry network/5xx twice with backoff. */
@@ -59,6 +64,8 @@ export const useStatus = () =>
     queryFn: api.status,
     refetchInterval: statusInterval,
     refetchIntervalInBackground: true,
+    // coming back to the tab checks for a new scan at once (the ScanWatcher then refreshes every page's data)
+    refetchOnWindowFocus: true,
     staleTime: 0,
     retry: false,
   })
@@ -83,6 +90,34 @@ export const useChart = (s: string, p: ChartParams) =>
   useQuery({ queryKey: keys.chart(s, p), queryFn: () => api.chart(s, p), staleTime: 10 * 60_000, placeholderData: keepPreviousData, enabled: !!s })
 export const useStock = (s: string) => useQuery({ queryKey: keys.stock(s), queryFn: () => api.stock(s), staleTime: Infinity, enabled: !!s })
 export const useHoldings = () => useQuery({ queryKey: keys.holdings, queryFn: api.holdings, staleTime: Infinity })
+/** Live prices for `symbols`, pushed by the shared event stream (api/liveQuotes.ts): FYERS live-feed ticks about a
+ *  second after the trade, REST / Yahoo every 30 s for symbols the feed doesn't carry yet. While the market is open
+ *  and until 18:00 (the day's last trades); empty when it is shut (pages then show the scan's official closes).
+ *  `live` = the market is open and at least one quote arrived; `data` = what these quotes are (source, delay, note). */
+export function useLiveQuotes(symbols: string[]) {
+  const key = [...new Set(symbols)].sort().slice(0, MAX_STREAM_SYMBOLS).join(',')
+  useEffect(() => (key ? quoteStream.want(key.split(',')) : undefined), [key])
+  const version = useSyncExternalStore(quoteStream.subscribe, quoteStream.getVersion)
+  return useMemo(() => {
+    void version
+    const meta = quoteStream.getMeta()
+    const session = meta?.session
+    const map: Record<string, LiveQuote> = {}
+    if (session === 'open' || session === 'post_close') {
+      for (const s of key ? key.split(',') : []) {
+        const q = quoteStream.get(s)
+        if (q) map[s] = q
+      }
+    }
+    const got = Object.values(map)
+    const data = meta && got.length ? { ...summarize(got, meta.session), as_of: meta.as_of, session: meta.session, connected: meta.connected } : undefined
+    return { live: session === 'open' && got.length > 0, quotes: map as Record<string, LiveQuote>, data }
+  }, [key, version])
+}
+
+/** The signal track record changes only with a new scan (the ScanWatcher invalidates every query then). */
+export const useTrackRecord = (p: { strategy?: string; state?: TrackState } = {}) =>
+  useQuery({ queryKey: keys.trackRecord(p), queryFn: () => api.trackRecord(p), staleTime: Infinity, placeholderData: keepPreviousData })
 export const usePaper = () => useQuery({ queryKey: keys.paper, queryFn: api.paper, staleTime: Infinity })
 export const usePaperDetail = (k: string) => useQuery({ queryKey: keys.paperDetail(k), queryFn: () => api.paperDetail(k), staleTime: Infinity, enabled: !!k })
 export const useMovers = () => useQuery({ queryKey: keys.movers, queryFn: api.movers, ...scan })
@@ -100,6 +135,10 @@ export const useDataHealth = () => useQuery({ queryKey: keys.dataHealth, queryFn
 /** Polls every 5 s only while a background re-run (POST /api/intraday/run) is in progress. */
 export const useIntraday = () =>
   useQuery({ queryKey: keys.intraday, queryFn: api.intraday, staleTime: 60_000, refetchInterval: (q) => (q.state.data?.run?.running ? 5000 : false) })
+
+/** Today's live intraday signals: the server recomputes them every 5 minutes in market hours, so poll every minute. */
+export const useIntradaySignals = () =>
+  useQuery({ queryKey: keys.intradaySignals, queryFn: api.intradaySignals, staleTime: 30_000, refetchInterval: 60_000 })
 
 export function useStartScan() {
   const qc = useQueryClient()
@@ -123,7 +162,9 @@ export function useSaveHoldings() {
 export function useIntradayRun() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (update: boolean) => api.intradayRun(update),
+    // true / false = update the bars or not; { backfill: true } = first a year of FYERS history (needs today's login)
+    mutationFn: (v: boolean | { update?: boolean; backfill?: boolean }) =>
+      typeof v === 'boolean' ? api.intradayRun(v) : api.intradayRun(v.update ?? true, v.backfill ?? false),
     onSuccess: (r) => {
       qc.setQueryData<IntradayResponse>(keys.intraday, (d) => (d ? { ...d, run: r.run } : d))
       void qc.invalidateQueries({ queryKey: keys.intraday })
@@ -131,8 +172,29 @@ export function useIntradayRun() {
   })
 }
 
+/** The Windows scheduled jobs (server caches the Task Scheduler read for a minute). */
+export const useAutomation = () =>
+  useQuery({ queryKey: ['automation'], queryFn: () => api.automation(), staleTime: 60_000, refetchInterval: 300_000 })
+export function useAutomationSetup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: api.automationSetup,
+    onSuccess: (r) => { qc.setQueryData(['automation'], r.status) },
+  })
+}
+
 export const useImportFyers = () => useMutation({ mutationFn: api.importFyers })
 export const useFyersLogin = () => useMutation({ mutationFn: api.fyersLogin })
+/** While a one-click login waits for the Fyers tab: the status every 2 s (file reads only on the server). */
+export const useFyersWait = (enabled: boolean) =>
+  useQuery({ queryKey: ['fyers', 'wait'], queryFn: () => api.fyersStatus(false), refetchInterval: 2_000, enabled, staleTime: 0 })
+export function useFyersDirectSetup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: api.fyersDirectSetup,
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.status }) },
+  })
+}
 export function useFyersComplete() {
   const qc = useQueryClient()
   return useMutation({

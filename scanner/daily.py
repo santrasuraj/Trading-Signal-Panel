@@ -16,17 +16,17 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from . import corporate, paper, pit
+from . import corporate, dividends, outlook, paper, pit
 from .costs import CostModel, TaxModel
 from .engine import (EventStrategy, _curve_stats, _period_ends, evaluate, equal_weight_index, simulate,
                      working_status)
 from .events import results_history, trading_holidays, upcoming_results
-from .nse import index_history
+from .nse import index_history, index_yields
 from .holdings import adjustment_factor, current_symbol, load_holdings
 from .lock import scan_lock
 from .panel import Factors, panel_from_wide
 from .providers import INDEX_N500, INDEX_NIFTY, INDEX_VIX, get_fyers
-from .settings import RESULTS_DIR, ROOT, SESSION_END, SESSION_START, ist_now, load_config
+from .settings import RESULTS_DIR, ROOT, SESSION_START, ist_now, load_config
 from .store import _replace, load_store, refresh_store
 from .strategies import build_strategies, strategy_lifecycle, tradable_mask
 from .universe import get_universe, industry_map
@@ -34,7 +34,7 @@ from .universe import get_universe, industry_map
 LATEST_FILE = RESULTS_DIR / "latest.json"
 TIMING_CACHE = RESULTS_DIR / "timing_cache.json"
 REJECTED_CACHE = RESULTS_DIR / "rejected_cache.json"   # B4: re-test results of strategies that never trade
-ENGINE_VERSION = 7  # bump when simulation logic changes, so cached timing ranges are recomputed
+ENGINE_VERSION = 9  # bump when simulation logic changes, so cached timing ranges are recomputed
 NEEDS_INDUSTRY = {"sector_rotation"}   # strategies whose picks depend on each stock's industry
 # (4: ETF stray open prints cleaned, low-vol "most traded" among stocks only; 6: no fills on gap-filled days or
 #  at locked circuits, cash yield less a fund fee and taxed, calendar-year CAGR, Sharpe over cash, idle windows
@@ -44,24 +44,6 @@ TRADES_FILE = RESULTS_DIR / "trades.parquet"       # B1: every closed trade of e
 SCREENER_FILE = RESULTS_DIR / "screener.parquet"   # B2: one row per tradable stock at scan time
 KEEP_SCAN_FILES = 60
 SCHEMA = 3            # latest.json content version (the file format itself stays `version: 2`)
-
-# Typical NSE cumulative volume by minutes since 09:15 (U-shaped day: heavy open and close).
-_VOLUME_CURVE = [(0, 0.0), (15, 0.12), (30, 0.20), (60, 0.32), (120, 0.48), (180, 0.60),
-                 (240, 0.72), (300, 0.84), (345, 0.93), (375, 1.0)]
-
-
-def expected_volume_fraction(now=None) -> float | None:
-    """Share of a normal day's volume traded by now, or None outside market hours."""
-    now = now or ist_now()
-    if now.weekday() >= 5:
-        return None
-    start = now.replace(hour=SESSION_START[0], minute=SESSION_START[1], second=0, microsecond=0)
-    mins = (now - start).total_seconds() / 60
-    if mins <= 0 or (now.hour, now.minute) >= SESSION_END:
-        return None
-    xs, ys = zip(*_VOLUME_CURVE)
-    return max(float(np.interp(mins, xs, ys)), 0.05)
-
 
 def _load_json(path) -> dict:
     try:
@@ -237,13 +219,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         raise RuntimeError("No price data yet. Check your internet connection and run the scan again.")
 
     live = bool(info.get("live_day"))
-    vol_frac = expected_volume_fraction() if live else None
-    if live and vol_frac:
-        # Project today's partial volume to a full day so volume filters aren't fooled.
-        frames = dict(frames)
-        v = frames["volume"].copy()
-        v.iloc[-1] = v.iloc[-1] / vol_frac
-        frames["volume"] = v
+    # During the session today's volume is the real volume traded so far - never scaled up to a guessed full day:
+    # a volume-confirmed signal shows only once that volume has actually traded.
 
     log("Testing strategies and computing signals...")
     p = panel_from_wide(frames, symbols, etfs=set(etfs))   # ETF stray open prints cleaned (fills at the open)
@@ -305,6 +282,21 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
     bt = pit.backtest_setup(cfg, frames, info, list(uni["symbol"]), {"f": f, "trad": trad, "ew": ew, "n500": n500},
                             log, etfs=etfs, industry=industry, results_dates=results_hist)
     bf, btrad, bew, bn500 = bt["f"], bt["trad"], bt["ew"], bt["n500"]
+    # With dividends in the backtests, the indices they are compared with are total-return ones too (NSE's daily
+    # dividend yield per index: dividends.total_return); price returns on both sides otherwise.
+    idx_yield = None
+    if bt.get("dividends"):
+        try:
+            idx_yield = index_yields([d.date() for d in p.dates if d <= done_upto], log=log).reindex(p.dates).ffill()
+        except Exception as e:
+            log(f"Index dividend yields unavailable ({type(e).__name__}: {e}) - indices are price returns")
+
+    def _tr(series, name):
+        dy = _index_column(idx_yield, name) if idx_yield is not None else None
+        return dividends.total_return(series, dy) if series is not None and dy is not None else series
+
+    bench50 = _tr(bf.p.index_close, "Nifty 50")
+    bn500 = _tr(bn500, "Nifty 500")
     timing_cache = _load_json(TIMING_CACHE)
     rejected_cache = _load_json(REJECTED_CACHE)
     # Inputs that change results without changing the config (part of every cache signature).
@@ -320,9 +312,17 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                   if ind_cov is not None and ind_cov < 99 else "")
     strat_out, rejected_out, curves, trade_rows = [], [], {}, []
     all_strats = build_strategies(cfg, include_disabled=True)
+    try:   # your own strategies switched on for the scan (Strategy builder): tested like the built-in ones
+        from . import custom
+        mine = custom.scan_strategies()
+        all_strats += mine
+        if mine:
+            log(f"Your strategies in this scan: {', '.join(s.name for s in mine)}")
+    except Exception as e:
+        log(f"Your saved strategies were skipped ({type(e).__name__}: {e})")
     for n_done, s in enumerate(all_strats, 1):
         log(f"Testing strategy {n_done}/{len(all_strats)}: {s.name}")   # run_scan.py turns this into progress
-        conf_s = (cfg.get("strategies") or {}).get(s.key)
+        conf_s = (cfg.get("strategies") or {}).get(s.key) or getattr(s, "spec", None)
         lifecycle, rejected_reason = strategy_lifecycle(cfg, s.key)
         # One signature for both caches: everything that changes the cached numbers (the resolved rules include
         # code defaults such as top_n and the raw config values; tax for the rejected entries' after-tax metrics).
@@ -334,8 +334,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
             hit = rejected_cache.get(s.key)
             if not (hit and hit.get("sig") == sig):
                 res = simulate(s, bf, costs, btrad, capital=capital, min_position=min_position, cash_rate=cash_rate)
-                factor = _index_column(idx_hist, s.benchmark)
-                m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
+                factor = _tr(_index_column(idx_hist, s.benchmark), s.benchmark)
+                m = evaluate(res, bench50, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
                              cash_rate=cash_rate, stt_pct=costs.stt_pct)
                 m["full"]["factor_benchmark_name"] = s.benchmark or None
                 m["full"]["backtest_universe"] = bt["universe"]
@@ -373,8 +373,8 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         live_eq = float(live_res.equity.dropna().iloc[-1]) if live_res.equity.notna().any() else 0.0
         res = live_res if bf is f else simulate(s, bf, costs, btrad, capital=capital, min_position=min_position,
                                                 cash_rate=cash_rate)
-        factor = _index_column(idx_hist, s.benchmark)
-        m = evaluate(res, bf.p.index_close, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
+        factor = _tr(_index_column(idx_hist, s.benchmark), s.benchmark)
+        m = evaluate(res, bench50, bew, tax=tax, n500_benchmark=bn500, factor_benchmark=factor,
                      cash_rate=cash_rate, stt_pct=costs.stt_pct)
         m["full"]["factor_benchmark_name"] = s.benchmark or None
         m["full"]["backtest_universe"] = bt["universe"]
@@ -595,7 +595,7 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
                    "vix": vix, "vix_change_pct": vix_chg,
                    "breadth_50": breadth, "advances": int((pool > 0).sum()), "declines": int((pool < 0).sum())},
         "strategies": strat_out,
-        # B4: kept out of `strategies` so older readers (Streamlit, Telegram, the paper journal) never see them
+        # B4: kept out of `strategies` so older readers (Telegram, the paper journal) never see them
         "rejected_strategies": rejected_out,
         "gainers": [mover(s) for s in pool.sort_values(ascending=False).head(movers_n).index],
         "losers": [mover(s) for s in pool.sort_values().head(movers_n).index],
@@ -621,8 +621,18 @@ def _run_daily(cfg: dict, update: bool, progress, log) -> dict:
         log(f"Paper-trading journal problem: {type(e).__name__}: {e}")
         result["paper"] = {}
     trades_df = pd.DataFrame(trade_rows, columns=_TRADE_COLS)
-    _save(result, curves, bf.p, bew, bn500, started, trades=trades_df, screener=screener)
+    _save(result, curves, bf.p, bew, bn500, started, trades=trades_df, screener=screener, n50=bench50)
     log(f"Done in {result['elapsed_s']}s: {len(strat_out)} strategies tested on {result['stocks']} stocks.")
+    if not info.get("live_day"):   # a completed day: candle-pattern alerts and scan alerts on its final prices
+        try:
+            from . import rule_alerts
+            rule_alerts.end_of_day(frames, [s for s in symbols if s in frames["close"].columns], log=log)
+        except Exception as e:
+            log(f"Rule alerts not checked ({type(e).__name__}: {e})")
+    try:   # the chart's Outlook base rates: re-measured once the point-in-time universe has a new day (~1 minute)
+        outlook.refresh_if_stale(log=log)
+    except Exception as e:   # never let it break a scan: the chart keeps the last study
+        log(f"Outlook study not updated ({type(e).__name__}: {e})")
     return result
 
 
@@ -719,17 +729,20 @@ def _write_atomic(path, write) -> None:
 
 
 def _save(result: dict, curves: dict, p, ew: pd.Series, n500: pd.Series | None, started,
-          trades: pd.DataFrame | None = None, screener: pd.DataFrame | None = None) -> None:
+          trades: pd.DataFrame | None = None, screener: pd.DataFrame | None = None,
+          n50: pd.Series | None = None) -> None:
     """B9: every artifact first, latest.json LAST. latest.json is the commit marker: a reader that sees a
     new scan_id can rely on curves / trades / screener of that scan already being in place."""
     df = pd.DataFrame(curves)
-    df["NIFTY 50"] = p.index_close.reindex(df.index).ffill() / p.index_close.reindex(df.index).ffill().iloc[0]
+    n50 = p.index_close if n50 is None else n50       # total return when the backtests include dividends
+    df["NIFTY 50"] = n50.reindex(df.index).ffill() / n50.reindex(df.index).ffill().iloc[0]
     df["Average stock"] = ew.reindex(df.index) / ew.reindex(df.index).iloc[0]
     if n500 is not None and n500.notna().any():
         n5 = n500.reindex(df.index).ffill()
         df["NIFTY 500"] = n5 / n5.dropna().iloc[0]
-    _write_atomic(CURVES_FILE, lambda t: df.to_parquet(t))
     scan_id = result["generated_at"]
+    df.attrs["scan_id"] = scan_id                   # kept in the parquet: readers reject curves of another scan
+    _write_atomic(CURVES_FILE, lambda t: df.to_parquet(t))
     for path, frame in ((TRADES_FILE, trades), (SCREENER_FILE, screener)):
         if frame is not None:
             frame = frame.assign(scan_id=scan_id)   # lets readers reject an artifact from another scan

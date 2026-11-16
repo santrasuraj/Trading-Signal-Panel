@@ -4,7 +4,15 @@
   python intraday_sync.py --archive       after the close: today's bars from FYERS into the store (~150 calls)
   python intraday_sync.py --live          real-time 5-minute bars from the FYERS WebSocket until 15:31
                                           (started before 09:13 it waits for the open; waits for today's login)
-  python intraday_sync.py --run           backtest the intraday strategies + today's setups
+  python intraday_sync.py --run           backtest the intraday strategies
+  python intraday_sync.py --signals       live signals from the strategies whose backtest passed (every 5 min)
+  python intraday_sync.py --footprints    Big money live: unusual volume, large trades, block deals (every 5 min)
+  python intraday_sync.py --options       option chains from NSE every options.interval_seconds until 15:31
+                                          (outside the session: once, the last chains)
+  python intraday_sync.py --fno           F&O positioning: participant OI and the F&O bhavcopy, last 30 days not stored
+  python intraday_sync.py --ai-forecast   Claude's option-chain forecasts: store the day's last chains, collect
+                                          finished answers, send tonight's batch (needs ANTHROPIC_API_KEY in .env)
+  python intraday_sync.py --ai-collect    only collect finished forecast answers (the 09:12 task does this)
   python intraday_sync.py --usage         FYERS calls used today vs the limits
 Options combine, e.g. --archive --run (used by the 15:45 scheduled task).
 Scheduled runs (pythonw, no console) write their output to data/logs/intraday.log.
@@ -20,7 +28,7 @@ from contextlib import contextmanager
 
 from scanner.fyers_limits import usage
 from scanner.intraday import fyers_sync, live
-from scanner.intraday.run import INTRADAY_DIR, intraday_universe, run_intraday_all
+from scanner.intraday.run import INTRADAY_DIR, intraday_universe, run_intraday_all, run_intraday_signals
 from scanner.lock import ScanBusy, _try_lock, _unlock
 from scanner.providers import get_fyers
 from scanner.settings import LOG_DIR, RESULTS_DIR, ist_now, load_config
@@ -82,7 +90,18 @@ def main() -> int:
     ap.add_argument("--backfill", action="store_true", help="~1 year of 5-minute history from FYERS (resumable)")
     ap.add_argument("--archive", action="store_true", help="after the close: today's bars from FYERS into the store")
     ap.add_argument("--live", action="store_true", help="real-time 5-minute bars from the FYERS WebSocket until 15:31")
-    ap.add_argument("--run", action="store_true", help="backtest the intraday strategies + today's setups")
+    ap.add_argument("--run", action="store_true", help="backtest the intraday strategies")
+    ap.add_argument("--signals", action="store_true",
+                    help="today's live signals, only from strategies whose backtest shows a real edge")
+    ap.add_argument("--footprints", action="store_true",
+                    help="Big money live: unusual volume, large trades, order book, block deals")
+    ap.add_argument("--options", action="store_true",
+                    help="option chains from NSE every options.interval_seconds in the session (else once)")
+    ap.add_argument("--fno", action="store_true",
+                    help="F&O positioning from NSE's end-of-day files (participant OI, futures build-ups)")
+    ap.add_argument("--ai-forecast", action="store_true",
+                    help="Claude's option-chain forecasts: store the last chains, collect answers, send tonight's batch")
+    ap.add_argument("--ai-collect", action="store_true", help="collect finished Claude forecast answers")
     ap.add_argument("--usage", action="store_true", help="FYERS calls used today vs the limits (the default)")
     ap.add_argument("--days", type=int, default=None, help="history to keep (default: intraday.history_days)")
     args = ap.parse_args()
@@ -98,12 +117,47 @@ def main() -> int:
     return code
 
 
+def _company_numbers() -> None:
+    """After the F&O files: new quarterly filings of the companies already stored (checked over a week ago)."""
+    try:
+        from scanner import fundamentals
+        stored = sorted(p.stem for p in fundamentals.folder().glob("*.json")) if fundamentals.folder().exists() else []
+        if stored:
+            rep = fundamentals.refresh(stored, log=lambda m: print(m, flush=True), max_age_days=7)
+            print(f"Company numbers: {rep['updated']} of {rep['wanted']} due companies checked", flush=True)
+    except Exception as e:                       # never fails the F&O job
+        print(f"  ! company numbers: {type(e).__name__}: {e}", flush=True)
+
+
 def _run(args) -> int:
     cfg = load_config()
     plan = str(cfg.get("fyers_plan", "standard"))
-    if args.usage or not any((args.backfill, args.archive, args.live, args.run)):
+    jobs = (args.backfill, args.archive, args.live, args.run, args.signals, args.footprints)
+    if args.ai_forecast or args.ai_collect:            # 19:30: --fno --ai-forecast; 09:12: --options --ai-collect
+        code = 0
+        if args.fno:                                    # positioning first: tonight's forecast reads it
+            from scanner import fno
+            rep = fno.refresh(log=lambda m: print(m, flush=True))
+            for e in rep["errors"] + rep["pending"]:
+                print(f"  ! {e}", flush=True)
+            code = 0 if rep["added"] or not rep["errors"] else 1
+            _company_numbers()
+            args.fno = False
+        code = max(code, _ai(cfg, submit=args.ai_forecast))
+        if not any((*jobs, args.options)):
+            return code
+    if args.fno and not any((*jobs, args.options)):     # no price store needed
+        from scanner import fno
+        rep = fno.refresh(log=lambda m: print(m, flush=True))
+        for e in rep["errors"] + rep["pending"]:
+            print(f"  ! {e}", flush=True)
+        _company_numbers()
+        return 0 if rep["added"] or not rep["errors"] else 1
+    if args.usage or not any((*jobs, args.options)):
         print(json.dumps(usage(plan), indent=1))
         return 0
+    if args.options and not any(jobs):      # no price store needed
+        return _options(cfg)
 
     frames = load_store()
     symbols, _ = intraday_universe(cfg, frames)
@@ -121,14 +175,26 @@ def _run(args) -> int:
                   f"{fy.limiter.usage()['data']['calls_today']}.")
             fyers_sync.sync(fy, symbols, INTRADAY_DIR, days, log=lambda m: print(m, flush=True),
                             progress=lambda i, n, s: print(f"  {i}/{n} {s}", flush=True) if i % 10 == 0 else None)
+            one_min = int((cfg.get("intraday") or {}).get("one_minute_days", 60) or 0)
+            if one_min > 0:   # 1-minute history for the 1m chart and replays (its own bookkeeping, fyers_sync_1m.json)
+                print(f"1-minute bars for the last {one_min} days...", flush=True)
+                fyers_sync.sync(fy, symbols, INTRADAY_DIR, one_min, resolution="1", log=lambda m: print(m, flush=True))
 
     if args.live:
         _wait_for_open()
         if not live.market_open_now(lead_minutes=LIVE_LEAD_MINUTES):
             print("Market is closed - the live feed runs 09:15-15:31 on trading days.")
         else:
-            # the 100 most liquid intraday symbols (FYERS Standard plan WebSocket limit)
-            live.run_live(symbols[: live.MAX_SYMBOLS], INTRADAY_DIR, log=lambda m: print(m, flush=True))
+            # FYERS allows 100 live symbols: the index futures / options of config.yaml live_fno first, then the
+            # most liquid intraday stocks
+            from scanner import fno_live
+            fno = fno_live.instruments(cfg, log=lambda m: print(m, flush=True))
+            if fno:
+                print(f"Live F&O: {len(fno)} futures / options (large trades); {live.MAX_SYMBOLS - len(fno)} stocks",
+                      flush=True)
+            from scanner.intraday import bus
+            live.run_live(symbols[: live.MAX_SYMBOLS - len(fno)], INTRADAY_DIR, log=lambda m: print(m, flush=True),
+                          fno=fno, fno_settings=fno_live.settings(cfg), bus_port=bus.port(cfg))
 
     if args.run:
         try:
@@ -137,7 +203,78 @@ def _run(args) -> int:
         except ScanBusy as e:
             print(e)
             return 2
+
+    if args.signals:
+        if live.market_open_now():
+            # live F&O build-ups from NSE's free feed every run: no FYERS login and no open browser page needed
+            try:
+                from web.api.services import fno_svc
+                err = fno_svc.refresh_live_now()
+                print(f"Live F&O build-ups: {err or 'updated from NSE'}", flush=True)
+            except Exception as e:
+                print(f"Live F&O build-ups: {type(e).__name__}: {e}", flush=True)
+        sig = run_intraday_signals(cfg, frames=frames, log=lambda m: print(m, flush=True))
+        if live.market_open_now():
+            try:   # the same signals as option trades, plus the volatility trades (scanner/option_signals.py)
+                from scanner import option_signals
+                rep = option_signals.refresh(intraday=sig)
+                print(f"Options signals: {rep['opened']} opened, {rep['closed']} closed, {rep['open']} open"
+                      + (f" ({'; '.join(rep['errors'][:3])})" if rep["errors"] else ""), flush=True)
+            except Exception as e:
+                print(f"Options signals: {type(e).__name__}: {e}", flush=True)
+        try:   # RSI / moving-average / live scan alerts on the live service's quotes (scanner/rule_alerts.py)
+            from scanner import rule_alerts
+            from scanner.intraday import quote_hub
+            from scanner.intraday.live import live_dir
+            from scanner.settings import DATA_DIR
+            info = quote_hub.read_quotes(live_dir(DATA_DIR / "intraday"))
+            if info and info.get("quotes") and frames:
+                rule_alerts.run_job(frames, list(frames["close"].columns), info["quotes"],
+                                    log=lambda m: print(m, flush=True))
+        except Exception as e:
+            print(f"Rule alerts: {type(e).__name__}: {e}", flush=True)
+    if args.footprints:
+        from scanner import footprints
+        footprints.scan(cfg, log=lambda m: print(m, flush=True), frames=frames)
+        footprints.cleanup_old_prints()
+    if args.options:
+        return _options(cfg)
     return 0
+
+
+def _ai(cfg, submit: bool) -> int:
+    """Claude's option-chain forecasts (web/api/services/forecast_svc.py). The evening run first stores the day's last
+    chains (NSE serves them after the close), so a forecast never reads an old chain as today's."""
+    from web.api.errors import ApiException
+    from web.api.services import forecast_svc
+    log = lambda m: print(m, flush=True)            # noqa: E731
+    try:
+        if submit:
+            from scanner import options
+            rep = options.refresh(cfg, log=log)
+            for e in rep["errors"]:
+                print(f"  ! {e}", flush=True)
+        out = forecast_svc.run_job(submit=submit, log=log)
+    except ApiException as e:                       # no key yet, or Anthropic said no: not a failed job
+        print(f"AI forecast: {e.message} {e.hint or ''}".strip(), flush=True)
+        return 0 if e.code == "FEATURE_UNAVAILABLE" else 1
+    except Exception:                               # never stops the job it rides with (09:12 option chains)
+        print("AI forecast failed:\n" + traceback.format_exc(), flush=True)
+        return 1
+    print(f"AI forecast: {json.dumps(out, default=str)}", flush=True)
+    return 0
+
+
+def _options(cfg) -> int:
+    """Option chains (scanner/options.py): every options.interval_seconds while the market is open, else once."""
+    from scanner import options
+    _wait_for_open()
+    if live.market_open_now(lead_minutes=LIVE_LEAD_MINUTES):
+        return options.run_live(cfg, log=lambda m: print(m, flush=True))
+    rep = options.refresh(cfg, log=lambda m: print(m, flush=True))
+    for e in rep["errors"]:
+        print(f"  ! {e}", flush=True)
+    return 0 if rep["chains"] else 1
 
 
 if __name__ == "__main__":

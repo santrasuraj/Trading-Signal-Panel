@@ -98,6 +98,18 @@ export interface Features {
   rejected_tested: boolean;             // B4
   config_edit: boolean;                 // P2
 }
+// GET /api/quotes?symbols=  live prices between scans (FYERS real time, else Yahoo ~15 min delayed; last close when shut)
+// live = FYERS WebSocket tick (~1 s old); fyers = FYERS REST (≤30 s); yahoo = ~15 min delayed; close = stored daily close
+export type QuoteSource = 'live' | 'fyers' | 'yahoo' | 'close'
+export interface Quote {
+  symbol: string; price: number; prev_close: number | null; change_pct: number | null; time: string;
+  source?: QuoteSource; delayed?: boolean;
+  open?: number | null; high?: number | null; low?: number | null; volume?: number | null; bid?: number | null; ask?: number | null;
+  tick_at?: number | null;     // live: epoch seconds the live service received the tick
+}
+export interface QuotesResponse {
+  as_of: string; session: MarketSession; source: QuoteSource; delayed: boolean; note: string; quotes: Quote[];
+}
 export interface Ticker {
   nifty: number | null; nifty_change_pct: number | null;
   nifty500: number | null; nifty500_change_pct: number | null;   // indices.factors 'Nifty 500' (chg_1d is 1-dp in source)
@@ -107,6 +119,7 @@ export interface Ticker {
 }
 export interface AppStatus {               // GET /api/status - polled; MUST be file-stat/cached reads only (no NSE, no Fyers)
   server_version: string;
+  ui_build: string | null;                  // the served build's entry script; a tab from an older build offers to reload
   latest: AsOf | null;                      // null => onboarding
   scan: ScanStatus;
   fyers: FyersStatus;                       // verify=false variant
@@ -294,13 +307,38 @@ export interface Order {
   provisional: boolean;
   below_min_position: boolean;               // BUY amount < min_position (the backtest would skip it)
   you_hold_qty: number | null;
+  strength?: SignalStrength | null;          // BUY orders of strategies that are not comparison-only
 }
+// A transparent 0-100 ranking aid for BUY signals: the sum of its parts (web/api/services/signal_quality.py)
+export interface StrengthPart { key: 'evidence' | 'status' | 'agreement' | 'track' | 'results'; label: string; points: number; max: number; note: string }
+export interface SignalStrength { score: number; grade: 'strong' | 'good' | 'fair' | 'weak'; agree: string[]; parts: StrengthPart[] }
 export interface Allocation { strategy_key: string; pct: number; capital: number }
 export interface SignalGroup {
   strategy: StrategySummary;
   sizing: { capital: number; per_position: number; max_positions: number; sizing: 'equal' | 'risk'; risk_pct: number | null };
   orders: Order[];
   empty_reason: string | null;
+}
+// GET /api/signals/track-record?strategy=&state=  every BUY signal the scanner gave, followed on real prices
+export type TrackState = 'pending' | 'not_filled' | 'open' | 'closed'
+export interface TrackSignal {
+  strategy_key: string; strategy_name: string; signal_date: ISODate; symbol: string; reason: string; signal_price: number | null;
+  status_then: StrategyStatus | null; state: TrackState; note: string | null; qty: number | null;
+  entry_date: ISODate | null; entry_price: number | null; exit_date: ISODate | null; exit_price: number | null; exit_reason: string | null;
+  last_price: number | null; stop: number | null; days: number; pnl: number; ret_pct: number;
+}
+export interface TrackStats {
+  signals: number; closed: number; open: number; pending: number; not_filled: number;
+  win_rate: number | null; avg_win_pct: number | null; avg_loss_pct: number | null; expectancy_pct: number | null;
+  profit_factor: number | null; avg_days: number | null; realised_pnl: number; open_pnl: number;
+  level: 'good' | 'bad' | 'unknown'; verdict: string;
+}
+export interface TrackStrategy {
+  key: string; name: string; status: StrategyStatus | null; live: TrackStats;
+  backtest: { trades: number | null; win_rate: number | null; expectancy_pct: number | null; profit_factor: number | null; avg_days: number | null } | null;
+}
+export interface TrackRecordResponse {
+  as_of: ISODate | null; min_closed: number; overall: TrackStats; strategies: TrackStrategy[]; signals: TrackSignal[]; total: number;
 }
 // GET /api/signals?horizon=&allocations=momentum:60,earnings_gap:40   (debounce what-if drags >= 250 ms)
 export interface SignalsResponse {
@@ -336,12 +374,16 @@ export interface SymbolInfo { symbol: string; company: string | null; industry: 
 export interface SparklinesResponse { source_date: ISODate; days: number; series: Record<string, (number | null)[]> }   // closes rounded to 2 dp
 
 // ------------------------------------------------------------------ 6. chart and stock
-export type IndicatorId = 'sma20' | 'sma50' | 'sma200' | 'ema21' | 'bb_upper' | 'bb_mid' | 'bb_lower'
-  | 'rsi14' | 'macd' | 'macd_signal' | 'macd_hist' | 'vol_avg20';
+export type IndicatorId = 'sma20' | 'sma50' | 'sma200' | 'ema21' | 'bb_upper' | 'bb_mid' | 'bb_lower' | 'w_sma10' | 'w_sma30' | 'w_rsi14'
+  | 'rsi14' | 'macd' | 'macd_signal' | 'macd_hist' | 'vol_avg20'
+  | 'ema9' | 'ema50' | 'ema200' | 'sma100' | 'supertrend' | 'dc_upper' | 'dc_lower' | 'kc_upper' | 'kc_mid' | 'kc_lower'
+  | 'stoch_k' | 'stoch_d' | 'adx14' | 'plus_di' | 'minus_di' | 'atr14' | 'obv' | 'cci20' | 'mfi14' | 'willr14' | 'roc12'
+  | 'ichi_tenkan' | 'ichi_kijun' | 'ichi_span_a' | 'ichi_span_b' | 'psar' | 'aroon_up' | 'aroon_down';
 // GET /api/chart/{symbol}?tf=1d|1w&range=3m|6m|1y|2y|5y|max&indicators=sma20,sma50,sma200,rsi14   (daily store only; intraday has its own endpoint later)
 export interface ChartResponse {
   symbol: string; company: string | null; industry: string | null; kind: 'stock' | 'etf' | 'index';
-  tf: '1d' | '1w'; range: string; adjusted: true; source_date: ISODate;
+  tf: '1d' | '1w' | '1mo'; range: string; adjusted: boolean; source_date: ISODate;
+  fetched?: 'yahoo' | null;                  // not in the local daily store (e.g. BANKNIFTY): fetched on demand, not adjusted
   bars: { t: ISODate[]; o: number[]; h: number[]; l: number[]; c: number[]; v: number[] };
      // NaN-close rows dropped; 1w: t = LAST TRADING DATE of the week (not the W-FRI label), O first/H max/L min/C last/V sum
      // index symbols (NIFTY50, INDIAVIX, NIFTY500): v = 0
@@ -354,7 +396,7 @@ export interface ChartResponse {
 }
 export interface ChartMarker {
   t: ISODate; position: 'aboveBar' | 'belowBar' | 'inBar'; shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square';
-  kind: 'entry' | 'exit' | 'open_entry' | 'pending_order' | 'corporate_action' | 'results';
+  kind: 'entry' | 'exit' | 'open_entry' | 'pending_order' | 'corporate_action' | 'results' | 'pattern';   // pattern: added by the Chart page (levels API)
   tone: 'profit' | 'loss' | 'neutral' | 'warn'; text: string; detail: string | null; strategy_key: string | null;
 }
 export interface PriceLine {
@@ -457,9 +499,13 @@ export interface ResultsEvent {
 export interface FyersStatus {
   configured: boolean; client_id_masked: string | null; plan: 'standard' | 'prime'; data_source: 'auto' | 'yahoo';
   token_present: boolean; token_created: ISODateTime | null;
-  logged_in_today: boolean;                  // token.created[:10] == IST today (app.py rule)
+  logged_in_today: boolean;                  // token.created[:10] == IST today
   verified: boolean | null; verified_at: ISODateTime | null; user_name: string | null;   // only with ?verify=true (5-min cache)
-  redirect_uri: string; login_modes: ('paste' | 'window')[];   // 'callback' is P2
+  redirect_uri: string; login_modes: FyersLoginMode[];
+  // who receives Fyers' redirect: this app's callback / a one-shot listener on a free local port (one click), or
+  // nobody here (the port is taken, e.g. Docker on 8000: paste the address)
+  direct_mode: 'app' | 'listener' | 'paste';
+  callback_url: string;                      // this app's callback, to register as the Fyers app's Redirect URL
   note: string;
 }
 // GET /api/fyers/status?verify=false|true
@@ -503,20 +549,31 @@ export interface DataHealth {               // GET /api/data/health
 }
 
 // ------------------------------------------------------------------ 13. intraday (reads data/results/intraday.json from scanner/intraday/run.py; always 200)
-export interface IntradayTrade {
-  symbol: string; date: ISODate; side: 'LONG' | 'SHORT'; entry_time: string; entry: number; stop: number | null;
-  exit_time: string; exit: number; reason: string; qty: number; pnl: number; ret_pct: number; open_now: boolean | null;
-}
 export interface IntradayStrategy {
   key: string; name: string; description: string; evidence: Evidence; horizon: 'intraday'; status: StrategyStatus;
   metrics: {                                 // scanner/intraday/engine.intraday_metrics
     days: number; trades: number; trades_per_day: number | null; return_pct: number | null; after_tax_return_pct: number | null;
     annualised_pct: number | null; sharpe: number | null; max_dd_pct: number | null; win_rate: number | null;
-    avg_trade_pct: number | null; profit_factor: number | null; avg_day_pct: number | null;
+    avg_trade_pct: number | null; avg_trade_gross_pct: number | null; profit_factor: number | null; avg_day_pct: number | null;
     ci95_day_pct: [number, number] | null; t_stat: number | null; significant: boolean; start: ISODate | null; end: ISODate | null;
   };
   equity: TimeSeries;                        // rupees
-  recent_trades: IntradayTrade[]; today: IntradayTrade[];
+}
+// Live intraday signals (GET /api/intraday/signals): with show_untested, from every strategy, each labelled with its
+// result in the current backtest ('working' = proven); without it, only from proven strategies
+export type SignalProof = 'working' | 'mixed' | 'unknown' | 'not-working' | 'untested'
+export interface IntradaySignal {
+  strategy_key: string; strategy_name: string; symbol: string; side: 'LONG' | 'SHORT'; entry_time: string; entry: number;
+  stop: number | null; qty: number; amount: number; state: 'open' | 'closed'; exit_time: string | null; exit: number | null;
+  last: number; reason: string; pnl: number; ret_pct: number;
+  target: number | null; strategy_status: SignalProof; proven: boolean; detail: string | null;
+}
+export interface IntradaySignalsResponse {
+  generated_at: ISODateTime | null; backtest_at: ISODateTime | null; tested: number;
+  proven: { key: string; name: string }[]; show_untested: boolean; signals: IntradaySignal[];
+  source: string | null; delayed: boolean; bars_to: string | null;
+  session: ISODate | null; market_closed: boolean;   // weekend / holiday / before 09:20: the last session's signals
+  note: string;
 }
 // Background re-run of the intraday backtest (web/api/services/intraday_job.run_status)
 export interface IntradayRun {
@@ -527,7 +584,10 @@ export interface IntradayRun {
 export interface IntradayResponse {
   available: boolean; reason: string | null;           // e.g. 'Intraday backtest not run yet'
   generated_at: ISODateTime | null; elapsed_s: number | null;
-  data: { source: string; interval: '5m'; from: ISODate; to: ISODate; sessions: number; symbols: number; note: string } | null;
+  data: {
+    source: string; interval: '5m'; from: ISODate; to: ISODate; sessions: number; symbols: number; note: string
+    fyers_coverage: { symbols: number; from: ISODate | null; to: ISODate | null } | null   // symbols 0 = Yahoo only
+  } | null;
   rules: Record<string, string>;                       // server text (square-off times etc.) - never hard-coded in the UI
   sebi: { source: string; url: string; points: string[] };
   costs: { value: number; round_trip_pct: number } | null;
@@ -537,6 +597,13 @@ export interface IntradayResponse {
 }
 // POST /api/intraday/run  {update?: boolean} -> 202 (409 SCAN_BUSY while one is running)
 export interface IntradayRunAccepted { accepted: boolean; run: IntradayRun }
+// GET /api/automation, POST /api/automation/setup: the Windows scheduled jobs (setup_schedule.ps1)
+export interface AutomationJob {
+  name: string; when: string; what: string; registered: boolean; state: string | null
+  next_run: string | null; last_run: string | null; last_result: string | null; ok: boolean | null
+}
+export interface AutomationStatus { available: boolean; jobs: AutomationJob[]; missing: number; note: string }
+export interface AutomationSetupResult { ok: boolean; output: string[]; status: AutomationStatus }
 
 // ------------------------------------------------------------------ response wrappers for endpoints the contract
 // documents only in comments (shapes transcribed from those comments; keep in sync with web/api/models)
@@ -553,12 +620,14 @@ export interface ScanStartResponse { accepted: true; status: ScanStatus }
 export interface ScanHistoryItem { scan_id: ISODateTime; file: string; data_date: ISODate | null; live: boolean | null; elapsed_s: number | null; strategies: number | null }
 export interface ScanHistoryResponse { scans: ScanHistoryItem[] }
 export interface ScanLogResponse { path: string; lines: string[] }
-export type FyersLoginMode = 'paste' | 'window';
-export interface FyersLoginResponse { mode: FyersLoginMode; login_url: string | null; expires_at: ISODateTime | null; instructions: string[] }
+export type FyersLoginMode = 'direct' | 'paste' | 'window';
+export interface FyersLoginResponse {
+  mode: FyersLoginMode; capture: 'app' | 'listener' | 'paste' | null; login_url: string | null; expires_at: ISODateTime | null; instructions: string[]
+}
 export interface FyersLoginCompleteResponse { ok: boolean; user_name: string | null; status: FyersStatus }
 export interface ConfigResponse { values: ConfigView; file_mtime: ISODateTime; needs_rescan: boolean }
 export interface CostPreviewResponse { value: number; buy: CostBreakdown; sell: CostBreakdown; round_trip_pct: number }
 export type CurveRange = '1y' | '3y' | 'all';
-export type ChartTf = '1d' | '1w';
+export type ChartTf = '1d' | '1w' | '1mo';
 export type ChartRange = '3m' | '6m' | '1y' | '2y' | '5y' | 'max';
 export type ScreenerPreset = 'momentum' | 'rs' | 'near_high' | 'low_vol' | 'volume' | 'uptrend' | 'all';

@@ -4,7 +4,7 @@
 
 # Your account - used to size positions (how many shares to buy).
 account:
-  capital: 500000            # rupees you plan to invest with these strategies
+  capital: 500000            # your real trading capital in rupees (confirmed by you, 14 Nov 2026)
   min_position: 15000        # skip buys smaller than this (fixed Rs 20 + Rs 14.75 charges hurt tiny orders)
 
 # auto  = Fyers real-time live prices when logged in, otherwise Yahoo (~15 min delayed)
@@ -66,6 +66,7 @@ tax:
   stcg_pct: 20.8             # held <= 12 months
   ltcg_pct: 13.0             # held > 12 months ...
   ltcg_exempt: 125000        # ... above Rs 1.25 lakh per financial year
+  dated: 1                   # 1 = gains before 23 Jul 2024 at the old 15% / 10% (Rs 1 lakh exemption); 0 = today's rates for every year
 
 # Strategies. Each is re-tested on 8 years of data after every scan.
 # Set enabled: false to hide one, or change its numbers (the backtest updates automatically).
@@ -90,25 +91,10 @@ strategies:
     stop_pct: 8              # 8% beat 10% both in and out of sample
     trail_pct: 0             # 0 = no trailing stop (the one robust improvement); exit on close below 50-DMA
     max_positions: 10
-  rsi2_pullback:
-    enabled: false           # short-term dips: lost money after realistic costs
-    rsi2_below: 10
-    stop_pct: 10
-    max_hold: 10
-    max_positions: 10
-  low_vol:
-    enabled: true
-    universe_size: 150       # the 150 most traded stocks (stand-in for "large caps")
-    top_n: 20                # hold the 20 steadiest
-    keep_rank: 40
-    rebalance: quarterly
-    use_regime: false        # defensive by design: stays invested
   sector_rotation:
     enabled: true
     top_industries: 3
     top_n: 12
-  golden_cross:
-    enabled: true
   index_trend:
     enabled: true
     etf: NIFTYBEES
@@ -155,11 +141,6 @@ strategies:
   bb_squeeze:
     enabled: false           # retired 25 Oct 2026 (still re-tested and shown under "Tested & rejected")
     rejected_reason: "6.9%/yr after costs in the point-in-time test (Aug 2019 - Oct 2026), below Nifty 50 (10.6%) and little above the cash rate; max drawdown -49%, profit factor 1.08 over 883 trades."
-  nr7_breakout:
-    enabled: false           # retired 25 Oct 2026 (still re-tested and shown under "Tested & rejected")
-    rejected_reason: "Lost money: -9.7%/yr after costs in the point-in-time test (Aug 2019 - Oct 2026), max drawdown -62%, profit factor 0.89 over 2,632 trades - costs of very frequent short trades eat any edge."
-  legacy_rules:
-    enabled: false           # the old v1 rules (-12%/yr); enable only to compare
 
 telegram:
   top_n: 10
@@ -167,6 +148,7 @@ telegram:
 # Intraday (MIS) strategies on 5-minute bars. Data: FYERS first (history + live WebSocket), Yahoo fallback.
 intraday:
   history_days: 365          # FYERS keeps ~1 year of intraday history (Standard plan); we archive daily
+  one_minute_days: 60        # 1-minute bars kept from FYERS for the 1m chart (~150 calls a day after the archive; 0 = off)
   max_sync_calls_per_scan: 200   # a scan tops up at most this many FYERS calls; bigger backfills: 5_intraday_backfill.bat
   min_price: 100             # liquid F&O stocks only (intraday is not allowed in trade-to-trade series)
   min_turnover_cr: 100       # 20-day average traded value, Rs crore
@@ -174,6 +156,9 @@ intraday:
   etfs: [NIFTYBEES]
   risk_pct: 0.5              # % of capital lost if a trade's stop is hit
   leverage: 2.0              # total intraday exposure cap (x capital); MIS allows ~5x - we stay well below
+  # true: live signals from EVERY intraday strategy (and live F&O OI build-ups), each labelled with its backtest result
+  # (proven / not proven / lost money / untested). false: only strategies whose backtest proved an edge after costs.
+  show_untested: true
   costs:
     brokerage_pct: 0.03      # FYERS intraday: Rs 20 or 0.03% per order, whichever is lower
     brokerage_max: 20
@@ -182,8 +167,49 @@ intraday:
     stamp_buy_pct: 0.003
     slippage_large_pct: 0.03 # Nifty 50 stocks, per side
     slippage_other_pct: 0.07 # other F&O stocks, per side
-    tax_pct: 31.2            # intraday profit = speculative business income at YOUR slab rate (set yours)
+    tax_pct: 0               # intraday profit = speculative business income at your slab rate: 0 = total income below
+                             # the taxable limit (your slab, confirmed 14 Nov 2026); 31.2 = the 30% slab + cess
+
+# Option chains (Quant Desk › Options): NSE's public option chain, stored every `interval_seconds` in market hours
+# by the 09:12 scheduled task (intraday_sync.py --options) - open interest, PCR, max pain, implied volatility,
+# expected move. Positioning, not signals: nothing here has been backtested yet.
+options:
+  # index or F&O stock symbols; every NSE index with options is here (Signals page, Index options tab). SENSEX and
+  # BANKEX trade on BSE, which this app has no data source for.
+  underlyings: [NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50]
+  expiries: 2                       # the nearest expiries of each
+  interval_seconds: 60              # NSE updates its chain every few minutes; an unchanged chain is not stored twice
+  risk_free_pct: 6.5                # for implied volatility (about the 91-day T-bill yield)
+
+# Big trades live in index futures / options (Options page): the 09:14 live service (FYERS WebSocket, needs today's
+# FYERS login) also streams these and keeps every large trade with its likely side. FYERS allows 100 live symbols:
+# these come off the stocks (default 2 futures + 18 NIFTY options = 20; stocks keep 80). futures: [] and options: []
+# switch it off.
+live_fno:
+  futures: [NIFTY, BANKNIFTY]       # nearest-month futures
+  options: [NIFTY]                  # nearest-expiry calls and puts ...
+  strikes_each_side: 4              # ... within 4 strikes of the money (9 strikes x CE/PE = 18 symbols)
+  future_print_cr: 5                # a futures trade of Rs 5 crore notional or more is "large"
+  option_print_lakh: 25             # an options trade of Rs 25 lakh premium or more is "large"
+
+# Claude's option-chain forecasts (Options page; needs ANTHROPIC_API_KEY in .env). The 19:30 task stores the day's
+# last chains and sends one forecast per underlying (Message Batches API: half price, ~Rs 4-7 each); the 09:12 task
+# collects the answers. Every forecast is scored against NSE's official closes vs a coin flip and the options-implied
+# range. Unproven until 60+ settled forecasts beat a coin flip; it never changes the options verdict or any order.
+ai_forecast:
+  underlyings: [NIFTY, BANKNIFTY]   # must also be in options.underlyings (the chain is what Claude reads)
 
 # Individual intraday strategies can be switched off, e.g.:
 # intraday_strategies:
-#   supertrend: {enabled: false}
+#   sweep_or15: {enabled: false}
+
+# Orders on your own FYERS account (Orders page; switched on there, off by default). Every order is previewed and
+# confirmed by you; these limits are enforced on the server.
+orders:
+  product: CNC                 # CNC (delivery) or INTRADAY
+  max_order_value_pct: 10      # one order at most this % of account.capital
+  max_orders_per_day: 20
+  daily_loss_limit_pct: 2      # today's P&L below -2% of capital: no new buys for the rest of the day
+  price_band_pct: 3            # a limit price at most 3% away from the last price (fat-finger guard)
+  min_seconds_between_orders: 1
+  allow_market: false          # market orders (the broker converts them to price-protected orders)

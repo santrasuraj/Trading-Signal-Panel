@@ -3,45 +3,140 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, Layers, PanelRightClose, PanelRightOpen, Search, SlidersHorizontal } from 'lucide-react'
-import { useChart, useStock, useSymbols } from '@/api/hooks'
-import type { ChartRange, ChartTf, IndicatorId } from '@/api/types'
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Crosshair, Layers, PanelRightClose, PanelRightOpen, Ruler, Search, SlidersHorizontal } from 'lucide-react'
+import { useChart, useLiveQuotes, useStock, useSymbols } from '@/api/hooks'
+import { useLevels, type LvChartPattern } from '@/api/levels'
+import { useOutlook } from '@/api/outlook'
+import type { ChartMarker, ChartRange, ChartTf, IndicatorId } from '@/api/types'
 import { useUi } from '@/app/uiState'
 import { LevelPill, ResultsChip, StatusDot } from '@/components/badges'
-import { PriceChart, type PriceChartHandle } from '@/components/charts/PriceChart'
+import { OSCILLATORS, PriceChart, type ChartOverlay, type LiveTick, type PriceChartHandle } from '@/components/charts/PriceChart'
+import { AiAnalyst } from '@/components/AiAnalyst'
+import { BigMoneyCard } from '@/components/BigMoney'
+import { ChartOptions } from '@/components/ChartOptions'
+import { VERDICT_STYLE } from '@/lib/verdict'
+import { OutlookPanel } from '@/components/Outlook'
 import { RangeBar52w } from '@/components/charts/svg'
 import { ErrorState, Skeleton, SkeletonChart } from '@/components/feedback'
 import { Money, Pct, Price } from '@/components/num'
 import { SmartMoneyPanel } from '@/components/SmartMoneyPanel'
 import { Button, Card, IconButton, KV, MenuCheck, Popover, Segmented, Switch } from '@/components/ui'
 import { cn } from '@/lib/csv'
-import { date, daysBetween, num, qty, todayIST } from '@/lib/format'
+import { date, daysBetween, num, pct, price, qty, todayIST } from '@/lib/format'
+import { patternDrawings, patternTone } from '@/lib/patternDrawing'
 import { useLocalStorage } from '@/lib/useLocalStorage'
 import { typingTarget, useIsMobile } from '@/lib/useMedia'
+import { EvidenceBadge, PriceAction } from '@/components/PriceAction'
+import { PriceStamp } from '@/components/LivePrice'
+import { ActionPanel } from '@/components/ActionCard'
+import { IntradayChart } from '@/components/charts/IntradayChart'
+import { BrickChart } from '@/components/charts/BrickChart'
+import { KagiChart, PnfChart, VolumeByPriceCard } from '@/components/charts/PnfKagi'
+import { heikinAshi, lineBreak, renko, type ChartType } from '@/lib/chartTypes'
+import { WatchButton, AlertButton } from '@/components/WatchButtons'
+import { useDrawings, useIntradayChart, type IntradayTf } from '@/api/watch'
+import { DrawTools } from '@/components/DrawTools'
+import { DepthLadder } from '@/components/DepthLadder'
+import { SeasonalityCard } from '@/components/SeasonalityCard'
+import { AnnouncementsCard } from '@/components/AnnouncementsCard'
+import { FundamentalsCard } from '@/components/FundamentalsCard'
+import { LayoutMenu } from '@/components/LayoutMenu'
+import { FormulaMenu, FormulaPanes, useFormulaSeries } from '@/components/FormulaMenu'
+import { VolumeProfile, type Profile } from '@/components/VolumeProfile'
+import type { FlowBars } from '@/components/charts/IntradayChart'
+import { useQuery } from '@tanstack/react-query'
+import { fetchJson, isFailure } from '@/api/client'
+import { OrderTicket } from '@/components/OrderTicket'
+import type { Ticket } from '@/api/orders'
+import { levelOverlays, lineDrawings } from '@/lib/userDrawings'
 
 const RANGES: ChartRange[] = ['3m', '6m', '1y', '2y', '5y', 'max']
-type Ind = IndicatorId | 'volume'
+type Ind = IndicatorId | 'volume' | 'donchian' | 'keltner' | 'stoch' | 'adx' | 'atr' | 'obv' | 'cci' | 'mfi' | 'willr' | 'roc' | 'ichimoku' | 'aroon' | 'wsma' | 'wrsi'
 const IND_MENU: { id: Ind; label: string }[] = [
-  { id: 'sma20', label: 'SMA 20' }, { id: 'sma50', label: 'SMA 50' }, { id: 'sma200', label: 'SMA 200' }, { id: 'ema21', label: 'EMA 21' },
-  { id: 'bb_mid', label: 'Bollinger 20, 2' }, { id: 'volume', label: 'Volume' }, { id: 'rsi14', label: 'RSI 14 pane' }, { id: 'macd', label: 'MACD pane' },
+  { id: 'sma20', label: 'SMA 20' }, { id: 'sma50', label: 'SMA 50' }, { id: 'sma100', label: 'SMA 100' }, { id: 'sma200', label: 'SMA 200' },
+  { id: 'ema9', label: 'EMA 9' }, { id: 'ema21', label: 'EMA 21' }, { id: 'ema50', label: 'EMA 50' }, { id: 'ema200', label: 'EMA 200' },
+  { id: 'bb_mid', label: 'Bollinger 20, 2' }, { id: 'keltner', label: 'Keltner 20, 2 ATR' }, { id: 'donchian', label: 'Donchian 20' },
+  { id: 'supertrend', label: 'Supertrend 10, 3' }, { id: 'ichimoku', label: 'Ichimoku 9, 26, 52' }, { id: 'psar', label: 'Parabolic SAR' }, { id: 'wsma', label: 'Weekly SMA 10 & 30 (daily chart)' }, { id: 'volume', label: 'Volume' },
 ]
+const PANE_MENU: { id: Ind; label: string }[] = [
+  { id: 'rsi14', label: 'RSI 14' }, { id: 'macd', label: 'MACD 12, 26, 9' },
+  ...OSCILLATORS.map((o) => ({ id: o.id as Ind, label: o.label })),
+]
+const PANE_IDS = new Set<string>(PANE_MENU.map((m) => m.id))
+const GROUPS: Partial<Record<Ind, IndicatorId[]>> = {
+  bb_mid: ['bb_upper', 'bb_mid', 'bb_lower'], macd: ['macd', 'macd_signal', 'macd_hist'], donchian: ['dc_upper', 'dc_lower'],
+  keltner: ['kc_upper', 'kc_mid', 'kc_lower'], ichimoku: ['ichi_tenkan', 'ichi_kijun', 'ichi_span_a', 'ichi_span_b'], wsma: ['w_sma10', 'w_sma30'], ...Object.fromEntries(OSCILLATORS.map((o) => [o.id, o.series.map(([k]) => k)])),
+}
+
+type LevelId = 'sr' | 'pivots' | 'intraday' | 'options' | 'range' | 'chart_patterns' | 'candles'
+const LEVEL_MENU: { id: LevelId; label: string; hint: string }[] = [
+  { id: 'chart_patterns', label: 'Chart patterns (drawn)', hint: 'double tops / bottoms, head & shoulders, triangles, wedges, rectangles, flags: shape, lines, target (1D chart)' },
+  { id: 'sr', label: 'Support & resistance', hint: 'swing highs / lows of the last year; thicker = formed more often' },
+  { id: 'pivots', label: 'Pivots (next session)', hint: 'P, R1-R2, S1-S2 from the last completed day' },
+  { id: 'intraday', label: 'Today: VWAP, opening range, POC', hint: 'from 5-minute bars, when the stock has them' },
+  { id: 'options', label: 'Option walls & max pain', hint: 'from a current NSE option chain (F&O symbols)' },
+  { id: 'range', label: 'Expected 5-day range', hint: 'options-implied when a current chain exists, else recent volatility' },
+  { id: 'candles', label: 'Candle patterns', hint: 'engulfing, hammer, doji ... as markers on the last 3 bars' },
+]
+const LEVEL_DEFAULT: LevelId[] = ['chart_patterns', 'sr', 'intraday', 'options', 'range']
+/** Saved before chart patterns were drawn, 'patterns' meant candle + chart pattern markers: now the drawn patterns. */
+const levelList = (saved: string[]): LevelId[] =>
+  [...new Set(saved.map((x) => (x === 'patterns' ? 'chart_patterns' : x)))].filter((x): x is LevelId => LEVEL_MENU.some((m) => m.id === x))
 
 function apiIndicators(sel: Ind[]): IndicatorId[] {
   const out = new Set<IndicatorId>(['vol_avg20'])
   for (const s of sel) {
     if (s === 'volume') continue
-    if (s === 'bb_mid') { out.add('bb_upper'); out.add('bb_mid'); out.add('bb_lower') } else if (s === 'macd') { out.add('macd'); out.add('macd_signal'); out.add('macd_hist') } else out.add(s)
+    for (const k of GROUPS[s] ?? [s as IndicatorId]) out.add(k)
   }
   return [...out].sort()
+}
+
+const TONE_TEXT = { profit: 'text-profit', loss: 'text-loss', info: 'text-info', warn: 'text-warn' } as const
+
+/** The chart patterns drawn on the chart, top right: name (in the drawing's colour), status, levels, tested record. */
+function PatternLegend({ patterns, drawn, compact }: { patterns: LvChartPattern[]; drawn: boolean; compact: boolean }) {
+  const chip = 'rounded bg-panel/85 px-1.5 py-0.5'
+  return (
+    <div className="absolute right-[76px] top-2 z-10 flex max-w-[min(380px,calc(100%-96px))] flex-col items-end gap-1 text-2xs">
+      {patterns.length === 0 ? (
+        <span className={cn(chip, 'pointer-events-none text-faint')}>No chart pattern on the last bars</span>
+      ) : !drawn ? (
+        <span className={cn(chip, 'text-muted')}>{patterns.length} chart pattern{patterns.length > 1 ? 's' : ''}: shown on the 1D chart</span>
+      ) : patterns.map((p) => (
+        <div key={`${p.key}:${p.start}`} title={p.what} className={cn(chip, 'flex flex-wrap items-center justify-end gap-x-1.5')}>
+          <span className={cn('font-semibold', TONE_TEXT[patternTone(p)])}>{p.name}</span>
+          <span className="text-muted">
+            {p.status === 'confirmed' ? `confirmed${p.confirmed_bars_ago ? ` ${p.confirmed_bars_ago} bar${p.confirmed_bars_ago > 1 ? 's' : ''} ago` : ' today'}` : 'forming'}
+          </span>
+          {!compact && (
+            <span className="num text-muted">
+              {p.status === 'forming' && p.breakout != null ? `breaks at ${price(p.breakout)}` : ''}
+              {p.status === 'forming' && p.breakout != null && p.target != null ? ' · ' : ''}
+              {p.target != null ? `target ${price(p.target)}${p.target_pct != null ? ` (${pct(p.target_pct)})` : ''}` : ''}
+              {p.invalidation != null && p.breakout != null ? ` · void ${p.invalidation < p.breakout ? 'below' : 'above'} ${price(p.invalidation)}` : ''}
+            </span>
+          )}
+          {!compact && <EvidenceBadge e={p.evidence} />}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function SidePanel({ symbol }: { symbol: string }) {
   const q = useStock(symbol)
   const s = q.data
+  const lq = useLiveQuotes([symbol])
+  const live = lq.quotes[symbol]
   if (q.error) return <ErrorState error={q.error} compact />
   if (!s) return <div className="space-y-3 p-4"><Skeleton className="h-6 w-28" /><Skeleton className="h-3 w-full" /><Skeleton className="h-24 w-full" /></div>
   const today = todayIST()
   const stock = s.kind === 'stock'
+  const px = live?.price ?? s.price
+  const hold = s.your_holding
+  const holdPnl = hold && live && hold.buy_price != null && hold.qty != null ? (live.price - hold.buy_price) * hold.qty : hold?.pnl_amount
+  const holdPct = hold && live && hold.buy_price ? (live.price / hold.buy_price - 1) * 100 : hold?.pnl_pct
   // Beside the chart (xl+) one column; stacked under the chart (md to lg) two columns, so the KV rows don't stretch
   // across the whole page.
   return (
@@ -53,11 +148,12 @@ function SidePanel({ symbol }: { symbol: string }) {
           <span className="text-2xs text-faint">{s.kind.toUpperCase()} · {date(s.data_date, { year: false })}</span>
         </div>
         <div className="mt-1 flex items-baseline gap-2">
-          <span className="num text-[22px] font-semibold"><Price v={s.price} /></span>
-          <Pct v={s.change_pct} dp={2} className="text-[13px]" />
+          <span className="num text-[22px] font-semibold"><Price v={px} /></span>
+          <Pct v={live ? live.change_pct : s.change_pct} dp={2} className="text-[13px]" />
         </div>
+        <div className="mt-0.5"><PriceStamp q={live} session={lq.data?.session} fallbackDate={s.data_date} /></div>
         <div className="mt-0.5 line-clamp-2 text-xs text-muted" title={`${s.company ?? ''}${s.industry ? ` · ${s.industry}` : ''}`}>{s.company}{s.industry ? ` · ${s.industry}` : ''}</div>
-        <div className="mt-3"><div className="mb-1 text-2xs text-muted">52-week range{s.pct_from_52w_high != null && <> · <Pct v={s.pct_from_52w_high} color={false} /> from high</>}</div><RangeBar52w low={s.low_52w} high={s.high_52w} value={s.price} /></div>
+        <div className="mt-3"><div className="mb-1 text-2xs text-muted">52-week range{s.pct_from_52w_high != null && <> · <Pct v={s.pct_from_52w_high} color={false} /> from high</>}</div><RangeBar52w low={Math.min(s.low_52w ?? px, px)} high={Math.max(s.high_52w ?? px, px)} value={px} /></div>
         {s.results_on && <div className="mt-3"><ResultsChip on={s.results_on} inDays={daysBetween(today, s.results_on)} /></div>}
       </div>
       <div className="px-4 py-2">
@@ -87,7 +183,7 @@ function SidePanel({ symbol }: { symbol: string }) {
         {s.your_holding ? (
           <div className="space-y-1 text-[13px]">
             <div className="flex justify-between"><span className="text-muted">{qty(s.your_holding.qty)} @ <Price v={s.your_holding.buy_price} /></span><LevelPill level={s.your_holding.level} /></div>
-            <div className="flex justify-between"><span className="text-muted">P&amp;L</span><span><Money v={s.your_holding.pnl_amount} signed color /> <Pct v={s.your_holding.pnl_pct} /></span></div>
+            <div className="flex justify-between"><span className="text-muted">P&amp;L{live ? ' (live)' : ''}</span><span><Money v={holdPnl} signed color /> <Pct v={holdPct} /></span></div>
             {s.your_holding.alerts.map((a) => <div key={a} className="text-xs text-warn">{a}</div>)}
           </div>
         ) : <div className="text-xs text-muted">None. <Link to="/portfolio" className="link">Add holdings</Link></div>}
@@ -108,8 +204,11 @@ export default function ChartPage() {
   const { symbol: raw = 'NIFTY50' } = useParams()
   const symbol = raw.toUpperCase()
   const [sp, setSp] = useSearchParams()
-  const tf = (sp.get('tf') as ChartTf | null) ?? '1d'
+  const tfRaw = (sp.get('tf') as ChartTf | IntradayTf | null) ?? '1d'
+  const intraTf: IntradayTf | null = (['1m', '5m', '15m', '30m', '1h'] as string[]).includes(tfRaw) ? (tfRaw as IntradayTf) : null
+  const tf: ChartTf = intraTf ? '1d' : (tfRaw as ChartTf)        // the daily chart query keeps running underneath
   const range = (sp.get('range') as ChartRange | null) ?? '1y'
+  const days = Math.min(20, Math.max(1, Number(sp.get('days')) || 3))
   const strategyParam = sp.get('s')
   const set = (k: string, v: string | null) => setSp((p) => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); return n }, { replace: true })
   const mobile = useIsMobile()
@@ -117,13 +216,51 @@ export default function ChartPage() {
   const [log, setLog] = useLocalStorage('qd.chart.log', false)
   const [lines, setLines] = useLocalStorage('qd.chart.lines', true)
   const [panel, setPanel] = useLocalStorage('qd.chart.panel', true)
-  const indSet = useMemo(() => new Set<Ind>(mobile ? ind.filter((i) => i !== 'rsi14' && i !== 'macd') : ind), [ind, mobile])
+  const indSet = useMemo(() => new Set<string>(mobile ? ind.filter((i) => !PANE_IDS.has(i)) : ind), [ind, mobile])
   const params = useMemo(() => ({ tf, range, indicators: apiIndicators(ind) }), [tf, range, ind])
   const q = useChart(symbol, params)
   const symbols = useSymbols()
   const { setPalette } = useUi()
   const nav = useNavigate()
   const ref = useRef<PriceChartHandle>(null)
+  const [lvSaved, setLvSel] = useLocalStorage<string[]>('qd.chart.levels', LEVEL_DEFAULT)
+  const lvSel = useMemo(() => levelList(lvSaved), [lvSaved])
+  const lvOn = useMemo(() => new Set(lvSel), [lvSel])
+  const lv = useLevels(symbol).data
+  const liveQ = useLiveQuotes([symbol])
+  const quote = liveQ.quotes[symbol]
+  const liveTick = useMemo<LiveTick | null>(() => (quote ? { date: todayIST(), price: quote.price } : null), [quote])
+  // order flow (intraday): delta under the candles and the session's volume profile, refreshed every minute
+  const [flowOn, setFlowOn] = useLocalStorage('qd.chart.flow', false)
+  const fq = useQuery({
+    queryKey: ['orderflow', symbol, intraTf], enabled: flowOn && !!intraTf, retry: false, refetchInterval: 60_000, staleTime: 30_000,
+    queryFn: () => fetchJson<{ symbol: string; bars: FlowBars; profile: Profile[]; poc: number | null; value_area: [number, number] | null; totals: { buy: number; sell: number }; note: string }>(`/api/orderflow/${encodeURIComponent(symbol)}?tf=${intraTf}`),
+  })
+  const flow = flowOn && fq.data?.symbol === symbol ? fq.data : null
+  // trade on the chart: a click opens an order ticket (practice unless real orders are on) with a limit at that price
+  const [tradeOn, setTradeOn] = useState(false)
+  const [ticket, setTicket] = useState<Ticket | null>(null)
+  const openTicket = (side: 'BUY' | 'SELL', price: number) => {
+    const px = Math.round(price * 20) / 20
+    setTicket({ symbol, side, qty: Math.max(1, Math.floor(50_000 / px)), type: 'LIMIT', product: 'CNC', limit_price: px, stop: null, target: null, source: 'chart' })
+  }
+  useEffect(() => { setTradeOn(false) }, [symbol])
+  useEffect(() => {
+    const chart = ref.current?.chart()
+    const series = ref.current?.series()
+    if (!tradeOn || !chart || !series || intraTf) return
+    const onClick = (p: { point?: { x: number; y: number } }) => {
+      const v = p.point ? series.coordinateToPrice(p.point.y) : null
+      if (v == null || !(v > 0)) return
+      const last = quote?.price ?? q.data?.bars.c[q.data.bars.c.length - 1] ?? v
+      openTicket(v <= last ? 'BUY' : 'SELL', v)
+    }
+    chart.subscribeClick(onClick)
+    return () => chart.unsubscribeClick(onClick)
+  }) // eslint-disable-line react-hooks/exhaustive-deps
+  const olq = useOutlook(symbol, liveQ.live)
+  const iq = useIntradayChart(symbol, intraTf ?? '5m', days, !!intraTf)
+  const ol = olq.data?.symbol === symbol ? olq.data : undefined
 
   const available = q.data?.strategies_available ?? []
   const [markerSel, setMarkerSel] = useState<string[] | null>(null)
@@ -143,6 +280,7 @@ export default function ChartPage() {
       if (n >= 1 && n <= 6) { set('range', RANGES[n - 1] === '1y' ? null : RANGES[n - 1]); return }
       if (e.key === 'd') set('tf', null)
       if (e.key === 'w') set('tf', '1w')
+      if (e.key === 'i') set('tf', '5m')
       if (e.key === '[' && idx > 0) nav(`/chart/${list[idx - 1]}?${sp.toString()}`)
       if (e.key === ']' && idx >= 0 && idx < list.length - 1) nav(`/chart/${list[idx + 1]}?${sp.toString()}`)
     }
@@ -158,8 +296,88 @@ export default function ChartPage() {
     a.download = `${symbol}-${tf}-${range}.png`
     a.click()
   }
+  const overlays = useMemo<ChartOverlay[]>(() => {
+    const out: ChartOverlay[] = []
+    const dl = lv?.daily
+    if (dl && lvOn.has('sr')) {
+      for (const l of dl.levels.resistance) if (l.price != null) out.push({ price: l.price, label: `R ${l.touches}×`, tone: 'loss', width: l.touches >= 3 ? 2 : 1, style: 'solid' })
+      for (const l of dl.levels.support) if (l.price != null) out.push({ price: l.price, label: `S ${l.touches}×`, tone: 'profit', width: l.touches >= 3 ? 2 : 1, style: 'solid' })
+    }
+    if (dl && lvOn.has('pivots')) {
+      const pv = dl.pivots
+      const add = (v: number | null, label: string, tone: ChartOverlay['tone']) => { if (v != null) out.push({ price: v, label, tone, style: 'dotted', axis: false }) }
+      add(pv.r2, 'R2', 'loss'); add(pv.r1, 'R1', 'loss'); add(pv.p, 'Pivot', 'accent'); add(pv.s1, 'S1', 'profit'); add(pv.s2, 'S2', 'profit')
+    }
+    const it = lv?.intraday
+    if (it && lvOn.has('intraday') && it.date === todayIST()) {
+      if (it.vwap != null) out.push({ price: it.vwap, label: 'VWAP', tone: 'info', style: 'solid', width: 2 })
+      if (it.or_high != null) out.push({ price: it.or_high, label: 'OR high', tone: 'warn', style: 'dashed', axis: false })
+      if (it.or_low != null) out.push({ price: it.or_low, label: 'OR low', tone: 'warn', style: 'dashed', axis: false })
+      if (it.profile?.poc != null) out.push({ price: it.profile.poc, label: 'POC', tone: 'violet', style: 'dotted', axis: false })
+    }
+    const ch = ol?.derivatives.chain
+    if (ch && !ch.old && lvOn.has('options')) {
+      if (ch.call_wall != null) out.push({ price: ch.call_wall, label: 'Call wall', tone: 'loss', width: 3, style: 'solid' })
+      if (ch.put_wall != null) out.push({ price: ch.put_wall, label: 'Put wall', tone: 'profit', width: 3, style: 'solid' })
+      if (ch.max_pain != null) out.push({ price: ch.max_pain, label: 'Max pain', tone: 'warn', style: 'dashed' })
+    }
+    const vd = ol?.derivatives.verdict
+    if (vd?.pick && lvOn.has('options')) {
+      const call = vd.pick.side === 'ce'
+      const tag = `${num(vd.pick.strike, 0)} ${vd.pick.side.toUpperCase()}`
+      if (vd.pick.breakeven != null) out.push({ price: vd.pick.breakeven, label: `Breakeven ${tag}`, tone: call ? 'profit' : 'loss', width: 2, style: 'dashed' })
+      if (vd.exit?.stop_underlying != null) out.push({ price: vd.exit.stop_underlying, label: `Stop (${tag})`, tone: 'loss', style: 'dotted' })
+      if (vd.exit?.target_underlying != null) out.push({ price: vd.exit.target_underlying, label: `Target (${tag})`, tone: 'profit', style: 'dotted' })
+    }
+    if (ol && lvOn.has('range')) {
+      const r = ol.expected.ranges.find((x) => x.days === 5 && x.source === 'options') ?? ol.expected.ranges.find((x) => x.days === 5 && x.source === 'realized')
+      if (r?.low != null && r.high != null) {
+        const tag = r.source === 'options' ? '5d implied' : '5d range'
+        out.push({ price: r.high, label: `${tag} +${num(r.pct, 1)}%`, tone: 'violet', style: 'dotted' }, { price: r.low, label: `${tag} −${num(r.pct, 1)}%`, tone: 'violet', style: 'dotted' })
+      }
+    }
+    return out
+  }, [lv, ol, lvOn])
+  const patternMarkers = useMemo<ChartMarker[]>(() => {
+    const dl = lv?.daily
+    if (!dl) return []
+    const out: ChartMarker[] = []
+    if (lvOn.has('candles')) {
+      for (const p of dl.patterns) {
+        const bull = p.bias === 'bullish', bear = p.bias === 'bearish'
+        // green / red only for a pattern whose own test found an edge after costs; the rest are grey: a shape, not a signal
+        const proven = p.evidence?.verdict === 'edge'
+        out.push({ t: p.at.slice(0, 10), position: bear ? 'aboveBar' : 'belowBar', shape: bull ? 'arrowUp' : bear ? 'arrowDown' : 'circle', kind: 'pattern',
+          tone: proven ? (bull ? 'profit' : bear ? 'loss' : 'neutral') : 'neutral',
+          text: proven ? p.name : `${p.name} (no edge)`, detail: p.what, strategy_key: null })
+      }
+    }
+    if (lvOn.has('chart_patterns')) {
+      // the breakout bar of a confirmed chart pattern (the pattern itself is drawn: see `drawings`)
+      for (const p of dl.chart_patterns) {
+        if (p.status !== 'confirmed') continue
+        const up = p.direction ? p.direction === 'up' : p.bias === 'bullish'
+        out.push({ t: p.confirmed_on ?? p.end, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'arrowUp' : 'arrowDown', kind: 'pattern',
+          tone: up ? 'profit' : 'loss', text: '', detail: `${p.name} breakout: ${p.what}`, strategy_key: null })
+      }
+    }
+    return out
+  }, [lv, lvOn])
   const height = mobile ? 300 + (indSet.has('macd') ? 80 : 0) : Math.max(460, (typeof window !== 'undefined' ? window.innerHeight : 800) - 250)
   const d = q.data
+  const chartPatterns = useMemo(() => (lvOn.has('chart_patterns') ? lv?.daily?.chart_patterns ?? [] : []), [lv, lvOn])
+  // Patterns are found on daily bars: drawn on the 1D chart only (on 1W the legend says so)
+  const drawings = useMemo(() => (d && d.tf === '1d' && chartPatterns.length ? patternDrawings(chartPatterns, d.bars.t) : []), [d, chartPatterns])
+  // your own drawings (DrawTools): levels as price lines, trendlines / Fibonacci as line drawings
+  const dq = useDrawings(symbol)
+  const allOverlays = useMemo(() => [...overlays, ...levelOverlays(dq.data?.drawings ?? [])], [overlays, dq.data])
+  const fs = useFormulaSeries(symbol, range, !intraTf && !!d)
+  const allDrawings = useMemo(() => [...drawings, ...lineDrawings(dq.data?.drawings ?? [], d ? d.bars.t[d.bars.t.length - 1] : null, d?.bars), ...fs.price], [drawings, dq.data, d, fs.price])
+  // chart type: Heikin Ashi keeps the dates (indicators, markers, drawings still line up); Renko / line break don't
+  const [ctype, setCtype] = useLocalStorage<ChartType>('qd.chart.type', 'candles')
+  const [box, setBox] = useLocalStorage('qd.chart.renkoBox', 2)
+  const shown = useMemo(() => (d && ctype === 'heikin' ? { ...d, bars: heikinAshi(d.bars) } : d), [d, ctype])
+  const bricks = useMemo(() => (!d ? [] : ctype === 'renko' ? renko(d.bars, box).bricks : ctype === 'linebreak' ? lineBreak(d.bars) : []), [d, ctype, box])
 
   return (
     <div className="flex flex-col gap-3">
@@ -186,17 +404,45 @@ export default function ChartPage() {
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 max-md:contents">
           <span className="flex-1 md:hidden" aria-hidden />
           <div className="scroll-x no-scrollbar flex min-w-0 items-center gap-2 max-md:order-[50] max-md:w-full">
-            <Segmented<ChartTf | '5m'> ariaLabel="Timeframe" value={tf} onChange={(v) => v !== '5m' && set('tf', v === '1d' ? null : v)} items={[{ id: '1d', label: '1D' }, { id: '1w', label: '1W' }, { id: '5m', label: '5m', disabled: true, title: 'Intraday chart comes with the intraday store' }]} />
-            <Segmented<ChartRange> ariaLabel="Range" value={range} onChange={(v) => set('range', v === '1y' ? null : v)} items={RANGES.map((r) => ({ id: r, label: r.toUpperCase() === 'MAX' ? 'Max' : r.toUpperCase() }))} />
+            <Segmented<ChartTf | IntradayTf> ariaLabel="Timeframe" value={intraTf ?? tf} onChange={(v) => set('tf', v === '1d' ? null : v)} items={[{ id: '1m', label: '1m', title: '1-minute candles with VWAP (from the live FYERS feed: the symbols it streams)' }, { id: '5m', label: '5m', title: '5-minute candles with VWAP (FYERS feed and history)' }, { id: '15m', label: '15m' }, { id: '30m', label: '30m' }, { id: '1h', label: '1H' }, { id: '1d', label: '1D' }, { id: '1w', label: '1W' }, { id: '1mo', label: '1M', title: 'Monthly candles' }]} />
+            {intraTf
+              ? <Segmented<string> ariaLabel="Sessions" value={String(days)} onChange={(v) => set('days', v === '3' ? null : v)} items={['1', '3', '5', '10'].map((n) => ({ id: n, label: `${n}D`, title: `Last ${n} session${n === '1' ? '' : 's'}` }))} />
+              : <Segmented<ChartRange> ariaLabel="Range" value={range} onChange={(v) => set('range', v === '1y' ? null : v)} items={RANGES.map((r) => ({ id: r, label: r.toUpperCase() === 'MAX' ? 'Max' : r.toUpperCase() }))} />}
           </div>
+          {!intraTf && (
+            <select aria-label="Chart type" title="Chart type" value={ctype} onChange={(e) => setCtype(e.target.value as ChartType)} className="input h-8 px-2 text-[13px]">
+              <option value="candles">Candles</option><option value="heikin">Heikin Ashi</option><option value="renko">Renko</option><option value="linebreak">Line break</option><option value="pnf">Point &amp; Figure</option><option value="kagi">Kagi</option>
+            </select>
+          )}
+          {!intraTf && (ctype === 'renko' || ctype === 'pnf' || ctype === 'kagi') && (
+            <select aria-label={ctype === 'kagi' ? 'Kagi reversal' : ctype === 'pnf' ? 'Point and figure box size' : 'Renko brick size'} title={ctype === 'kagi' ? 'The move against the line that turns it' : 'Box size, % of the price'} value={box} onChange={(e) => setBox(Number(e.target.value))} className="input h-8 px-2 text-[13px]">
+              {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{ctype === 'kagi' ? `${n * 2}% reversal` : ctype === 'pnf' ? `${n}% boxes` : `${n}% bricks`}</option>)}
+            </select>
+          )}
           <Popover align="right" width={248} trigger={({ toggle, open }) => <Button icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Indicators" title="Indicators" className="max-sm:px-2.5"><span className="max-sm:hidden">Indicators</span></Button>}>
             <div className="py-1">
               {IND_MENU.map((m) => <MenuCheck key={m.id} checked={ind.includes(m.id)} onChange={(on) => setInd(on ? [...ind, m.id] : ind.filter((x) => x !== m.id))}>{m.label}</MenuCheck>)}
+              <div className="mx-2.5 my-1 border-t border-line" />
+              <div className="px-2.5 pt-1 text-2xs font-semibold uppercase tracking-[0.04em] text-faint">Panes below the chart</div>
+              {PANE_MENU.map((m) => <MenuCheck key={m.id} checked={ind.includes(m.id)} onChange={(on) => setInd(on ? [...ind, m.id] : ind.filter((x) => x !== m.id))}>{m.label}</MenuCheck>)}
               <div className="mx-2.5 my-1 border-t border-line" />
               <div className="px-2.5 py-1.5"><Switch checked={log} onChange={setLog} label="Log scale" /></div>
               <div className="px-2.5 py-1.5"><Switch checked={lines} onChange={setLines} label="Price lines (stops, entries, 52w)" /></div>
             </div>
           </Popover>
+          <DrawTools symbol={symbol} chartRef={ref} price={quote?.price ?? null} enabled={!intraTf && !!d} />
+          <FormulaMenu symbol={symbol} />
+          <LayoutMenu current={{ ind, log, lines, ctype, tf: intraTf ?? tf, range, levels: lvSaved }}
+            apply={(l) => { setInd(l.ind as Ind[]); setLog(l.log); setLines(l.lines); setCtype(l.ctype as ChartType); setLvSel(l.levels)
+              setSp((p) => { const n = new URLSearchParams(p); if (l.tf && l.tf !== '1d') n.set('tf', l.tf); else n.delete('tf'); if (l.range && l.range !== '1y') n.set('range', l.range); else n.delete('range'); return n }, { replace: true }) }} />
+          {intraTf && (
+            <Button onClick={() => setFlowOn((x) => !x)} className={cn('max-sm:px-2.5', flowOn && 'border-accent text-accent')}
+              title="Estimated buy / sell volume: delta per bar, cumulative delta and today's volume profile (from the FYERS feed)">Order flow</Button>
+          )}
+          <Button icon={<Crosshair className="h-3.5 w-3.5" />} onClick={() => setTradeOn((x) => !x)} disabled={!!intraTf || !d}
+            title="Click the chart to open an order ticket at that price (practice unless real orders are switched on)" className={cn('max-sm:px-2.5', tradeOn && 'border-accent text-accent')}>
+            <span className="max-sm:hidden">{tradeOn ? 'Trading: click a price' : 'Trade on chart'}</span>
+          </Button>
           <Popover align="right" width={260} trigger={({ toggle, open }) => <Button icon={<Layers className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Markers" title="Strategy markers" className="max-sm:px-2.5"><span className="max-sm:hidden">Markers</span>{markerSet ? ` · ${markerSet.size}` : ''}</Button>}>
             <div className="py-1">
               {available.length === 0 ? <div className="px-2.5 py-2 text-xs text-muted">No strategy traded this symbol in the recent trades. Full history needs trades.parquet (next scan).</div> : (
@@ -213,21 +459,84 @@ export default function ChartPage() {
               )}
             </div>
           </Popover>
+          <Popover align="right" width={300} trigger={({ toggle, open }) => <Button icon={<Ruler className="h-3.5 w-3.5" />} onClick={toggle} aria-expanded={open} aria-label="Levels" title="Support / resistance, pivots, option walls, ranges" className="max-sm:px-2.5"><span className="max-sm:hidden">Levels</span>{lvSel.length ? ` · ${lvSel.length}` : ''}</Button>}>
+            <div className="py-1">
+              {LEVEL_MENU.map((m) => (
+                <MenuCheck key={m.id} checked={lvOn.has(m.id)} onChange={(on) => setLvSel(on ? [...lvSel, m.id] : lvSel.filter((x) => x !== m.id))}>
+                  <span className="block">{m.label}</span><span className="block text-2xs text-faint">{m.hint}</span>
+                </MenuCheck>
+              ))}
+            </div>
+          </Popover>
+          {liveQ.data && quote && (
+            <span title={liveQ.data.note}
+              className={cn('inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-2xs font-medium', quote.delayed ? 'border-loss/40' : 'border-profit/40')}>
+              <PriceStamp q={quote} session={liveQ.data.session} /><span className="num text-fg">{num(quote.price, 2)}</span> <Pct v={quote.change_pct} dp={2} />
+            </span>
+          )}
+          <WatchButton symbol={symbol} />
+          <AlertButton symbol={symbol} price={quote?.price ?? null} />
           <IconButton label="Save chart as PNG" onClick={screenshot} className="max-sm:hidden"><Camera className="h-4 w-4" /></IconButton>
           <IconButton label={panel ? 'Hide side panel' : 'Show side panel'} onClick={() => setPanel(!panel)} className="max-md:hidden">{panel ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}</IconButton>
         </div>
       </div>
+      {/* the one tested answer for this stock, above everything else: BUY / SELL (exit) / HOLD / NO EDGE */}
+      <ActionPanel symbol={symbol} />
       {/* The side panel sits beside the chart from xl; below that it goes under the chart, so the chart keeps the
           full width (at 800 px it was squeezed to ~370 px). self-start: the chart card hugs the chart. */}
       <div className={cn('grid gap-3', panel && 'xl:grid-cols-[minmax(0,1fr)_320px]')}>
         <Card flush className="min-w-0 self-start overflow-hidden">
-          {q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : (
-            <PriceChart ref={ref} data={d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile} />
+          {intraTf ? (
+            iq.data && iq.data.symbol === symbol ? <IntradayChart data={iq.data} live={quote} height={height} flow={flow?.bars} />
+              : iq.error ? <div className="p-4"><ErrorState error={iq.error} compact /></div> : <SkeletonChart height={height} />
+          ) : q.error && !d ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !d ? <SkeletonChart height={height} /> : ctype === 'pnf' || ctype === 'kagi' ? (
+            <div>
+              {ctype === 'pnf' ? <PnfChart bars={d.bars} boxPct={box} height={height} /> : <KagiChart bars={d.bars} revPct={box * 2} height={height} />}
+              <p className="border-t border-line px-3 py-1.5 text-2xs text-faint">{ctype === 'pnf' ? `Point & Figure: an X for each ${box}% rise, an O for each ${box}% fall; a new column only after a 3-box reversal (highs and lows).` : `Kagi: the line turns after a ${box * 2}% move against it; thick (green) once it rises above the last shoulder, thin (red) once it falls below the last waist.`} Time is left out: no indicators or drawings on this view. Widen the range (top) for more history.</p>
+            </div>
+          ) : ctype === 'renko' || ctype === 'linebreak' ? (
+            <div>
+              <BrickChart bricks={bricks} height={height} />
+              <p className="border-t border-line px-3 py-1.5 text-2xs text-faint">{ctype === 'renko' ? `Renko: a ${box}% brick each time the close moves a full brick (two to reverse).` : 'Three-line break: a new line when the close breaks the last line; a reversal must break the last three.'} Time is left out: no indicators, markers or drawings on this view. {bricks.length} {ctype === 'renko' ? 'bricks' : 'lines'}.</p>
+            </div>
+          ) : (
+            <div className="relative">
+              {ctype === 'heikin' && <span className="absolute right-16 top-2 z-10 rounded bg-raised/90 px-1.5 py-0.5 text-2xs text-muted">Heikin Ashi candles (smoothed; not the traded prices)</span>}
+              <PriceChart ref={ref} data={shown ?? d} indicators={indSet} markerStrategies={markerSet} showLines={lines} log={log} height={height} compactLegend={mobile}
+                overlays={allOverlays} extraMarkers={patternMarkers} drawings={allDrawings} live={liveTick} />
+              {lvOn.has('chart_patterns') && lv?.daily && <PatternLegend patterns={chartPatterns} drawn={d.tf === '1d'} compact={mobile} />}
+              {ol?.derivatives.verdict && (
+                <button type="button" title={ol.derivatives.verdict.headline}
+                  onClick={() => document.getElementById('chart-options')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className={cn('absolute bottom-10 left-3 z-10 rounded-md border px-2 py-1 text-2xs font-bold tracking-wide shadow-sm', VERDICT_STYLE[ol.derivatives.verdict.verdict].cls)}>
+                  Options: {VERDICT_STYLE[ol.derivatives.verdict.verdict].label}
+                  {ol.derivatives.verdict.pick ? ` ${num(ol.derivatives.verdict.pick.strike, 0)} ${ol.derivatives.verdict.pick.side.toUpperCase()}` : ''}
+                </button>
+              )}
+            </div>
           )}
+          {!intraTf && <FormulaPanes own={fs.own} />}
         </Card>
-        {panel && <Card flush className="min-w-0 self-start"><SidePanel symbol={symbol} /></Card>}
+        {panel && (
+          <div className="min-w-0 space-y-3 self-start">
+            <Card flush><SidePanel symbol={symbol} /></Card>
+            <DepthLadder symbol={symbol} onPick={openTicket} />
+            {flowOn && intraTf && (flow ? <VolumeProfile profile={flow.profile} poc={flow.poc} va={flow.value_area} totals={flow.totals} note={flow.note} />
+              : fq.error ? <Card title="Order flow today"><p className="text-xs text-muted">{isFailure(fq.error) ? `${fq.error.message} ${fq.error.hint ?? ''}` : 'Unavailable.'}</p></Card> : null)}
+            {!intraTf && d && <VolumeByPriceCard bars={d.bars} last={quote?.price ?? d.bars.c[d.bars.c.length - 1] ?? null} />}
+            <SeasonalityCard symbol={symbol} />
+            <FundamentalsCard symbol={symbol} />
+            <AnnouncementsCard symbol={symbol} />
+          </div>
+        )}
+        {ticket && <OrderTicket open={!!ticket} onClose={() => setTicket(null)} initial={ticket} />}
       </div>
-      <p className="text-2xs text-faint">Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data. Markers: ▲ model buy, ▼ model sell, ● open model position, ■ corporate action, small ● results day. Keys: 1-6 range, d/w timeframe, [ ] symbol.</p>
+      <AiAnalyst symbol={symbol} />
+      <OutlookPanel symbol={symbol} livePrice={quote?.price ?? null} />
+      {ol && <ChartOptions d={ol.derivatives} live={liveQ.live} lastDay={ol.date} />}
+      {ol && <BigMoneyCard symbol={symbol} b={ol.big_money} kind={ol.kind} />}
+      <PriceAction symbol={symbol} />
+      <p className="text-2xs text-faint">{intraTf && iq.data?.symbol === symbol ? `${iq.data.note} ` : ''}{d?.fetched ? `Daily candles fetched from Yahoo (${symbol} is not in the local store; to ${date(d.source_date)}, not adjusted with NSE's corporate-action data)` : <>Daily candles from the local store{d ? ` (to ${date(d.source_date)})` : ''}, adjusted for splits, bonuses and demergers with NSE data</>}; while the market is open the last candle follows the live price. Chart patterns (Levels menu, 1D): the pattern's shape through its swing points, its lines (dashed while forming, solid once a close broke through), the textbook target and the level that voids it; ▲▼ Breakout marks the confirming bar. Markers: ▲ model buy / bullish candle pattern, ▼ model sell / bearish candle pattern, ● open model position, ■ corporate action, small ● results day. Lines (Levels menu): red resistance / call wall, green support / put wall, blue VWAP, violet expected range. Intraday (1m to 1H): stored FYERS 5-minute candles of the ~150 most liquid F&O stocks and the live feed's symbols; any other stock or index, 1-minute candles and any session the store lacks are fetched when you open them (FYERS history when you are logged in, else Yahoo, about 15 minutes late while the market is open). Each session's VWAP in blue; the last candle follows the live price. Keys: 1-6 range, d/w/i timeframe, [ ] symbol.</p>
     </div>
   )
 }

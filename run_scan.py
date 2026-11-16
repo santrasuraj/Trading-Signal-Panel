@@ -3,6 +3,8 @@
   python run_scan.py               scan and print the summary
   python run_scan.py --telegram    also send the summary (or a failure alert) to Telegram
   python run_scan.py --no-update   use stored prices only (no download)
+  python run_scan.py --live-only   scan only while the market is open (today's live candle, provisional signals;
+                                   used by the scheduled task every 30 minutes in market hours)
   python run_scan.py --status FILE write progress to FILE as JSON (used by the dashboards and scheduled tasks;
                                    only the scan holding the lock writes it)
 """
@@ -51,7 +53,14 @@ def main() -> int:
     ap.add_argument("--no-update", action="store_true", help="use stored prices only")
     ap.add_argument("--status", help="write progress JSON to this file")
     ap.add_argument("--by", default="manual", help="who started the scan (shown if another scan is blocked)")
+    ap.add_argument("--live-only", action="store_true",
+                    help="exit unless the market is open now (holidays, weekends, outside 09:15-15:30)")
     args = ap.parse_args()
+    if args.live_only:
+        from scanner.intraday.live import market_open_now
+        if not market_open_now():
+            print("Market is not open now: no live scan.", flush=True)
+            return 0
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     lg = _logger()
@@ -125,7 +134,7 @@ def main() -> int:
     owner[0] = True
     # The scan itself is finished and saved: tell the dashboard now, before the slower smart-money download.
     write_status(state="done", progress=1.0, message=f"Done in {result['elapsed_s']}s")
-    if not args.no_update:
+    if not args.no_update and not args.live_only:   # disclosures change once a day: not every 30-minute live scan
         # Smart money (docs/smart_money_spec.md): NSE bulk/block deals, insider trades, FII/DII and shareholding.
         # Own lock and per-source error handling: it never fails the finished scan.
         try:
@@ -134,6 +143,25 @@ def main() -> int:
         except Exception as e:
             lg.error("Smart money refresh failed: %s\n%s", e, traceback.format_exc())
             print(f"Smart money refresh failed (skipped): {e}", flush=True)
+        # Big money (scanner/big_money.py): F&O ban list, acquisition filings, promoter pledges of the stocks you
+        # hold or the models hold / order. Own error handling: never fails the finished scan.
+        try:
+            from scanner import big_money
+            wanted = [h.get("symbol") for h in result.get("holdings") or []]
+            for s in result.get("strategies") or []:
+                wanted += [r.get("symbol") for r in (s.get("actions") or []) + (s.get("positions") or [])]
+            big_money.refresh([w for w in wanted if w], log=lambda m: (print(m, flush=True), lg.info(m)))
+        except Exception as e:
+            lg.error("Big money refresh failed: %s", e)
+            print(f"Big money refresh failed (skipped): {e}", flush=True)
+    # Options verdicts (scanner/option_verdict.py): journal today's verdict for every chain stored today, so their
+    # real record builds up. Files only.
+    try:
+        from scanner import option_verdict
+        from scanner.store import load_store
+        option_verdict.record_stored_chains(load_store(), result, log=lambda m: (print(m, flush=True), lg.info(m)))
+    except Exception as e:
+        lg.error("Options verdict journal failed: %s", e)
     try:
         summary = format_daily(result, int((cfg.get("telegram") or {}).get("top_n", 10)))
     except Exception as e:   # the scan finished and is saved: a summary problem must not leave it "running"

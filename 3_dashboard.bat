@@ -1,6 +1,5 @@
 @echo off
 REM Open Quant Desk at http://127.0.0.1:8600. Keep this window open while using it.
-REM (The old Streamlit dashboard is still available: 3b_dashboard_streamlit.bat)
 cd /d "%~dp0"
 
 REM Build the app when there is no Quant Desk build yet (no web\ui\dist, or the old Vite template page)
@@ -44,5 +43,6 @@ REM This checkout's own venv, else the main checkout's (this folder may be a git
 set "PY=.venv\Scripts\python.exe"
 if not exist "%PY%" if exist "..\..\.venv\Scripts\python.exe" set "PY=..\..\.venv\Scripts\python.exe"
 if not exist "%PY%" set "PY=python"
-"%PY%" -m web.serve
+REM --reload: an update to the app's code applies by itself, without closing this window
+"%PY%" -m web.serve --reload
 pause

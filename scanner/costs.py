@@ -5,7 +5,9 @@ All percentages are in percent of traded value. Defaults are NSE delivery charge
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
+
+import pandas as pd
 
 
 @dataclass(frozen=True)
@@ -23,12 +25,39 @@ class CostModel:
     illiquid_below_cr: float = 25.0       # average daily traded value, Rs crore
     cash_fee_pct: float = 0.7         # yearly cost of parking idle cash (liquid-ETF expense ratio; an assumption:
                                       # check your fund's current factsheet), deducted from the cash yield
+    dated: float = 1.0                # 1 = the charges in force on each trade's date (HISTORY); 0 = today's for all
+
+    # Charges that changed during the backtest (only documented changes; everything else is today's rate):
+    #   SEBI turnover fee Rs 15 / crore until 31 May 2020, then Rs 10 / crore;
+    #   stamp duty: state rates until 30 Jun 2020 (Maharashtra's 0.01% on delivery buys used), then 0.015% everywhere;
+    #   NSE transaction charge 0.00325% until 30 Sep 2024, then 0.00297% (uniform slabs), then today's config value
+    #   (0.00307% incl. IPFT) from 1 Mar 2026.
+    HISTORY = (("2020-06-01", {"sebi_pct": 0.00015}), ("2020-07-01", {"stamp_buy_pct": 0.01}),
+               ("2024-10-01", {"exchange_pct": 0.00325}), ("2026-03-01", {"exchange_pct": 0.00297}))
 
     @classmethod
     def from_config(cls, cfg: dict | None) -> "CostModel":
         cfg = cfg or {}
         known = {f.name for f in fields(cls)}
         return cls(**{k: float(v) for k, v in cfg.items() if k in known})
+
+    def on(self, day) -> "CostModel":
+        """The model with the charges in force on `day` (HISTORY: a change applies BEFORE its date). Cached."""
+        if not self.dated:
+            return self
+        key = pd.Timestamp(day).strftime("%Y-%m-%d")
+        over: dict = {}
+        for until, vals in self.HISTORY:
+            if key < until:
+                for k, v in vals.items():
+                    over.setdefault(k, v)            # the earliest period that still covers the day wins
+        if not over:
+            return self
+        cache = self.__dict__.setdefault("_on", {})     # frozen dataclass: a plain per-instance cache
+        tag = tuple(sorted(over.items()))
+        if tag not in cache:
+            cache[tag] = replace(self, **over, dated=0.0)
+        return cache[tag]
 
     def _fees(self, value: float) -> float:
         brokerage = min(value * self.brokerage_pct / 100, self.brokerage_max)
@@ -61,6 +90,22 @@ class TaxModel:
     ltcg_pct: float = 13.0
     ltcg_exempt: float = 125000.0
     interest_pct: float = 31.2        # 30% slab + 4% cess; set your own slab
+    # Dated rates (Finance (No. 2) Act 2024): the rates above apply to gains realised from 23 Jul 2024; before that
+    # STCG was 15% and LTCG 10% (+ 4% cess) with a Rs 1 lakh LTCG exemption (Rs 1.25 lakh from FY 2024-25 on).
+    dated: float = 1.0                # 0 = use today's rates for every year (the old, pessimistic way)
+
+    CHANGE = pd.Timestamp("2024-07-23")
+    OLD_STCG, OLD_LTCG, OLD_EXEMPT = 15.6, 10.4, 100000.0
+
+    def rates_on(self, exit_date) -> tuple[float, float]:
+        """(STCG %, LTCG %) for a gain realised on `exit_date`."""
+        if self.dated and pd.Timestamp(exit_date) < self.CHANGE:
+            return self.OLD_STCG, self.OLD_LTCG
+        return self.stcg_pct, self.ltcg_pct
+
+    def exempt_for_fy(self, fy: int) -> float:
+        """LTCG exemption of the financial year starting in April of `fy`."""
+        return self.OLD_EXEMPT if self.dated and fy < 2024 else self.ltcg_exempt
 
     @classmethod
     def from_config(cls, cfg: dict | None) -> "TaxModel":

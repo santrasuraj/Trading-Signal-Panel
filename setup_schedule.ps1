@@ -35,7 +35,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
     -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45) -MultipleInstances IgnoreNew
 
 foreach ($t in @("08:30", "15:40", "19:15")) {
-    # --status: the dashboards (Quant Desk and the old Streamlit app) follow a scheduled scan's progress and see
+    # --status: the dashboard (Quant Desk) follows a scheduled scan's progress and see
     # whether it failed, from the same status file their own scans write
     $action = New-ScheduledTaskAction -Execute $pythonw `
         -Argument "run_scan.py --telegram --by scheduled --status data\results\status.json" -WorkingDirectory $root
@@ -46,6 +46,29 @@ foreach ($t in @("08:30", "15:40", "19:15")) {
     Write-Host "Created task: $name (weekdays at $t)"
 }
 
+# 09:45-15:15 every 30 minutes: a live scan on today's forming candle (FYERS real time when logged in, else Yahoo
+# ~15 min delayed). Its signals are provisional (what each strategy would do if the market closed now) and are
+# never journaled; the 15:40 / 19:15 scans give the final ones. No Telegram: one summary per scheduled scan above.
+$liveScan = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 25) -MultipleInstances IgnoreNew
+$action = New-ScheduledTaskAction -Execute $pythonw `
+    -Argument "run_scan.py --live-only --by live --status data\results\status.json" -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At "09:45"
+$trigger.Repetition = (New-ScheduledTaskTrigger -Once -At "09:45" -RepetitionInterval (New-TimeSpan -Minutes 30) `
+    -RepetitionDuration (New-TimeSpan -Hours 5 -Minutes 31)).Repetition
+Register-ScheduledTask -TaskName "NSE Scanner live" -Action $action -Trigger $trigger -Settings $liveScan -Force `
+    -Description "NSE stock scanner - live scan in market hours (provisional signals)" | Out-Null
+Write-Host "Created task: NSE Scanner live (weekdays 09:45-15:15, every 30 minutes)"
+
+# 08:45 on weekdays: a reminder to log in to FYERS when today's login is missing (Telegram if configured, and
+# data\logs
+eminders.log). Nothing on NSE holidays or once you are logged in; no FYERS call.
+$action = New-ScheduledTaskAction -Execute $pythonw -Argument "-m scanner.reminders" -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At "08:45"
+Register-ScheduledTask -TaskName "NSE Scanner login reminder" -Action $action -Trigger $trigger -Settings $settings -Force `
+    -Description "NSE stock scanner - reminder to log in to FYERS for the day" | Out-Null
+Write-Host "Created task: NSE Scanner login reminder (weekdays at 08:45)"
+
 # Intraday (FYERS first, inside the shared rate limiter):
 #   09:14  live 5-minute bars from the FYERS WebSocket until 15:31 (no REST calls; if today's login is
 #          missing it waits for it - log in with 1_login.bat - and on weekends/NSE holidays it just exits)
@@ -53,9 +76,15 @@ foreach ($t in @("08:30", "15:40", "19:15")) {
 #   Their output goes to data\logs\intraday.log.
 $liveSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 7) -MultipleInstances IgnoreNew
+#   09:12  option chains from NSE every options.interval_seconds until 15:31 (config.yaml `options:`; no FYERS calls);
+#          first collects last night's Claude forecasts (if ANTHROPIC_API_KEY is set)
+#   19:30  F&O positioning: NSE's participant-wise OI and F&O bhavcopy (published after the close), then Claude's
+#          option-chain forecasts: the day's last chains, one batch request per ai_forecast underlying (half price)
 $jobs = @(
     @{ Time = "09:14"; Args = "intraday_sync.py --live"; Name = "NSE Scanner intraday live"; Settings = $liveSettings },
-    @{ Time = "15:45"; Args = "intraday_sync.py --archive --run"; Name = "NSE Scanner intraday archive"; Settings = $settings }
+    @{ Time = "09:12"; Args = "intraday_sync.py --options --ai-collect"; Name = "NSE Scanner option chains"; Settings = $liveSettings },
+    @{ Time = "15:45"; Args = "intraday_sync.py --archive --run"; Name = "NSE Scanner intraday archive"; Settings = $settings },
+    @{ Time = "19:30"; Args = "intraday_sync.py --fno --ai-forecast"; Name = "NSE Scanner F&O positioning"; Settings = $settings }
 )
 foreach ($j in $jobs) {
     $action = New-ScheduledTaskAction -Execute $pythonw -Argument $j.Args -WorkingDirectory $root
@@ -64,6 +93,29 @@ foreach ($j in $jobs) {
         -Description "NSE stock scanner - intraday data (FYERS)" | Out-Null
     Write-Host "Created task: $($j.Name) (weekdays at $($j.Time))"
 }
-Write-Host "`nDone. Log in to Fyers (1_login.bat) each trading day before 09:14 for real-time prices."
+
+#   09:20-15:05 every 5 minutes: live intraday signals, only from strategies whose backtest shows a real edge
+#   after costs (no FYERS history calls; when none is proven it only writes that note), and Big money live:
+#   unusual volume for the time of day, large trades, order-book pressure and block deals (footprints.py)
+$sigSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 4) -MultipleInstances IgnoreNew
+$action = New-ScheduledTaskAction -Execute $pythonw -Argument "intraday_sync.py --signals --footprints" -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At "09:20"
+$trigger.Repetition = (New-ScheduledTaskTrigger -Once -At "09:20" -RepetitionInterval (New-TimeSpan -Minutes 5) `
+    -RepetitionDuration (New-TimeSpan -Hours 5 -Minutes 45)).Repetition
+Register-ScheduledTask -TaskName "NSE Scanner intraday signals" -Action $action -Trigger $trigger -Settings $sigSettings `
+    -Force -Description "NSE stock scanner - live intraday signals (proven strategies) and Big money live" | Out-Null
+Write-Host "Created task: NSE Scanner intraday signals (weekdays 09:20-15:05, every 5 minutes)"
+
+# Saturdays 11:00: every candle and chart pattern re-tested on the survivorship-free top 500 (~17 minutes), so each
+# pattern's tested record on the Chart page keeps up with the new weeks (it was a manual python -m command before)
+$weekly = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1) -MultipleInstances IgnoreNew
+$action = New-ScheduledTaskAction -Execute $pythonw -Argument "-m scanner.pattern_study" -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At "11:00"
+Register-ScheduledTask -TaskName "NSE Scanner pattern study" -Action $action -Trigger $trigger -Settings $weekly -Force `
+    -Description "NSE stock scanner - weekly candle / chart pattern study" | Out-Null
+Write-Host "Created task: NSE Scanner pattern study (Saturdays at 11:00)"
+Write-Host "`nDone. Log in to Fyers each trading day before 09:14 (Fyers chip in Quant Desk's top bar) for real-time prices."
 Write-Host "Without login the scans still run (Yahoo for live prices, NSE official data in the evening)."
 Write-Host "Problems are written to data\logs\scanner.log and sent to Telegram (intraday jobs: data\logs\intraday.log)."

@@ -1,7 +1,9 @@
 """1. system: /api/health, /api/status (polled every 1-10 s: file stats and cached reads only)."""
 from __future__ import annotations
 
+import re
 import time
+from pathlib import Path
 
 from fastapi import APIRouter
 
@@ -43,10 +45,30 @@ def ticker(lt: dict | None) -> dict | None:
             "advances": int(m.get("advances") or 0), "declines": int(m.get("declines") or 0), "label": label}
 
 
+UI_INDEX = Path(__file__).resolve().parents[2] / "ui" / "dist" / "index.html"
+_ENTRY = re.compile(r"/assets/(index-[\w-]+\.js)")
+_ui: dict = {"mtime": None, "build": None}
+
+
+def ui_build() -> str | None:
+    """The entry script of the app build being served (e.g. index-CMbVnSWU.js; its name changes with every build).
+    A tab loaded from an older build compares it with its own and offers to reload: without that, a page left open
+    keeps showing the old screens after an update. A file stat per call; the file is read only when it changed."""
+    try:
+        m = UI_INDEX.stat().st_mtime
+    except OSError:
+        return None
+    if _ui["mtime"] != m:
+        hit = _ENTRY.search(UI_INDEX.read_text(encoding="utf-8", errors="replace"))
+        _ui.update(mtime=m, build=hit.group(1) if hit else None)
+    return _ui["build"]
+
+
 @router.get("/status", response_model=AppStatus)
 def status():
     lt = data.latest()
     clk = clock.market_clock()
-    return {"server_version": VERSION, "latest": st.as_of(lt, clk) if lt else None, "scan": scan_runner.status(),
-            "fyers": fyers_svc.status(verify=False, lt=lt), "clock": clk, "features": features(lt),
-            "ticker": ticker(lt), "config_changed_since_scan": settings_svc.config_changed_since_scan(lt)}
+    return {"server_version": VERSION, "ui_build": ui_build(), "latest": st.as_of(lt, clk) if lt else None,
+            "scan": scan_runner.status(), "fyers": fyers_svc.status(verify=False, lt=lt), "clock": clk,
+            "features": features(lt), "ticker": ticker(lt),
+            "config_changed_since_scan": settings_svc.config_changed_since_scan(lt)}

@@ -65,7 +65,7 @@ def test_etf_stray_open_print_is_cleaned_like_the_backtest(jpath):
     paper.record_scan(scan(d[20], actions=[("BUY", "A", "enters top ranks")]), jpath)
     assert paper.build_report(fr, COSTS, jpath)["mom"]["open"][0]["entry_price"] == pytest.approx(85 * (1 + SLIP))
     rep = paper.build_report(fr, COSTS, jpath, etfs={"A"})["mom"]
-    assert rep["open"][0]["entry_price"] == pytest.approx(98 * (1 + SLIP))     # clamped to 2% below the closes
+    assert rep["open"][0]["entry_price"] == pytest.approx(100 * (1 + SLIP))    # the previous close (no market gap)
     assert fr["open"].iloc[21, 0] == 85.0                                      # the caller's frames untouched
 
 
@@ -103,6 +103,24 @@ def test_sell_order_exits_at_next_open_after_all_charges(jpath):
     assert t["exit_date"] == d[25].date().isoformat() and t["exit_price"] == pytest.approx(exit_)
     assert t["reason"] == "dropped from ranking" and t["pnl"] == pytest.approx(proceeds - cost)
     assert not rep["open"] and rep["equity"]["Paper"].iloc[-1] == pytest.approx(100_000 - cost + proceeds)
+
+
+def test_holding_that_stops_trading_is_sold_at_its_last_price(jpath):
+    """As engine.simulate: a holding with no trade for STALE_EXIT_DAYS days (delisted, merged away) is sold at
+    its last traded price - a sell order needs an open, so it would otherwise stay open for ever."""
+    from scanner.engine import STALE_EXIT_DAYS
+    fr = make_store(n=60)
+    for f in ("open", "high", "low", "close"):
+        fr[f].iloc[30:, 0] = np.nan                                  # A's last trade on day 29
+    d = fr["close"].index
+    paper.record_scan(scan(d[20], actions=[("BUY", "A", "enters top ranks")]), jpath)
+    paper.record_scan(scan(d[35], actions=[("SELL", "A", "dropped from ranking")], positions=[("A", d[21], None)]),
+                      jpath)                                         # the model's sell can never fill
+    rep = report(fr, jpath)
+    assert not rep["open"] and len(rep["trades"]) == 1
+    t = rep["trades"][0]
+    assert t["reason"] == "stopped trading" and t["exit_date"] == d[29 + STALE_EXIT_DAYS].date().isoformat()
+    assert t["exit_price"] == pytest.approx(100 * (1 - SLIP))
 
 
 @pytest.mark.parametrize("open_23,expected_raw", [(95.0, None), (85.0, 85.0)])

@@ -418,6 +418,16 @@ def test_stock_signals_and_lists(tmp_path):
     assert "XYZ" in set(sm.accumulating(sig)["symbol"]) and "XYZ" in set(sm.exiting(sig)["symbol"])
     top = sm.top_reasons(ev[ev["symbol"] == "XYZ"], "down", 2)
     assert len(top) == 2 and top[0].startswith("GOLDMAN SACHS (SINGAPORE) PTE sold")
+    # all stocks at once (one sort) give each stock exactly its own top_reasons, and the signals' reasons too
+    for direction in ("up", "down", None):
+        fast = sm.reasons_by_symbol(ev, direction)
+        for sym, g in ev.groupby("symbol"):
+            assert fast.get(sym, []) == sm.top_reasons(g, direction)
+    for r in sig.itertuples():
+        e = ev[ev["symbol"] == r.symbol]
+        up, dn = e[e["direction"] == "up"], e[e["direction"] == "down"]
+        first, second = (up, dn) if r.up_score >= r.down_score else (dn, up)
+        assert list(r.reasons) == (sm.top_reasons(first, None, 99) + sm.top_reasons(second, None, 99))[:4]
 
 
 def test_loaders_and_derived_on_an_empty_folder(tmp_path):

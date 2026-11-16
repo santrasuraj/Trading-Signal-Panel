@@ -349,12 +349,11 @@ def _flow(r: dict) -> dict:
 def _with_reasons(stocks: pd.DataFrame, ev: pd.DataFrame, direction: str, companies: dict) -> list[dict]:
     """Stocks as SmStock with `reasons` rebuilt from `ev` for one direction, so a list of sellers explains the
     selling even for a stock that is also being bought."""
-    by_sym = {s: g for s, g in ev.groupby("symbol", sort=False)} if len(ev) else {}
+    reasons = sm.reasons_by_symbol(ev, direction)
     out = []
     for r in _records(stocks):
         row = _stock(r, companies)
-        g = by_sym.get(row["symbol"])
-        row["reasons"] = _list(sm.top_reasons(g, direction)) if g is not None else []
+        row["reasons"] = _list(reasons.get(row["symbol"], []))
         out.append(row)
     return out
 

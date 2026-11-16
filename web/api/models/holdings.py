@@ -82,7 +82,7 @@ class RejectedRow(Model):
 
 
 class HoldingsPutResponse(Model):
-    saved: int
+    saved: int                                    # 0 when any row is rejected: nothing is written then
     rejected: list[RejectedRow]
     unknown_symbols: list[str]
 

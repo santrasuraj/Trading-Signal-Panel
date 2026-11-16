@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { WifiOff } from 'lucide-react'
-import { useStatus } from '@/api/hooks'
+import { useAutomation, useAutomationSetup, useLiveQuotes, useStatus } from '@/api/hooks'
 import { isFailure } from '@/api/client'
 import { Banner, Skeleton } from '@/components/feedback'
 import { FyersLoginDialog } from '@/components/FyersLogin'
@@ -19,8 +19,11 @@ import { duration } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
 import { readLocal, useLocalStorage, writeLocal } from '@/lib/useLocalStorage'
 import { typingTarget, useMedia } from '@/lib/useMedia'
+import { quoteStream } from '@/api/liveQuotes'
+import { useAlerts } from '@/api/watch'
 import { G_KEYS } from './nav'
 import { useUi } from './uiState'
+import { notify } from '@/lib/notify'
 
 /** Invalidate every scan-derived query when /api/status reports a new scan_id; toast scan outcomes. */
 function ScanWatcher() {
@@ -49,6 +52,31 @@ function ScanWatcher() {
   return null
 }
 
+/** A toast (and a sound-free browser notification when allowed) for every price alert that fires while the app is
+ *  open; the Alerts list refreshes too. */
+function AlertWatcher() {
+  const toast = useToast()
+  const qc = useQueryClient()
+  // active alerts' symbols ride the app's price stream on every page, so they are checked even when no page shows
+  // them (the live service checks them on FYERS ticks too, with or without the app open)
+  const alerts = useAlerts()
+  useLiveQuotes(alerts.data?.alerts.filter((a) => a.active && a.symbol !== 'ALL').map((a) => a.symbol) ?? [])
+  useEffect(() => quoteStream.onAlert((a) => {
+    toast({ tone: 'info', title: a.text, detail: 'Price alert fired (Watchlist › Alerts to re-arm it).' })
+    void qc.invalidateQueries({ queryKey: ['alerts'] })
+    void notify('Quant Desk alert', a.text, a.alert.symbol && a.alert.symbol !== 'ALL' ? `/chart/${a.alert.symbol}` : '/watchlist', `alert-${a.alert.id}`)
+  }), [toast, qc])
+  // your FYERS orders: a fill or rejection shows at once, on any page, and the Orders page / cards refresh
+  useEffect(() => quoteStream.onOrder((o) => {
+    const st = o.order.status
+    toast({ tone: st === 'rejected' ? 'bad' : st === 'filled' ? 'good' : 'info', title: `FYERS: ${o.text}`, detail: st === 'filled' ? 'Protect it with a stop-loss and target on the Orders page.' : undefined })
+    void qc.invalidateQueries({ queryKey: ['orders'] })
+    if (st === 'filled') void qc.invalidateQueries({ queryKey: ['coach'] })
+    if (st === 'filled' || st === 'rejected') void notify('Quant Desk order', o.text, '/orders', `order-${o.order.id}-${st}`)
+  }), [toast, qc])
+  return null
+}
+
 /** Dismissed-banner flag for the CURRENT key (keys change once /api/status loads, so derive it on every render). */
 function useDismissed(key: string): [boolean, () => void] {
   const [list, setList] = useState<string[]>(() => readLocal<string[]>('qd.dismissed', []))
@@ -60,6 +88,11 @@ function useDismissed(key: string): [boolean, () => void] {
   return [list.includes(key), dismiss]
 }
 
+/** The build this page was loaded from (its entry script's hashed name); null on the dev server (no build). */
+const MY_BUILD = typeof document !== 'undefined'
+  ? document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/index-"]')?.src.split('/').pop() ?? null
+  : null
+
 function GlobalBanners() {
   const { data: s, error } = useStatus()
   const nav = useNavigate()
@@ -70,12 +103,25 @@ function GlobalBanners() {
   const [legacyDismissed, dismissLegacy] = useDismissed(legacyKey)
   const loginKey = `login:${s?.clock.now.slice(0, 10) ?? ''}`
   const [loginDismissed, dismissLogin] = useDismissed(loginKey)
+  const auto = useAutomation().data
+  const setupJobs = useAutomationSetup()
+  const toast = useToast()
+  const missingJobs = auto?.available ? auto.jobs.filter((j) => !j.registered).map((j) => j.name.replace(/^NSE Scanner /, '')) : []
+  const [jobsDismissed, dismissJobs] = useDismissed(`jobs:${missingJobs.join(',')}:${s?.clock.now.slice(0, 10) ?? ''}`)
   const offline = error && isFailure(error) && error.code === 'OFFLINE'
   const items: React.ReactNode[] = []
   if (offline || (error && !s)) {
     items.push(
       <Banner key="off" tone="danger" icon={<WifiOff className="h-4 w-4 text-loss" />}>
         <span className="font-medium">Can't reach the local server (127.0.0.1:8600).</span> <span className="text-muted">Is 3_dashboard.bat still running? Retrying automatically…</span>
+      </Banner>,
+    )
+  }
+  // A tab left open across an update keeps running the old screens until it reloads: say so, once a new build is served
+  if (MY_BUILD && s?.ui_build && s.ui_build !== MY_BUILD) {
+    items.push(
+      <Banner key="update" tone="info" action={<Button size="sm" variant="primary" onClick={() => window.location.reload()}>Reload</Button>}>
+        <span className="font-medium">Quant Desk was updated.</span> <span className="text-muted">Reload this page to see the new version.</span>
       </Banner>,
     )
   }
@@ -107,6 +153,20 @@ function GlobalBanners() {
       </Banner>,
     )
   }
+  if (missingJobs.length > 0 && !jobsDismissed) {
+    const go = () => setupJobs.mutate(undefined, {
+      onSuccess: (r) => toast(r.ok
+        ? { tone: 'good', title: 'Automatic jobs are set up', detail: 'Scans, option chains, F&O, forecasts and studies now run by themselves.' }
+        : { tone: 'bad', title: 'Some jobs could not be set up', detail: 'Settings › Automatic jobs shows what Windows said.' }),
+      onError: (e) => toast({ tone: 'bad', title: isFailure(e) ? e.message : 'Could not set up the jobs', detail: isFailure(e) ? e.hint ?? undefined : undefined }),
+    })
+    items.push(
+      <Banner key="jobs" tone="warn" onDismiss={dismissJobs} action={<Button size="sm" loading={setupJobs.isPending} onClick={go}>Set up now</Button>}>
+        <span className="font-medium">{missingJobs.length} automatic job{missingJobs.length > 1 ? 's are' : ' is'} not set up</span>{' '}
+        <span className="text-muted">({missingJobs.join(', ')}). One click sets everything up; no command to run.</span>
+      </Banner>,
+    )
+  }
   if (!items.length) return null
   return <div className="space-y-2 px-4 pt-3 md:px-5">{items}</div>
 }
@@ -116,6 +176,9 @@ const HELP: [string, string][] = [
   ['g o / g s / g t', 'Go to Overview / Signals / Strategies'],
   ['g c / g p / g m / g b', 'Go to Chart / Portfolio / Market / Smart money'],
   ['g r / g a / g i / g ,', 'Go to Screener / Paper / Intraday / Settings'],
+  ['g d / g w / g x / g e', 'Go to Today / Watchlist / Scans / Orders'],
+  ['g y / g h / g k / g l / g u / g j', 'Go to Replay / Coach / Benchmarks / Multi-chart / Practice / Strategy builder'],
+  ['g v', 'Go to the market heatmap'],
   ['/', "Focus the current table's filter"],
   ['j / k, Enter', 'Move the table selection; open it'],
   ['[ / ]', 'Previous / next strategy (detail) or symbol (chart)'],
@@ -217,6 +280,7 @@ export function AppShell() {
       <FyersLoginDialog />
       <Shortcuts />
       <ScanWatcher />
+      <AlertWatcher />
       <FirstRunNotice />
     </div>
   )

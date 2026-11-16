@@ -1,0 +1,309 @@
+"""Option chains (scanner/options.py): one chain's analysis, the day's series, status and the refresh job."""
+from __future__ import annotations
+
+from typing import Literal
+
+from .common import ISODate, ISODateTime, Model
+from .outlook import OvCheck, OvExit, OvPlan, OvTrack
+
+OptBuildup = Literal["long_buildup", "short_buildup", "short_covering", "long_unwinding"]
+OptRunState = Literal["idle", "running", "done", "failed"]
+
+
+class OptLeg(Model):
+    ltp: float | None = None
+    chg: float | None = None                      # price change since yesterday's close
+    oi: int | None = None                         # open interest, contracts
+    oi_chg: int | None = None                     # since yesterday
+    oi_chg_pct: float | None = None
+    oi_chg_window: int | None = None              # over the last `window_minutes` of stored chains
+    volume: int | None = None                     # contracts traded today
+    iv_pct: float | None = None                   # implied volatility on the forward (Black-76)
+    iv_nse_pct: float | None = None               # NSE's own figure (on the spot), for reference
+    bid: float | None = None
+    ask: float | None = None
+    buy_qty: int | None = None                    # pending buy / sell quantity at NSE
+    sell_qty: int | None = None
+    delta: float | None = None
+    gamma: float | None = None
+    theta: float | None = None                    # per calendar day
+    vega: float | None = None                     # per volatility point
+    buildup: OptBuildup | None = None
+
+
+class OptRow(Model):
+    strike: float
+    atm: bool
+    ce: OptLeg
+    pe: OptLeg
+
+
+class OptLevel(Model):
+    strike: float
+    oi: int | None = None
+    oi_chg: int | None = None
+
+
+class OptLevels(Model):
+    resistance: list[OptLevel]                    # most call OI at or above the spot
+    support: list[OptLevel]                       # most put OI at or below the spot
+    call_adds: list[OptLevel]                     # largest call OI additions since yesterday
+    put_adds: list[OptLevel]
+
+
+class OptSummary(Model):
+    pcr_oi: float | None = None
+    pcr_volume: float | None = None
+    max_pain: float | None = None
+    max_pain_gap_pct: float | None = None         # max pain vs the spot
+    atm_iv_pct: float | None = None
+    straddle: float | None = None                 # at-the-money call + put
+    expected_move_pct: float | None = None        # straddle / spot
+    one_sd_pts: float | None = None               # forward x ATM IV x sqrt(time)
+    range_low: float | None = None
+    range_high: float | None = None
+    skew_25d: float | None = None                 # 25-delta put IV - call IV, volatility points
+    ce_oi: int | None = None
+    ce_oi_chg: int | None = None
+    ce_volume: int | None = None
+    pe_oi: int | None = None
+    pe_oi_chg: int | None = None
+    pe_volume: int | None = None
+
+
+class OptUnusual(Model):
+    strike: float
+    side: Literal["ce", "pe"]
+    ltp: float | None = None
+    volume: int | None = None
+    oi: int | None = None
+    vol_oi: float | None = None                   # contracts traded today / open contracts
+    oi_chg_window: int | None = None
+    oi_chg_window_pct: float | None = None
+    value_cr: float | None = None                 # premium traded today, Rs crore (needs the lot size)
+    why: list[str]
+
+
+class OptChainResponse(Model):
+    symbol: str
+    expiry: ISODate
+    expiries: list[ISODate]                       # every stored expiry of this symbol (for the picker)
+    time: ISODateTime                             # NSE's own stamp of the chain
+    source: str
+    stale: bool                                   # market open and the chain is over 10 minutes old
+    spot: float | None = None
+    forward: float | None = None
+    atm: float | None = None
+    days_to_expiry: float | None = None
+    summary: OptSummary
+    levels: OptLevels
+    readings: list[str]
+    window_minutes: int
+    window_since: ISODateTime | None = None       # None: no chain that old today yet
+    lot: int | None = None                        # contract size, from NSE's F&O bhavcopy (None until fetched)
+    unusual: list[OptUnusual]
+    rows: list[OptRow]
+    note: str
+
+
+class OptHistoryResponse(Model):
+    symbol: str
+    expiry: ISODate
+    day: ISODate
+    t: list[ISODateTime]
+    spot: list[float | None]
+    max_pain: list[float | None]
+    pcr_oi: list[float | None]
+    atm_iv_pct: list[float | None]
+    straddle: list[float | None]
+    support: list[float | None]
+    resistance: list[float | None]
+
+
+class OptChainRef(Model):
+    symbol: str
+    expiry: ISODate
+    day: ISODate
+    time: ISODateTime
+    spot: float | None = None
+
+
+class OptRefreshRun(Model):
+    state: OptRunState
+    running: bool
+    message: str | None = None
+    started_at: ISODateTime | None = None
+    finished_at: ISODateTime | None = None
+    errors: list[str]
+
+
+class OptLastRefresh(Model):
+    started_at: ISODateTime | None = None
+    chains: int
+    refused: bool
+    errors: list[str]
+
+
+class OptStatus(Model):
+    run: OptRefreshRun
+    live_running: bool                            # the scheduled job (intraday_sync.py --options) is running
+    market_open: bool
+    interval_seconds: int
+    underlyings: list[str]                        # config.yaml options.underlyings
+    chains: list[OptChainRef]
+    last_refresh: OptLastRefresh | None = None
+    note: str
+
+
+class OptClaim(Model):
+    n: int                                        # days the claim could be checked on
+    verdict: str
+
+
+class OptMaxPainClaim(OptClaim):
+    hit_pct: float | None = None                  # % of days the expiry close ended nearer max pain than the spot
+    fair_pct: float
+
+
+class OptExpectedMoveClaim(OptClaim):
+    inside_pct: float | None = None               # % of days the expiry close landed inside spot +- straddle
+    fair_pct: float
+
+
+class OptPcrClaim(OptClaim):
+    corr: float | None = None                     # rank correlation of PCR with the next day's move
+    top_minus_bottom_pct: float | None = None     # next-day move after the highest third of PCR minus the lowest
+
+
+class OptStudy(Model):
+    symbol: str
+    days: int
+    first_day: ISODate | None = None
+    max_pain: OptMaxPainClaim
+    expected_move: OptExpectedMoveClaim
+    pcr: OptPcrClaim
+
+
+class OptResearchResponse(Model):
+    min_days: int
+    studies: list[OptStudy]
+    note: str
+
+
+class OptBigInstrument(Model):
+    ticker: str                                   # FYERS symbol, e.g. NSE:NIFTY26NOVFUT
+    underlying: str
+    kind: Literal["fut", "ce", "pe"]
+    strike: float | None = None
+    expiry: ISODate
+    lot: int
+    prints: int                                   # large trades today
+    buy_cr: float                                 # Rs crore traded at the ask (likely started by a buyer)
+    sell_cr: float                                # ... at the bid (likely started by a seller)
+    unknown_cr: float                             # ... between bid and ask
+    net_cr: float                                 # buy - sell
+    ltp: float | None = None
+    buy_qty: float | None = None                  # pending buy / sell quantity in the book
+    sell_qty: float | None = None
+    volume: float | None = None
+
+
+class OptBigTrade(Model):
+    ts: ISODateTime
+    ticker: str
+    underlying: str
+    kind: Literal["fut", "ce", "pe"]
+    strike: float | None = None
+    expiry: ISODate
+    price: float
+    lots: float
+    value_cr: float                               # notional (futures) or premium (options)
+    side: Literal["BUY", "SELL"] | None = None    # likely initiator (tick rule); None: between bid and ask
+
+
+class OptBigTradesResponse(Model):
+    date: ISODate | None = None
+    updated_at: ISODateTime | None = None
+    live: bool                                    # the live feed wrote within the last 2 minutes
+    instruments: list[OptBigInstrument]
+    recent: list[OptBigTrade]                     # newest first
+    thresholds: dict[str, float]                  # future_print_cr, option_print_lakh
+    note: str
+
+
+class OptIndexPick(Model):
+    side: Literal["ce", "pe"]
+    strike: float | None = None
+    premium: float | None = None
+    breakeven: float | None = None
+
+
+class OptIndexClosest(Model):
+    """The journalled option nearest to passing the verdict's checks."""
+    side: Literal["ce", "pe"]
+    strike: float | None = None
+    moneyness: str | None = None
+    premium: float | None = None
+    fair: float | None = None
+    edge_pct: float | None = None
+    prob_profit_pct: float | None = None
+    breakeven: float | None = None
+    spread_pct: float | None = None
+    oi: int | None = None
+    iv_pct: float | None = None
+    ok: bool = False
+    fails: list[str] = []
+
+
+class OptIndexRow(Model):
+    """One NSE index option expiry: the stored chain's summary and the scan's latest verdict for it."""
+    symbol: str                                   # NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50
+    name: str                                     # NSE's index name, e.g. Nifty Bank
+    expiry: ISODate
+    days_to_expiry: float | None = None
+    spot: float | None = None
+    chain_time: ISODateTime
+    stale: bool
+    atm: float | None = None
+    atm_call: float | None = None                 # last traded price at the ATM strike
+    atm_put: float | None = None
+    atm_iv_pct: float | None = None
+    expected_move_pct: float | None = None        # ATM straddle / spot: the move the market prices to expiry
+    range_low: float | None = None
+    range_high: float | None = None
+    pcr_oi: float | None = None                   # reference only: not shown to predict
+    max_pain: float | None = None                 # reference only: not shown to predict
+    verdict: Literal["BUY_CALL", "BUY_PUT", "NO_TRADE", "NO_DATA"] | None = None   # None = not journalled yet
+    verdict_day: ISODate | None = None
+    headline: str | None = None                   # the verdict in one sentence (with the first failed check)
+    bias: Literal["bullish", "bearish", "none"] | None = None
+    pick: OptIndexPick | None = None
+    plan: OvPlan | None = None                    # BUY: entry / stop / target premium, lot, capital, maximum loss
+    exit: OvExit | None = None                    # BUY: the underlying's stop and target
+    closest: OptIndexClosest | None = None        # NO TRADE: the option nearest to passing, and why it fails
+    checks: list[OvCheck] = []                    # every check of the verdict, passed or not
+    reasons: list[str] = []                       # the direction's tested sources
+    lot: int | None = None
+
+
+class OptIndicesResponse(Model):
+    generated_at: ISODateTime
+    rows: list[OptIndexRow]
+    missing: list[str]                            # configured indices with no stored chain yet
+    track: OvTrack                                # the index verdicts' record so far
+    note: str
+
+
+class OptRefreshRequest(Model):
+    symbols: list[str] | None = None              # default: config.yaml options.underlyings
+
+
+class OptRefreshAccepted(Model):
+    accepted: bool
+    run: OptRefreshRun
+
+
+__all__ = ["OptBuildup", "OptRunState", "OptLeg", "OptRow", "OptLevel", "OptLevels", "OptSummary", "OptUnusual",
+           "OptBigInstrument", "OptBigTrade", "OptBigTradesResponse", "OptClaim", "OptMaxPainClaim", "OptExpectedMoveClaim", "OptPcrClaim", "OptStudy", "OptResearchResponse",
+           "OptChainResponse", "OptHistoryResponse", "OptChainRef", "OptRefreshRun", "OptLastRefresh", "OptStatus",
+           "OptRefreshRequest", "OptRefreshAccepted"]

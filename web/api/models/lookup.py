@@ -5,6 +5,7 @@ from typing import Literal
 
 from .common import AsOf, ISODate, Model, StrategyStatus
 from .holdings import HoldingRow
+from .system import MarketSession
 
 SymbolKind = Literal["stock", "etf", "index"]
 IndicatorId = Literal["sma20", "sma50", "sma200", "ema21", "bb_upper", "bb_mid", "bb_lower",
@@ -107,10 +108,11 @@ class ChartResponse(Model):
     company: str | None = None
     industry: str | None = None
     kind: SymbolKind
-    tf: Literal["1d", "1w"]
+    tf: Literal["1d", "1w", "1mo"]
     range: str
-    adjusted: Literal[True] = True
+    adjusted: bool = True               # False for a symbol fetched on demand (not adjusted with NSE's actions)
     source_date: ISODate
+    fetched: Literal["yahoo"] | None = None   # not in the local daily store: fetched on demand (ondemand_bars.py)
     bars: Bars
     indicators: dict[IndicatorId, list[float | None]]
     markers: list[ChartMarker]
@@ -161,3 +163,35 @@ class StockSnapshot(Model):
     strategies: list[StockStrategyRole]
     your_holding: HoldingRow | None = None
     corporate_actions: list[CorporateAction]
+
+
+# ------------------------------------------------------------------ live quotes
+QuoteSource = Literal["live", "fyers", "yahoo", "close"]
+
+
+class Quote(Model):
+    symbol: str
+    price: float
+    prev_close: float | None = None
+    change_pct: float | None = None               # vs the previous close
+    time: str                                     # last trade time (FYERS), or the trading day (Yahoo / stored close)
+    # live = FYERS WebSocket tick (about a second old); fyers = FYERS REST quote (up to 30 s old);
+    # yahoo = Yahoo, ~15 minutes behind; close = a stored daily close (market not open)
+    source: QuoteSource = "close"
+    delayed: bool = False
+    open: float | None = None                     # today's open / high / low / volume (live and FYERS only)
+    high: float | None = None
+    low: float | None = None
+    volume: float | None = None
+    bid: float | None = None
+    ask: float | None = None
+    tick_at: float | None = None                  # live: epoch seconds the live service received the tick (latency)
+
+
+class QuotesResponse(Model):
+    as_of: str
+    session: MarketSession
+    source: QuoteSource                           # the best source in this answer (per quote: Quote.source)
+    delayed: bool                                 # yahoo: ~15 minutes behind
+    note: str
+    quotes: list[Quote]                           # symbols with no price at all are left out

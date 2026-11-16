@@ -140,7 +140,10 @@ def data_health() -> dict:
     ih = data.index_history()
     _, cached_on = data.results_events()
     log_size = P.scan_log.stat().st_size / 1024 if P.scan_log.exists() else 0.0
-    errs = [x for x in _log_tail(3000) if " ERROR " in x]
+    tail = _log_tail(3000)
+    # an error before the newest finished scan ("Done in ...") was dealt with by that scan: not shown as current
+    done = max((i for i, x in enumerate(tail) if " INFO Done in " in x), default=-1)
+    errs = [x for x in tail[done + 1:] if " ERROR " in x]
     scans = alerts.scan_files()
     producers = {bool(h.get("has_producer")) for h in scans}
     ji = data.journal_info()

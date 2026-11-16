@@ -301,6 +301,20 @@ def test_refresh_applies_a_notice_listed_only_the_day_after(monkeypatch, tmp_pat
     assert store.PanelStore().meta["corporate_actions"][-1]["reason"] == "DEMERGER"
 
 
+def test_refresh_forgets_failures_of_symbols_no_longer_asked_for(monkeypatch, tmp_path):
+    """An NSE 'DUMMY...' demerger placeholder of an older list (or a stock that left the index) is never tried again,
+    so its failure must not stay in Data health as a 'failed download' forever. A wanted symbol's failure stays."""
+    ex = date(2025, 6, 12)
+    _x_world(monkeypatch, tmp_path, ex, 1.0, {})
+    refresh_env(monkeypatch, tmp_path, ex)
+    store.refresh_store(["X"], 60, log=lambda *_: None)
+    st = store.PanelStore()
+    st.meta["failed"] = {"DUMMYHEG": {"count": 2, "last_try": "2025-06-01"}, "X": {"count": 1, "last_try": "2025-06-01"}}
+    st.save_meta()
+    store.refresh_store(["X"], 60, log=lambda *_: None)
+    assert "DUMMYHEG" not in store.PanelStore().meta["failed"]
+
+
 def test_refresh_adjusts_a_split_nse_never_listed(monkeypatch, tmp_path):
     # SHRIRAMFIN / 360ONE style: a 1:5 split without a notice on the ex-date, added from NSE's raw file. The
     # clean ratio is applied at once; the notice that turns up the next day then finds nothing left to do.
@@ -476,8 +490,7 @@ def test_daily_result_keeps_refresh_info_when_a_strategy_has_actions(monkeypatch
     monkeypatch.setattr(daily, "_save", lambda result, *a, **k: saved.update(result))
     cfg = {"backtest_universe": "current", "filters": {"min_price": 0, "min_turnover_cr": 0},
            "strategies": {"momentum": {"enabled": True}, "near_high": {"enabled": False},
-                          "trend_breakout": {"enabled": False}, "rsi2_pullback": {"enabled": False},
-                          "low_vol": {"enabled": False}, "legacy_rules": {"enabled": False}}}
+                          "trend_breakout": {"enabled": False}}}
     out = daily._run_daily(cfg, True, None, lambda *_: None)
     assert out["strategies"][0]["actions"][0]["results_on"] == "2099-01-01"
     assert saved["live_source"] == "Fyers (real-time)" and saved["nse_status"] == "NSE official data to today"

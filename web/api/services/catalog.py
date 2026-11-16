@@ -19,16 +19,6 @@ CATALOG: dict[str, dict] = {
                   "High turnover pushes gains into short-term capital gains tax (20.8%).",
                   "Crowding as momentum fund assets grow."],
     },
-    "low_vol": {
-        "id": "L2", "summary": "Low volatility (NSE Nifty100 Low Volatility 30 method). Strong evidence for smaller "
-        "losses; the extra return is moderate and not significant after controlling for beta in India.",
-        "expect": "Lags in strong bull runs; falls less in crashes (Mar 2020: about -31% vs -38% for Nifty 50).",
-        "sources": [S("Ang, Hodrick, Xing & Zhang (2006)"), S("Frazzini & Pedersen (2014)"),
-                    S("Joshipura et al. (IMFI 2020)", "https://www.businessperspectives.org/images/pdf/applications/publishing/templates/article/assets/13547/IMFI_2020_02_Joshipura.pdf"),
-                    S("NSE methodology", "https://archives.nseindia.com/content/indices/Method_Nifty100_Low_Volatility_30.pdf")],
-        "fails": ["Lags in strong bull runs.", "Tilts toward FMCG, pharma and IT.",
-                  "Exposed to interest-rate moves and valuation crowding."],
-    },
     "index_trend": {
         "id": "L3", "summary": "Index trend timing (Faber / 200-day average) on a Nifty ETF. The reliable benefit is a "
         "smaller drawdown, not a higher return.",
@@ -54,13 +44,6 @@ CATALOG: dict[str, dict] = {
         "sources": [S("Moskowitz & Grinblatt (1999)", "https://ideas.repec.org/a/bla/jfinan/v54y1999i4p1249-1290.html"),
                     S("Disputed: Grundy & Martin (2001)")],
         "fails": ["Industries with few, concentrated members.", "Reversals when leadership flips."],
-    },
-    "golden_cross": {
-        "id": "S11", "summary": "Golden cross on single stocks. Weak evidence: moving-average rules did not survive "
-        "out-of-sample tests (Sullivan, Timmermann & White).",
-        "expect": "Slow; many small losses and a few big winners.",
-        "sources": [S("Brock, Lakonishok & LeBaron (1992)"), S("Sullivan, Timmermann & White (1999)")],
-        "fails": ["Lags badly at turning points.", "Whipsaws in sideways markets."],
     },
     "trend_breakout": {
         "id": "S1", "summary": "Minervini SEPA trend template + breakout. Practitioner evidence only (self-reported "
@@ -108,31 +91,12 @@ CATALOG: dict[str, dict] = {
         "sources": [S("Bollinger (2001), Bollinger on Bollinger Bands")],
         "fails": ["No directional edge.", "False breakouts in ranges."],
     },
-    "nr7_breakout": {
-        "id": "S9", "summary": "NR7 narrow-range breakout (Crabel 1990). Folklore evidence.",
-        "expect": "Many short trades; costs matter a lot.",
-        "sources": [S("Crabel (1990)"), S("Connors & Raschke (1995)")],
-        "fails": ["Short holding periods make costs dominate.", "No published out-of-sample evidence."],
-    },
-    "rsi2_pullback": {
-        "id": "S10", "summary": "Connors RSI(2) pullback. Largely in-sample evidence from US large caps.",
-        "expect": "Average gain per trade is smaller than Indian delivery costs.",
-        "sources": [S("Connors & Alvarez (2009)"),
-                    S("Community test (mostly unprofitable)", "https://prorealcode.com/prorealtime-trading-strategies/rsi-2p-larry-connors")],
-        "fails": ["STT of 0.1% on each side exceeds the average edge."],
-    },
     "near_high": {
         "id": "S4", "summary": "Nearness to the 52-week high (George & Hwang 2004): a documented effect, but our rank "
         "version never beat the average stock.",
         "expect": "Overlaps momentum; no extra edge in our tests.",
         "sources": [S("George & Hwang (2004)")],
         "fails": ["Contrary results for emerging-market indices."],
-    },
-    "legacy_rules": {
-        "id": None, "summary": "The v1 textbook rules (50-DMA volume breakout, 52-week-high breakout). Kept only as a "
-        "'what not to do' baseline.",
-        "expect": "Loses money after costs.",
-        "sources": [], "fails": ["Fixed small target/stop ratio with costs on every trade."],
     },
     # added 25 Oct 2026 (docs/strategy_catalogue.md L1-R, L11-L13): judged only by their own backtests
     "momentum_n200": {
@@ -179,51 +143,39 @@ CATALOG: dict[str, dict] = {
 
 # Catalogue entries tested and rejected (fallback rows when the scan has no B4 metrics yet).
 REJECTED_CATALOGUE = [
-    {"key": "rsi2_pullback", "name": "RSI-2 pullback (Connors)", "horizon": "swing", "evidence": "WEAK",
-     "result_text": "Lost money after realistic Indian delivery costs."},
-    {"key": "legacy_rules", "name": "Old textbook rules (baseline)", "horizon": "swing", "evidence": "EXPERIMENTAL",
-     "result_text": "Lost money after costs in testing."},
     {"key": "near_high", "name": "Near 52-week high", "horizon": "longterm", "evidence": "MODERATE",
      "result_text": "Never beat the average stock in our tests."},
 ]
 
 _ENTRY = {
     "momentum": "Rank stocks by an NSE-style momentum score (6- and 12-month return divided by volatility, z-scored){uptrend}.",
-    "low_vol": "Rank the {universe_size} most traded stocks by 1-year volatility, lowest first.",
     "sector_rotation": "Find the {top_industries} strongest industries (average 6-month return of their stocks); rank their stocks above the 200-day average by relative strength.",
     "index_trend": "Hold the {etf} ETF while Nifty 50 is above its 200-day average; otherwise hold cash (earning the Nifty 1D rate).",
     "dual_momentum": "Rank the ETFs {etfs} by 12-month return; only ETFs with a positive 12-month return qualify, otherwise cash.",
-    "golden_cross": "Buy when the 50-day average crosses above the 200-day average in a stock with relative strength {rs_min}+.",
     "trend_breakout": "Buy a stock in a strong uptrend (above rising 50/150/200-day averages, near its high, relative strength {rs_min}+) closing above its 20-day high on {min_vol_ratio}x volume.",
     "vcp_breakout": "Buy a leader near its 52-week high breaking out of a tight 15-day box (under {max_box_pct}% high-to-low) on {min_vol_ratio}x volume.",
     "donchian": "Buy a close above the previous 55-day high in a stock above its 200-day average.",
     "pullback_leaders": "Buy a relative-strength leader (RS {rs_min}+) in a stage-2 uptrend when the day's low touches the 21-day EMA and the close stays above it.",
     "earnings_gap": "Within 2 days of quarterly results, buy a stock that gaps up {min_gap_pct}%+ on {min_vol_ratio}x volume and holds the gap, above its 200-day average.",
     "bb_squeeze": "Buy the first close above the upper Bollinger Band after the bands were at their narrowest in 6 months, in an uptrend.",
-    "nr7_breakout": "After the narrowest-range day in 7 sessions, buy a close above that day's high in an uptrending leader (RS 70+).",
-    "rsi2_pullback": "Buy when RSI(2) falls below {rsi2_below} in a stock above its 200-day average.",
     "near_high": "Rank uptrending stocks by distance to their 52-week high, closest first.",
-    "legacy_rules": "Buy a 50-day-average volume breakout or a 52-week-high breakout.",
     "momentum_n200": "Rank the {universe_size} most traded stocks with a year of history by the NSE momentum score (6- and 12-month return divided by volatility, z-scored); no trend or market filter.",
     "residual_momentum": "Rank stocks by residual momentum: their alpha against Nifty 50 over months 12-1 divided by its residual volatility{uptrend}.",
     "alpha_low_vol": "Rank the {universe_size} most traded stocks by the average of the percentile ranks of 1-year alpha against Nifty 50 (high first) and 1-year volatility (low first).",
     "etf_trend": "Hold an equal slice of each of the ETFs {etfs} while it is above its 200-day average; a slice whose ETF is below it waits in cash (earning the Nifty 1D rate).",
 }
 _EXIT_SIGNAL = {
-    "golden_cross": "Exit when the 50-day average falls back below the 200-day average (death cross).",
     "trend_breakout": "Exit on a close below the 50-day average.",
     "vcp_breakout": "Exit on a close below the 50-day average.",
     "donchian": "Exit on a close below the previous 20-day low.",
     "pullback_leaders": "Exit on a close below the 50-day average.",
     "earnings_gap": "Exit on a close below the 50-day average.",
     "bb_squeeze": "Exit on a close below the 20-day average.",
-    "nr7_breakout": "Exit on a close below the 10-day average.",
-    "rsi2_pullback": "Exit when the close rises above the 5-day average.",
 }
 _DEFAULTS = {"uptrend": True, "universe_size": 150, "top_industries": 3, "etf": "NIFTYBEES",
              "etfs": "NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES, MON100", "rs_min": None, "min_vol_ratio": None,
              "max_box_pct": 12, "min_gap_pct": 4, "rsi2_below": 10}
-_RS_DEFAULT = {"golden_cross": 60, "trend_breakout": 90, "vcp_breakout": 80, "pullback_leaders": 80}
+_RS_DEFAULT = {"trend_breakout": 90, "vcp_breakout": 80, "pullback_leaders": 80}
 _VOL_DEFAULT = {"trend_breakout": 2.0, "vcp_breakout": 1.5, "earnings_gap": 3}
 _SIZE_DEFAULT = {"momentum_n200": 200}                                   # code defaults that differ from _DEFAULTS
 _ETFS_DEFAULT = {"etf_trend": "NIFTYBEES, JUNIORBEES, GOLDBEES, MON100"}

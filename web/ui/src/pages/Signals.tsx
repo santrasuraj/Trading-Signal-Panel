@@ -1,19 +1,28 @@
 // Signals `/signals` (spec 3.4): orders for the next open by horizon, sized to capital/allocations, stops, risk,
-// results warnings; allocation bar with a session-only what-if; comparison-only groups collapsed.
+// results warnings; allocation bar with a session-only what-if; comparison-only groups collapsed. The Intraday tab
+// shows today's live signals: with show_untested (config.yaml) from every intraday strategy and the live F&O OI
+// build-ups, each labelled with its backtest result (Proven / Not proven / Lost in test / Untested), with an AI trade
+// plan per symbol; otherwise only from strategies whose backtest shows a real edge after costs. BUY signals
+// carry a strength score (strongest first in their own card); the track record of past signals is /signals/track.
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ChevronDown, Info, SlidersHorizontal, Undo2 } from 'lucide-react'
-import { useSignals } from '@/api/hooks'
+import { ChevronDown, History, Info, ShieldCheck, SlidersHorizontal, Sparkles, Undo2 } from 'lucide-react'
+import { useIntradaySignals, useLiveQuotes, useSignals } from '@/api/hooks'
 import { isFailure } from '@/api/client'
-import type { Horizon, SignalGroup, SignalsResponse } from '@/api/types'
-import { EvidenceChip, EtfChip, HorizonChip, StatusBadge, WarnChip } from '@/components/badges'
+import type { Horizon, IntradaySignal, Quote, SignalGroup, SignalsResponse } from '@/api/types'
+import { AiPlan } from '@/components/AiPlan'
+import { isBuy, useIndexOptions } from '@/api/indexOptions'
+import { OptionSignals } from '@/components/OptionSignals'
+import { useOptionSignals } from '@/api/optionSignals'
+import { DataTable, type Col } from '@/components/DataTable'
+import { EvidenceChip, EtfChip, HorizonChip, ProofBadge, StatusBadge, WarnChip } from '@/components/badges'
 import { BiasNote, OrdersTable, PageHeader, flatteredNote } from '@/components/domain'
-import { Banner, ErrorState, RefreshFailed, Skeleton, SkeletonRows } from '@/components/feedback'
-import { Money } from '@/components/num'
-import { Button, Card, Popover, Tabs } from '@/components/ui'
+import { Banner, EmptyState, ErrorState, RefreshFailed, Skeleton, SkeletonRows } from '@/components/feedback'
+import { Money, Pct, Price } from '@/components/num'
+import { Button, Card, Popover, Segmented, Tabs } from '@/components/ui'
 import { cn } from '@/lib/csv'
-import { date, keepDatesTogether, money, num, pct, qty } from '@/lib/format'
+import { date, dateTimeIST, keepDatesTogether, money, num, pct, qty } from '@/lib/format'
 import { allocationTotal, formatAllocations, parseAllocations } from '@/lib/sizing'
 import { HORIZON, lostMoney } from '@/lib/vocab'
 
@@ -95,7 +104,7 @@ function WhatIf({ groups, base, value, onChange }: { groups: SignalGroup[]; base
   )
 }
 
-function Group({ g, cmp }: { g: SignalGroup; cmp?: boolean }) {
+function Group({ g, cmp, live }: { g: SignalGroup; cmp?: boolean; live?: Record<string, Quote> }) {
   const s = g.strategy
   return (
     <Card
@@ -120,14 +129,126 @@ function Group({ g, cmp }: { g: SignalGroup; cmp?: boolean }) {
         </span>
       }
     >
-      {g.orders.length ? <OrdersTable id={`sig.${s.key}`} orders={g.orders} /> : <div className="px-4 py-3 text-[13px] text-muted">No orders. {g.empty_reason ? keepDatesTogether(g.empty_reason) : null}</div>}
+      {g.orders.length ? <OrdersTable id={`sig.${s.key}`} orders={g.orders} live={live} /> : <div className="px-4 py-3 text-[13px] text-muted">No orders. {g.empty_reason ? keepDatesTogether(g.empty_reason) : null}</div>}
     </Card>
+  )
+}
+
+/** Strategies with no order for the next open, one row each, instead of a full card per strategy saying "No orders"
+ *  (ten such cards pushed the orders that exist off the screen). */
+function QuietStrategies({ groups }: { groups: SignalGroup[] }) {
+  return (
+    <Card title="No orders today" subtitle={`${groups.length} strateg${groups.length > 1 ? 'ies keep' : 'y keeps'} its holdings until the next review`} flush>
+      <ul className="divide-y divide-line/70">
+        {groups.map((g) => {
+          const s = g.strategy
+          return (
+            <li key={s.key} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-[13px]">
+              <span className="flex min-w-0 flex-1 basis-[260px] flex-wrap items-center gap-2">
+                <Link to={`/strategies/${s.key}`} className="font-medium hover:underline">{s.name}</Link>
+                <StatusBadge status={s.status} lost={lostMoney(s.headline)} />
+                <HorizonChip horizon={s.horizon} />
+              </span>
+              <span className="num text-xs text-muted">
+                holding {s.positions}{s.next_rebalance && <> · next review <span className="whitespace-nowrap">{date(s.next_rebalance, { year: false })}</span></>}
+              </span>
+              {/* "No changes until the next review on …" only repeats the date beside the name */}
+              {g.empty_reason && !/^No changes until the next review/i.test(g.empty_reason) && (
+                <span className="basis-full text-xs text-faint">{keepDatesTogether(g.empty_reason)}</span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </Card>
+  )
+}
+
+function intraCols(onPlan: (symbol: string) => void): Col<IntradaySignal>[] {
+  return [
+    { id: 'sym', header: 'Symbol', value: (r) => r.symbol, cell: (r) => <Link to={`/chart/${r.symbol}`} className="font-semibold hover:underline">{r.symbol}</Link>, sticky: true, mobile: 'primary' },
+    { id: 'st', header: 'Strategy', value: (r) => r.strategy_name, cell: (r) => (
+      <span className="block max-w-[220px]" title={r.detail ?? undefined}>
+        <span className="block truncate">{r.strategy_name}</span>
+        {r.strategy_key === 'oi_buildup' && r.detail && <span className="block truncate text-2xs text-muted">{r.detail}</span>}
+      </span>
+    ) },
+    { id: 'proof', header: 'Backtest', title: 'The strategy\'s result in the current intraday backtest', value: (r) => r.strategy_status, cell: (r) => <ProofBadge status={r.strategy_status} />, mobile: 'secondary', label: 'Backtest' },
+    { id: 'side', header: 'Side', value: (r) => r.side, cell: (r) => <span className={cn('text-2xs font-bold tracking-[0.04em]', r.side === 'LONG' ? 'text-profit' : 'text-loss')}>{r.side}</span> },
+    { id: 'state', header: 'State', value: (r) => r.state, cell: (r) => <span className={cn('text-xs', r.state === 'open' ? 'font-semibold text-fg' : 'text-muted')}>{r.state === 'open' ? 'Open' : `Closed ${r.exit_time ?? ''} (${r.reason})`}</span>, label: 'State' },
+    { id: 'in', header: 'In', value: (r) => r.entry_time, cell: (r) => <span className="num text-muted">{r.entry_time}</span> },
+    { id: 'entry', header: 'Entry ₹', align: 'right', value: (r) => r.entry, cell: (r) => <Price v={r.entry} /> },
+    { id: 'stop', header: 'Stop ₹', align: 'right', value: (r) => r.stop, cell: (r) => <Price v={r.stop} /> },
+    { id: 'target', header: 'Target ₹', title: 'Twice the risk, where the strategy sets one', align: 'right', value: (r) => r.target, cell: (r) => <Price v={r.target} /> },
+    { id: 'qty', header: 'Qty', align: 'right', value: (r) => r.qty, cell: (r) => <span className="num">{r.qty}</span> },
+    { id: 'last', header: 'Last ₹', title: 'Exit price, or the latest bar while open', align: 'right', value: (r) => r.last, cell: (r) => <Price v={r.last} /> },
+    { id: 'pnl', header: 'P&L ₹', title: 'After intraday charges and slippage (open: if closed at the last price)', align: 'right', value: (r) => r.pnl, cell: (r) => <Money v={r.pnl} signed color />, mobile: 'value' },
+    { id: 'ret', header: 'Return', align: 'right', value: (r) => r.ret_pct, cell: (r) => <Pct v={r.ret_pct} dp={2} />, mobile: 'change' },
+    { id: 'ai', header: '', value: () => null, cell: (r) => (
+      <Button size="sm" variant="ghost" icon={<Sparkles className="h-3.5 w-3.5 text-violet" />} onClick={() => onPlan(r.symbol)} title={`Claude reads ${r.symbol}'s chart and writes an IF-THEN plan`}>AI plan</Button>
+    ) },
+  ]
+}
+
+/** Today's live intraday signals (MIS, squared off the same day). With show_untested (config.yaml) every strategy gives
+ * signals, each labelled with its backtest result; otherwise only strategies whose backtest passed. */
+function IntradaySignals() {
+  const q = useIntradaySignals()
+  const d = q.data
+  const [provenOnly, setProvenOnly] = useState(false)
+  const [planFor, setPlanFor] = useState<string | null>(null)
+  const cols = useMemo(() => intraCols(setPlanFor), [])
+  if (q.error && !d) return <div className="card"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
+  if (!d) return <div className="card"><SkeletonRows rows={3} /></div>
+  const bars = d.source ? `${d.source}${d.delayed ? ', ~15 min delayed' : ''}` : null
+  const rows = provenOnly ? d.signals.filter((s) => s.proven) : d.signals
+  const unproven = d.signals.filter((s) => !s.proven).length
+  return (
+    <div className="space-y-3">
+      <Card
+        title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted" />{d.market_closed ? 'Intraday signals, last session' : 'Intraday signals today'}</span>}
+        subtitle={<>{d.show_untested ? 'Every intraday strategy, each labelled with its backtest result' : 'Only strategies whose backtest shows a real edge after costs'}: <span className="num">{d.proven.length} of {d.tested}</span> proven{d.proven.length > 0 && <> ({d.proven.map((p) => p.name).join(', ')})</>}{bars && <> · bars {bars}</>}{d.generated_at && <> · updated <span className="num">{dateTimeIST(d.generated_at)}</span></>}</>}
+        right={d.show_untested && d.signals.length > 0 ? (
+          <Segmented<'all' | 'proven'> size="xs" ariaLabel="Which signals" value={provenOnly ? 'proven' : 'all'} onChange={(v) => setProvenOnly(v === 'proven')}
+            items={[{ id: 'all', label: `All (${d.signals.length})` }, { id: 'proven', label: `Proven only (${d.signals.length - unproven})` }]} />
+        ) : undefined}
+        flush
+      >
+        {d.market_closed && d.session && (
+          <div className="border-b border-line px-4 py-2">
+            <Banner tone="info" icon={<Info className="h-4 w-4 text-info" />}>
+              <span className="font-medium">Market closed: these are the signals of {date(d.session)}</span>{' '}
+              <span className="text-muted">for review. New ones start after 09:20 on the next trading day.</span>
+            </Banner>
+          </div>
+        )}
+        {d.show_untested && unproven > 0 && !provenOnly && (
+          <div className="border-b border-line px-4 py-2">
+            <Banner tone="warn">
+              <span className="font-medium">{unproven} of {d.signals.length} signals come from strategies the backtest has not proven</span>{' '}
+              <span className="text-muted">(Not proven, Lost in test, Untested). Treat them as ideas to check on the chart, not proven trades. Most individual intraday traders in India lose money (SEBI).</span>
+            </Banner>
+          </div>
+        )}
+        {rows.length === 0 ? (
+          <EmptyState compact title={provenOnly && d.signals.length ? 'No signals from proven strategies today.' : d.note}>
+            <Link to="/intraday" className="link">See each intraday strategy's backtest</Link>
+          </EmptyState>
+        ) : (
+          <>
+            <DataTable id="signals.intraday" data={rows} columns={cols} rowKey={(r) => `${r.strategy_key}${r.symbol}${r.entry_time}`} exportName="intraday-signals" />
+            <p className="border-t border-line px-4 py-2 text-2xs text-faint">{d.note} Intraday positions are squared off the same day (15:00 for F&O stocks). You decide and place every trade yourself.</p>
+          </>
+        )}
+      </Card>
+      {planFor && <AiPlan symbol={planFor} onClose={() => setPlanFor(null)} />}
+    </div>
   )
 }
 
 export default function Signals() {
   const [sp, setSp] = useSearchParams()
-  const horizon = (sp.get('horizon') as Horizon | null) ?? 'all'
+  const horizon = (sp.get('horizon') as Horizon | 'options' | null) ?? 'all'
   const allocParam = sp.get('allocations') ?? ''
   const [draft, setDraft] = useState<Record<string, number>>(() => parseAllocations(allocParam))
   useEffect(() => {
@@ -139,12 +260,22 @@ export default function Signals() {
   }, [draft, allocParam, setSp])
 
   const q = useSignals({ allocations: allocParam || undefined })
+  const intra = useIntradaySignals().data
+  const intraday = horizon === 'intraday'
+  const optionsTab = horizon === 'options'
+  const special = intraday || optionsTab           // tabs with their own card instead of the strategies' orders
+  const idx = useIndexOptions().data
+  const optSig = useOptionSignals().data
   // a stale or mistyped ?allocations= (e.g. a strategy key that no longer exists) must not lock the page
   const resetWhatIf = () => { setDraft({}); setSp((p) => { const n = new URLSearchParams(p); n.delete('allocations'); return n }, { replace: true }) }
   const d = q.data
   const groups = useMemo(() => (d ? d.groups.filter((g) => horizon === 'all' || g.strategy.horizon === horizon) : []), [d, horizon])
   const main = groups.filter((g) => !g.strategy.comparison_only)
   const cmp = groups.filter((g) => g.strategy.comparison_only)
+  const lq = useLiveQuotes(main.flatMap((g) => g.orders.map((o) => o.symbol)))
+  const live = lq.live ? lq.quotes : undefined
+  const ranked = main.flatMap((g) => g.orders).filter((o) => o.action === 'BUY' && o.strength)
+    .sort((a, b) => (b.strength?.score ?? 0) - (a.strength?.score ?? 0))
   const [showCmp, setShowCmp] = useState(false)
   const count = (h: Horizon) => (d ? d.groups.filter((g) => g.strategy.horizon === h && !g.strategy.comparison_only).reduce((n, g) => n + g.orders.length, 0) : 0)
   const totals = useMemo(() => {
@@ -171,6 +302,7 @@ export default function Signals() {
     <div>
       <PageHeader
         title="Signals"
+        right={<Link to="/signals/track" className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-line px-3 text-[13px] font-medium hover:bg-raised"><History className="h-4 w-4" />Track record</Link>}
         subtitle={d ? <>Orders for the next market open · sized for {money(d.capital)} · based on prices of <span className="whitespace-nowrap">{date(d.as_of.data_date, { year: false })}</span> ({d.as_of.stale ? <span className="text-warn">stale</span> : d.as_of.live ? <span className="text-warn">live candle, provisional</span> : 'official close'})</> : <Skeleton className="h-3 w-72" />}
       />
       {q.error && !d && allocParam && isFailure(q.error) && q.error.code === 'VALIDATION' ? (
@@ -191,28 +323,46 @@ export default function Signals() {
             <Banner tone="info" icon={<Info className="h-4 w-4 text-info" />}>{d.regime.note}</Banner>
           )}
           <div className="border-b border-line">
-            <Tabs<'all' | Horizon>
+            <Tabs<'all' | Horizon | 'options'>
               value={horizon}
               onChange={(h) => setSp((p) => { const n = new URLSearchParams(p); if (h === 'all') n.delete('horizon'); else n.set('horizon', h); return n })}
               items={[
                 { id: 'all', label: 'All', count: count('longterm') + count('swing') },
                 { id: 'longterm', label: HORIZON.longterm.label, count: count('longterm') },
                 { id: 'swing', label: HORIZON.swing.label, count: count('swing') },
-                { id: 'intraday', label: <span title="Intraday strategies are research only: no orders (see Intraday)">Intraday · research only</span>, disabled: true },
+                { id: 'intraday', label: <span title={intra?.show_untested ? 'Same-day signals from every intraday strategy and live F&O build-ups, each labelled with its backtest result' : 'Same-day signals, only from intraday strategies whose backtest shows a real edge after costs'}>Intraday</span>, count: intra?.signals.length ?? 0 },
+                { id: 'options', label: <span title="Intraday and stock signals as option trades, volatility (IV rank) trades and the daily index verdicts">Options</span>, count: (optSig?.signals.filter((r) => r.state === 'open').length ?? 0) + (idx?.rows.filter((r) => isBuy(r.verdict)).length ?? 0) },
               ]}
             />
           </div>
-          {main.length === 0 && <div className="card px-4 py-6 text-center text-[13px] text-muted">No active strategies in this horizon.</div>}
-          {main.map((g) => <Group key={g.strategy.key} g={g} />)}
+          {intraday && <IntradaySignals />}
+          {optionsTab && <OptionSignals />}
+          {/* the cross-strategy ranking only says something new when the buys come from two or more strategies;
+              with one, it repeated that strategy's own table */}
+          {!special &&ranked.length > 1 && new Set(ranked.map((o) => o.strategy_key)).size > 1 && (
+            <Card title="Strongest buy signals" subtitle="Every buy signal today, strongest first. Hover a score for its parts: evidence, backtest, agreement between strategies, live record, results day." flush>
+              <OrdersTable id="signals.ranked" orders={ranked} showStrategy live={live} />
+            </Card>
+          )}
+          {!special &&main.length === 0 && <div className="card px-4 py-6 text-center text-[13px] text-muted">No active strategies in this horizon.</div>}
+          {!special &&lq.data && main.some((g) => g.orders.length) && (
+            <p className="px-1 text-2xs text-muted">
+              <span className={cn('mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle', lq.data.delayed ? 'bg-warn' : 'bg-profit')} />
+              {lq.data.note} Updated <span className="num">{dateTimeIST(lq.data.as_of)}</span>.
+              {d.as_of.live ? ' Signals are from the latest live scan (provisional until the close).' : ' Signals are from the last close; the live scan in market hours re-checks them every 30 minutes.'}
+            </p>
+          )}
+          {main.filter((g) => g.orders.length > 0).map((g) => <Group key={g.strategy.key} g={g} live={live} />)}
+          {!special &&main.some((g) => g.orders.length === 0) && <QuietStrategies groups={main.filter((g) => g.orders.length === 0)} />}
 
-          <div className="card num flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-[13px]">
+          {!special &&<div className="card num flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-[13px]">
             <span className="eyebrow">Totals</span>
             <span><span className="text-muted">Buys </span>{totals.buy} · <Money v={totals.buyAmt} /></span>
             <span><span className="text-muted">Sells </span>{totals.sell}{totals.sell > 0 && <> · {totals.sellUnknown ? <span className="text-faint" title="Some sells cannot be sized (you don't hold them and the model weight is unknown)">≥ <Money v={totals.sellAmt} /></span> : <Money v={totals.sellAmt} />}</>}</span>
             <span><span className="text-muted">Risk at stops </span><Money v={totals.risk} />{totals.noStop > 0 && <span className="text-faint" title="BUY orders without a stop are not in this total"> (+{totals.noStop} with no stop)</span>}</span>
             <span className={cn(totals.warn > 0 && 'text-warn')}><span className="text-muted">Results warnings </span>{qty(totals.warn)}</span>
             {d.sized_like_scan && <span className="ml-auto text-2xs text-faint">Same sizes as the scan (and Telegram)</span>}
-          </div>
+          </div>}
 
           {cmp.length > 0 && (
             <div>

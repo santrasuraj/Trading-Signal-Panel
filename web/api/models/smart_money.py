@@ -15,8 +15,8 @@ __all__ = ["SmCategory", "SmCategoryFilter", "SmDealKind", "SmDealSide", "SmMode
            "SmInsiderResponse", "SmEvent", "SmStock", "SmHoldingsResponse", "SmFlowDay", "SmFlowsResponse", "SmKpis",
            "SmOverview", "SmHoldingPeriod", "SmHolder", "SmStockResponse", "SmRefreshRequest", "SmRefreshAccepted"]
 
-SmCategory = Literal["fii", "mf", "insurance", "bank", "pension", "promoter", "famous", "broker", "other"]
-SmCategoryFilter = Literal["all", "big", "institutions", "fii", "mf", "insurance", "bank", "pension", "promoter",
+SmCategory = Literal["fii", "mf", "insurance", "bank", "pension", "aif", "promoter", "famous", "broker", "other"]
+SmCategoryFilter = Literal["all", "big", "institutions", "fii", "mf", "insurance", "bank", "pension", "aif", "promoter",
                            "famous", "broker", "other"]
 SmDealKind = Literal["bulk", "block", "both"]
 SmDealSide = Literal["BUY", "SELL", "FLAT"]
@@ -360,3 +360,83 @@ class SmRefreshRequest(Model):
 class SmRefreshAccepted(Model):
     accepted: bool
     run: SmRefreshRun
+
+
+# ------------------------------------------------------------------ Big money live (scanner/footprints.py)
+class SmLivePrints(Model):
+    count: int
+    value_cr: float
+    buy_cr: float                                 # traded at or above the ask (buyer-initiated)
+    sell_cr: float                                # at or below the bid (seller-initiated)
+
+
+class SmLiveBlock(Model):
+    client: str | None = None
+    side: str | None = None
+    value_cr: float
+
+
+class SmLiveDisclosures(Model):
+    direction: Literal["up", "down", "mixed"]     # what the last 30 days of disclosures say about the stock
+    reasons: list[str]
+    deal_net_value: float
+    insider_buy_value: float
+    insider_sell_value: float
+    promoter_buying: bool
+    promoter_selling: bool
+
+
+class SmLiveRow(Model):
+    symbol: str
+    company: str | None = None
+    last: float
+    change_pct: float | None = None
+    vwap: float | None = None
+    rvol: float | None = None                     # today's volume so far / normal for this time of day
+    value_cr: float
+    direction: Literal["up", "down", "mixed"]     # price vs the previous close and VWAP
+    kinds: list[Literal["volume", "prints", "block"]]
+    reasons: list[str]
+    prints: SmLivePrints
+    book_ratio: float | None = None               # pending buy / sell quantity (FYERS feed)
+    blocks: list[SmLiveBlock]
+    disclosures: SmLiveDisclosures | None = None
+    agree: bool                                   # the live move and the disclosures point the same way
+
+
+class SmLiveStats(Model):
+    alerts: int
+    hit_rate: float | None = None                 # % that kept moving the alert's way by the next close
+    avg_move_pct: float | None = None
+
+
+class SmLiveAlert(Model):
+    date: str
+    time: str
+    symbol: str
+    price: float
+    direction: Literal["up", "down", "mixed"]
+    kinds: list[str]
+    next_date: str | None = None
+    move_pct: float | None = None                 # next close vs the alert price, in the alert's direction
+
+
+class SmLiveTrack(Model):
+    min_to_judge: int
+    all: SmLiveStats
+    with_agreement: SmLiveStats
+    verdict: str
+    recent: list[SmLiveAlert]
+
+
+class SmLiveResponse(Model):
+    generated_at: str | None = None
+    market_open: bool
+    fresh: bool
+    source: str | None = None
+    delayed: bool
+    note: str
+    thresholds: dict[str, float]
+    universe: int
+    rows: list[SmLiveRow]
+    track: SmLiveTrack

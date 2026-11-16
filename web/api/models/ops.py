@@ -39,11 +39,12 @@ class ScanLog(Model):
 
 # ------------------------------------------------------------------ fyers
 class FyersLoginRequest(Model):
-    mode: Literal["paste", "window"] = "paste"
+    mode: Literal["direct", "paste", "window"] = "paste"
 
 
 class FyersLoginResponse(Model):
-    mode: Literal["paste", "window"]
+    mode: Literal["direct", "paste", "window"]     # 'direct' answered 'paste' when nothing here can receive it
+    capture: Literal["app", "listener", "paste"] | None = None
     login_url: str | None = None
     expires_at: ISODateTime | None = None
     instructions: list[str]
@@ -241,22 +242,6 @@ class DataHealth(Model):
 
 
 # ------------------------------------------------------------------ intraday
-class IntradayTrade(Model):
-    symbol: str
-    date: ISODate
-    side: Literal["LONG", "SHORT"]
-    entry_time: str
-    entry: float
-    stop: float | None = None
-    exit_time: str
-    exit: float
-    reason: str
-    qty: int
-    pnl: float
-    ret_pct: float
-    open_now: bool | None = None
-
-
 class IntradayMetrics(Model):
     days: int
     trades: int
@@ -268,6 +253,7 @@ class IntradayMetrics(Model):
     max_dd_pct: float | None = None
     win_rate: float | None = None
     avg_trade_pct: float | None = None
+    avg_trade_gross_pct: float | None = None      # the same trades before any cost: the gap to avg_trade_pct is costs
     profit_factor: float | None = None
     avg_day_pct: float | None = None
     ci95_day_pct: tuple[float, float] | None = None
@@ -286,8 +272,12 @@ class IntradayStrategy(Model):
     status: StrategyStatus
     metrics: IntradayMetrics
     equity: TimeSeries                            # rupees
-    recent_trades: list[IntradayTrade]
-    today: list[IntradayTrade]
+
+
+class IntradayCoverage(Model):
+    symbols: int = 0                              # symbols with FYERS history stored (0 = Yahoo's ~60 sessions only)
+    from_: ISODate | None = Field(default=None, alias="from")
+    to: ISODate | None = None
 
 
 class IntradayData(Model):
@@ -298,6 +288,7 @@ class IntradayData(Model):
     sessions: int
     symbols: int
     note: str
+    fyers_coverage: IntradayCoverage | None = None
 
 
 class SebiFacts(Model):
@@ -335,8 +326,80 @@ class IntradayResponse(Model):
     run: IntradayRun
 
 
+class IntradaySignal(Model):
+    strategy_key: str
+    strategy_name: str
+    symbol: str
+    side: Literal["LONG", "SHORT"]
+    entry_time: str
+    entry: float
+    stop: float | None = None
+    qty: int
+    amount: float
+    state: Literal["open", "closed"]              # open = entered, not stopped or squared off by the last bar
+    exit_time: str | None = None
+    exit: float | None = None
+    last: float                                   # exit price, or the last bar's close while open
+    reason: str
+    pnl: float                                    # rupees after charges (open: if closed at `last`)
+    ret_pct: float
+    target: float | None = None                   # set by strategies with a fixed target (live OI build-ups)
+    # the strategy's result in the current backtest: working = proven; mixed / unknown = not proven;
+    # not-working = lost money; untested = not backtested (new strategies, live OI build-ups)
+    strategy_status: Literal["working", "mixed", "unknown", "not-working", "untested"] = "working"
+    proven: bool = True
+    detail: str | None = None                     # why this signal (e.g. the OI change) or what its label means
+
+
+class IntradayProven(Model):
+    key: str
+    name: str
+
+
+class IntradaySignalsResponse(Model):
+    generated_at: ISODateTime | None = None       # when the signals were last computed
+    backtest_at: ISODateTime | None = None        # the backtest that decided which strategies are proven
+    tested: int
+    proven: list[IntradayProven]                  # the strategies whose backtest shows a real edge after costs
+    show_untested: bool = False                   # intraday.show_untested: signals from every strategy, each labelled
+    signals: list[IntradaySignal]
+    source: str | None = None                     # today's bars: "fyers_ws" real time, "yahoo" ~15 min delayed
+    delayed: bool
+    bars_to: str | None = None
+    session: ISODate | None = None                # the trading day these signals are from
+    market_closed: bool = False                   # weekend / holiday / before 09:20: the last session's signals
+    note: str
+
+
 class IntradayRunRequest(Model):
     update: bool = True                           # false = re-test on the stored 5-minute bars only
+    backfill: bool = False                        # first download ~1 year of FYERS 5-minute history (needs today's login)
+
+
+# ------------------------------------------------------------------ automatic jobs (Windows Task Scheduler)
+class AutomationJob(Model):
+    name: str                                     # the Task Scheduler task name (setup_schedule.ps1)
+    when: str
+    what: str
+    registered: bool
+    state: str | None = None                      # Ready / Running / Disabled
+    next_run: str | None = None                   # ISO when Windows' date could be read, else as Windows shows it
+    last_run: str | None = None
+    last_result: str | None = None                # 'ok', 'not run yet', 'running' or a short reason with the code
+    ok: bool | None = None                        # None = never ran
+
+
+class AutomationStatus(Model):
+    available: bool                               # Windows Task Scheduler is there (it is on this app's PCs)
+    jobs: list[AutomationJob]
+    missing: int
+    note: str
+
+
+class AutomationSetupResult(Model):
+    ok: bool
+    output: list[str]                             # what setup_schedule.ps1 printed (last lines)
+    status: AutomationStatus
 
 
 class IntradayRunAccepted(Model):

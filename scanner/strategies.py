@@ -25,9 +25,14 @@ def tradable_mask(f: Factors, min_price: float, min_turnover_cr: float,
     point-in-time panel, only that day's universe members (ETFs are funds, never universe members:
     they stay tradable for the ETF strategies). `price`: the prices the minimum-price test uses
     (default f.p.close). On a panel back-adjusted for corporate actions, pass the prices as they traded
-    that day, so a later split or bonus cannot decide whether a stock was tradable before it."""
+    that day, so a later split or bonus cannot decide whether a stock was tradable before it.
+    The price and turnover filters are stock filters: the configured ETFs are exempt. A fund's unit price says
+    nothing about it (GOLDBEES traded below Rs 50 until 2023) and market makers quote it whatever its turnover,
+    so filtering them would sell an ETF strategy out of its own assets. Thin ETFs still pay the illiquid
+    slippage in the engine. Stock strategies never trade ETFs (engine: `strategy.universe`)."""
     px = f.p.close if price is None else price.reindex(index=f.p.dates, columns=f.p.close.columns)
-    ok = (px >= min_price) & (f.turnover_avg20_cr >= min_turnover_cr) & f.p.close.notna()
+    liquid = (px >= min_price) & (f.turnover_avg20_cr >= min_turnover_cr)
+    ok = (liquid | f.etf_mask) & f.p.close.notna()
     return ok if f.p.universe is None else ok & (f.p.universe | f.etf_mask)
 
 
@@ -67,12 +72,21 @@ def _alpha_lowvol_score(f: Factors, size: int) -> pd.DataFrame:
             + 0.5 * (-f.vol_ann).where(u).rank(axis=1, pct=True))
 
 
+def _qvm(f: Factors, size: int) -> dict:
+    """Quality / value / momentum parts (scanner/qvm.py) among the day's `size` most traded stocks, point in time;
+    computed once per Factors."""
+    key = f"_qvm_{size}"
+    if key not in f.__dict__:
+        from . import financials, qvm
+        fin = financials.frames(list(f.p.close.columns), f.p.dates)
+        f.__dict__[key] = qvm.parts(f.p.close, f.momentum, fin, mask=f._stocks_only(f.turnover_rank <= size).fillna(False))
+    return f.__dict__[key]
+
+
 # Strategies that are off unless config.yaml turns them on: tested here and rejected. They are still
 # re-tested (cached) by the daily scan so the platform can show the evidence, but never produce orders.
 REJECTED_REASONS = {
-    "rsi2_pullback": "Lost money after realistic Indian delivery costs (short-term reversal works mostly in illiquid stocks).",
     "near_high": "Never beat the average stock in our tests.",
-    "legacy_rules": "The old v1 rules lost money in every re-test; kept only as a 'what not to do' baseline.",
 }
 
 
@@ -119,19 +133,21 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             regime_action=opt(k, "regime_action", "hold"), stop_pct=opt(k, "stop_pct", None),
         ))
 
-    k = "low_vol"
+    k = "qvm_score"
     if enabled(k):
-        big = int(opt(k, "universe_size", 150))
+        big = int(opt(k, "universe_size", 200))
         out.append(RankStrategy(
-            key=k, name="Low volatility", horizon="longterm", evidence="STRONG",
-            benchmark="Nifty100 Low Volatility 30",
-            description=("Holds the 20 steadiest large, liquid stocks (lowest 1-year volatility), reviewed quarterly "
-                         "- the method behind NSE's Nifty100 Low Vol 30 index (17.7% vs 13.7%/yr for Nifty 100, "
-                         "2005-18, and much smaller crash losses). Defensive: lags in strong rallies."),
-            score=lambda f: -f.vol_ann,
-            # "most traded" among STOCKS (that day's universe members on a point-in-time panel): heavily
-            # traded ETFs (NIFTYBEES, GOLDBEES...) must not take the slots
-            eligible=lambda f: (f.turnover_rank <= big) & f.vol_ann.notna(),
+            key=k, name="Quality-value-momentum score", horizon="longterm", evidence="EXPERIMENTAL",
+            benchmark="Nifty200 Quality 30",
+            description=("Our own 0-100 score (scanner/qvm.py): quality (ROE, low debt), value (earnings and book "
+                         "yield) and momentum (6- and 12-month return over volatility), each a percentile among the 200 "
+                         "most traded stocks, averaged. Holds the 20 best scored, reviewed quarterly. Fundamentals from "
+                         "NSE's filings as of the day they were filed; a stock without stored filings is never picked, "
+                         "so the backtest means little until every company's financials are fetched (Company "
+                         "screener > Fetch all). Each part has published evidence (also in India); the combination "
+                         "here is ours and unproven - its backtest is the test."),
+            score=lambda f: _qvm(f, big)["score"],
+            eligible=lambda f: _qvm(f, big)["score"].notna(),
             top_n=int(opt(k, "top_n", 20)), keep_rank=int(opt(k, "keep_rank", 40)),
             rebalance=opt(k, "rebalance", "quarterly"), use_regime=opt(k, "use_regime", False),
         ))
@@ -148,21 +164,6 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             eligible=lambda f: (f.industry_rank <= top_ind) & (f.p.close > f.sma200),
             top_n=int(opt(k, "top_n", 12)), keep_rank=int(opt(k, "keep_rank", 24)),
             rebalance=opt(k, "rebalance", "monthly"), use_regime=opt(k, "use_regime", True),
-        ))
-
-    k = "golden_cross"
-    if enabled(k):
-        gc_rs = float(opt(k, "rs_min", 60))
-        out.append(EventStrategy(
-            key=k, name="Golden cross trend", horizon="longterm", evidence="WEAK",
-            description=("Buys when the 50-day average crosses above the 200-day average (a 'golden cross') in a "
-                         "strong stock, and holds until the 'death cross' (50-day back below 200-day). Classic "
-                         "long-term trend following; slow, many small losses, a few big winners."),
-            entries=lambda f: f.golden_cross & (f.rs_rating >= gc_rs),
-            priority=lambda f: f.rs_rating,
-            exit_signal=lambda f: f.sma50 < f.sma200,
-            stop_pct=float(opt(k, "stop_pct", 15)), max_positions=int(opt(k, "max_positions", 15)),
-            use_regime=opt(k, "use_regime", False),
         ))
 
     k = "index_trend"
@@ -362,34 +363,6 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             use_regime=opt(k, "use_regime", True),
         ))
 
-    k = "nr7_breakout"
-    if enabled(k):
-        out.append(EventStrategy(
-            key=k, name="NR7 breakout", horizon="swing", evidence="WEAK",
-            description=("Toby Crabel's narrow-range pattern: after the quietest day in 7 sessions, a close above "
-                         "that day's high in an uptrending leader. Short holding (exit below the 10-day average or "
-                         "after 7 days), 5% stop."),
-            entries=lambda f: (f.nr7.shift(1).fillna(False).astype(bool) & (f.p.close > f.p.high.shift(1))
-                               & _uptrend(f) & (f.rs_rating >= 70)),
-            priority=lambda f: f.rs_rating, exit_signal=lambda f: f.p.close < f.sma10,
-            stop_pct=float(opt(k, "stop_pct", 5)), max_hold=int(opt(k, "max_hold", 7)),
-            max_positions=int(opt(k, "max_positions", 10)), use_regime=opt(k, "use_regime", True),
-        ))
-
-    k = "rsi2_pullback"
-    if enabled(k, default=False):
-        level = float(opt(k, "rsi2_below", 10))
-        out.append(EventStrategy(
-            key=k, name="RSI-2 pullback (Connors)", horizon="swing", evidence="WEAK",
-            description=("Larry Connors' short-term mean reversion: buy a 1-3 day plunge (RSI-2 under 10) in a "
-                         "stock above its 200-day average, sell on the bounce. Works in US large caps; here it lost "
-                         "money after realistic costs (reversal mostly works in illiquid stocks)."),
-            entries=lambda f: (f.p.close > f.sma200) & (f.rsi2 < level),
-            priority=lambda f: -f.rsi2, exit_signal=lambda f: f.p.close > f.sma5,
-            stop_pct=float(opt(k, "stop_pct", 10)), max_hold=int(opt(k, "max_hold", 10)),
-            max_positions=int(opt(k, "max_positions", 10)), use_regime=opt(k, "use_regime", True),
-        ))
-
     k = "near_high"
     if enabled(k, default=False):
         out.append(RankStrategy(
@@ -401,16 +374,4 @@ def build_strategies(cfg: dict, include_disabled: bool = False) -> list:
             rebalance=opt(k, "rebalance", "monthly"), use_regime=opt(k, "use_regime", True),
         ))
 
-    k = "legacy_rules"
-    if enabled(k, default=False):
-        out.append(EventStrategy(
-            key=k, name="Old textbook rules (baseline)", horizon="swing", evidence="EXPERIMENTAL",
-            description=("The v1 rules (50-DMA volume breakout, 52-week-high breakout) with 5% stop / 10% target / "
-                         "15 days. Kept only as a 'what not to do' comparison (lost money in every re-test)."),
-            entries=lambda f: (((f.p.close > f.sma50) & (f.p.close.shift(1) <= f.sma50.shift(1))
-                                & (f.vol_ratio >= 2) & (f.p.close > f.sma200))
-                               | ((f.p.close > f.high_52w_prev) & (f.vol_ratio >= 1.5))),
-            priority=lambda f: f.vol_ratio, stop_pct=5, target_pct=10, max_hold=15, max_positions=10,
-            use_regime=False,
-        ))
     return out

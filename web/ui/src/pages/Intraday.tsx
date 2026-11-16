@@ -1,71 +1,74 @@
 // Intraday `/intraday` (spec 3.10, review A7): honest results from data/results/intraday.json, SEBI facts, rules
-// from the server (never hard-coded), and today's simulated setups. The server's summary line (how many strategies
-// lost money after costs, whether any edge is significant) comes first. "Re-run backtest" posts /api/intraday/run
+// from the server (never hard-coded). The server's summary line (how many strategies lost money after costs,
+// whether any edge is significant) comes first. "Re-run backtest" posts /api/intraday/run
 // and the page polls while it runs.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertOctagon, ExternalLink, RefreshCw, Timer } from 'lucide-react'
 import { isFailure } from '@/api/client'
 import { useIntraday, useIntradayRun, useStatus } from '@/api/hooks'
-import type { IntradayRun, IntradayStrategy, IntradayTrade } from '@/api/types'
+import { useUi } from '@/app/uiState'
+import { whyNoEdge } from '@/lib/intraday'
+import type { IntradayRun, IntradayStrategy } from '@/api/types'
 import { EdgeVerdict, EvidenceChip, StatusBadge, edgeVerdict } from '@/components/badges'
 import { LinesChart, type LineDef } from '@/components/charts/LinesChart'
 import { DataTable, type Col } from '@/components/DataTable'
 import { KpiStrip, KpiTile, PageHeader } from '@/components/domain'
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/feedback'
-import { Money, Pct, Price, Ratio, Risk } from '@/components/num'
+import { Pct, Ratio, Risk } from '@/components/num'
 import { useToast } from '@/components/toast'
 import { Button, Card, KV, Spinner } from '@/components/ui'
 import { cn } from '@/lib/csv'
 import { date, dateTimeIST, duration, money, num, pct } from '@/lib/format'
 
-type TodayRow = IntradayTrade & { strategy: string; strategy_key: string }
-
-function tradeCols(withStrategy: boolean): Col<TodayRow>[] {
-  return [
-    ...(withStrategy ? [{ id: 'st', header: 'Strategy', value: (r: TodayRow) => r.strategy, cell: (r: TodayRow) => <span className="block max-w-[180px] truncate">{r.strategy}</span> } as Col<TodayRow>] : []),
-    { id: 'sym', header: 'Symbol', value: (r) => r.symbol, cell: (r) => <Link to={`/chart/${r.symbol}`} onClick={(e) => e.stopPropagation()} className="font-semibold hover:underline">{r.symbol}</Link>, sticky: true, mobile: 'primary' },
-    { id: 'date', header: 'Date', value: (r) => r.date, cell: (r) => <span className="num text-muted">{date(r.date, { year: false })}</span> },
-    { id: 'side', header: 'Side', value: (r) => r.side, cell: (r) => <span className={cn('text-2xs font-bold tracking-[0.04em]', r.side === 'LONG' ? 'text-profit' : 'text-loss')}>{r.side}</span> },
-    { id: 'in', header: 'In', value: (r) => r.entry_time, cell: (r) => <span className="num text-muted">{r.entry_time}</span> },
-    { id: 'entry', header: 'Entry ₹', align: 'right', value: (r) => r.entry, cell: (r) => <Price v={r.entry} /> },
-    { id: 'stop', header: 'Stop ₹', align: 'right', value: (r) => r.stop, cell: (r) => <Price v={r.stop} /> },
-    { id: 'out', header: 'Out', value: (r) => r.exit_time, cell: (r) => <span className="num text-muted">{r.open_now ? 'open' : r.exit_time}</span> },
-    { id: 'exit', header: 'Exit ₹', align: 'right', value: (r) => r.exit, cell: (r) => <Price v={r.exit} /> },
-    { id: 'qty', header: 'Qty', align: 'right', value: (r) => r.qty, cell: (r) => <span className="num">{r.qty}</span>, defaultHidden: true },
-    { id: 'pnl', header: 'P&L ₹', title: 'After intraday charges and slippage', align: 'right', value: (r) => r.pnl, cell: (r) => <Money v={r.pnl} signed color />, mobile: 'value' },
-    { id: 'ret', header: 'Return', align: 'right', value: (r) => r.ret_pct, cell: (r) => <Pct v={r.ret_pct} dp={2} />, mobile: 'change' },
-    { id: 'why', header: 'Exit', value: (r) => r.reason, cell: (r) => <span className="text-muted">{r.reason}</span> },
-  ]
-}
-
 function StrategyPanel({ s, sessions }: { s: IntradayStrategy; sessions: number | null }) {
   const lines: LineDef[] = useMemo(() => [{ id: s.key, label: 'Equity ₹', v: s.equity.series[0]?.v ?? [], color: 'accent', width: 2, format: (v) => money(v) }], [s])
   const m = s.metrics
-  const rows: TodayRow[] = s.recent_trades.map((t) => ({ ...t, strategy: s.name, strategy_key: s.key }))
   return (
-    <div className="space-y-3">
-      <Card title={<span className="flex flex-wrap items-center gap-2">{s.name}<StatusBadge status={s.status} /><EvidenceChip evidence={s.evidence} /></span>} subtitle={s.description}>
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2">{s.equity.t.length > 1 ? <LinesChart t={s.equity.t} lines={lines} height={240} /> : <EmptyState compact title="No equity curve" />}</div>
-          <div>
-            <KV k="Sessions tested" v={sessions && m.days !== sessions ? `${m.days} of ${sessions}` : m.days} title={sessions && m.days < sessions ? 'The first session(s) only warm up this strategy (it needs the previous day)' : undefined} />
-            <KV k="Trades (per day)" v={<>{m.trades} <span className="text-faint">({num(m.trades_per_day, 1)})</span></>} />
-            <KV k="Avg trade after costs" v={<Pct v={m.avg_trade_pct} dp={2} />} />
-            <KV k="Avg day" v={<Pct v={m.avg_day_pct} dp={3} />} />
-            <KV k="95% range of avg day" v={m.ci95_day_pct ? <>{pct(m.ci95_day_pct[0], { dp: 2 })} to {pct(m.ci95_day_pct[1], { dp: 2 })}</> : '—'} title="If this range includes zero, the result is indistinguishable from luck" />
-            <KV k="t-stat" v={<span className={m.significant ? 'text-fg' : 'text-muted'}>{num(m.t_stat, 2)} {m.significant ? '(significant)' : '(not significant)'}</span>} />
-            <KV k="Profit factor" v={<Ratio v={m.profit_factor} />} />
-            <KV k="Win rate" v={<Pct v={m.win_rate} signed={false} color={false} />} />
-            <KV k="After-tax return" v={<Pct v={m.after_tax_return_pct} />} title="Speculative business income at the slab rate" />
-          </div>
+    <Card title={<span className="flex flex-wrap items-center gap-2">{s.name}<StatusBadge status={s.status} /><EvidenceChip evidence={s.evidence} /></span>} subtitle={s.description}>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">{s.equity.t.length > 1 ? <LinesChart t={s.equity.t} lines={lines} height={240} /> : <EmptyState compact title="No equity curve" />}</div>
+        <div>
+          <KV k="Sessions tested" v={sessions && m.days !== sessions ? `${m.days} of ${sessions}` : m.days} title={sessions && m.days < sessions ? 'The first session(s) only warm up this strategy (it needs the previous day)' : undefined} />
+          <KV k="Trades (per day)" v={<>{m.trades} <span className="text-faint">({num(m.trades_per_day, 1)})</span></>} />
+          <KV k="Avg trade after costs" v={<Pct v={m.avg_trade_pct} dp={2} />} />
+          <KV k="Avg day" v={<Pct v={m.avg_day_pct} dp={3} />} />
+          <KV k="95% range of avg day" v={m.ci95_day_pct ? <>{pct(m.ci95_day_pct[0], { dp: 2 })} to {pct(m.ci95_day_pct[1], { dp: 2 })}</> : '—'} title="If this range includes zero, the result is indistinguishable from luck" />
+          <KV k="t-stat" v={<span className={m.significant ? 'text-fg' : 'text-muted'}>{num(m.t_stat, 2)} {m.significant ? '(significant)' : '(not significant)'}</span>} />
+          <KV k="Profit factor" v={<Ratio v={m.profit_factor} />} />
+          <KV k="Win rate" v={<Pct v={m.win_rate} signed={false} color={false} />} />
+          <KV k="After-tax return" v={<Pct v={m.after_tax_return_pct} />} title="Speculative business income at the slab rate" />
         </div>
-      </Card>
-      <Card title="Recent simulated trades" flush>
-        <DataTable id="intraday.trades" data={rows} columns={tradeCols(false)} rowKey={(r) => `${r.symbol}${r.date}${r.entry_time}`} pageSize={50} exportName={`intraday-${s.key}`} empty={<EmptyState compact title="No trades" />} />
-      </Card>
+      </div>
+    </Card>
+  )
+}
+
+/** Only Yahoo's ~60 sessions so far: a year of FYERS history makes the test much stronger. The 15:45 job fetches it
+ *  by itself once Fyers is logged in; this starts it now (in the background, then the re-test). */
+function HistoryBackfill({ sessions, running }: { sessions: number; running: boolean }) {
+  const { data: s } = useStatus()
+  const { setFyersLogin } = useUi()
+  const start = useIntradayRun()
+  const toast = useToast()
+  const logged = !!s?.fyers.logged_in_today
+  return (
+    <div className="mt-3 rounded-md border border-warn/35 bg-warn/[0.06] p-3 text-xs">
+      <p className="font-medium text-fg">Tested on only {sessions} sessions of delayed Yahoo bars.</p>
+      <p className="mt-1 text-muted">A year of FYERS 5-minute history gives a far stronger test. The 15:45 automatic job downloads it by itself on the first afternoon you are logged in to Fyers, or start it now: about 600 FYERS calls and 15 minutes, inside the daily limit.</p>
+      <div className="mt-2">
+        {logged ? (
+          <Button size="sm" loading={start.isPending} disabled={running}
+            onClick={() => start.mutate({ backfill: true }, {
+              onError: (e) => toast({ tone: 'bad', title: isFailure(e) ? e.message : 'Could not start the download', detail: isFailure(e) ? e.hint ?? undefined : undefined }),
+            })}>
+            Download 1 year of FYERS history
+          </Button>
+        ) : (
+          <Button size="sm" onClick={() => setFyersLogin(true)}>Log in to Fyers first</Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -117,11 +120,8 @@ export default function Intraday() {
   const strategies = d?.strategies ?? []
   const losers = strategies.filter((s) => (s.metrics.return_pct ?? 0) < 0).length
   const best = strategies.reduce<IntradayStrategy | null>((b, s) => (b == null || (s.metrics.return_pct ?? -1e9) > (b.metrics.return_pct ?? -1e9) ? s : b), null)
-  const today: TodayRow[] = useMemo(() => strategies.flatMap((s) => s.today.map((t) => ({ ...t, strategy: s.name, strategy_key: s.key }))), [strategies])
+  const why = whyNoEdge(strategies)
   const selected = strategies.find((s) => s.key === sel) ?? null
-  const clk = useStatus().data?.clock
-  const marketClosed = !!clk && !clk.is_trading_day
-  const setupDay = today.reduce<string | null>((m, r) => (r.date && (!m || r.date > m) ? r.date : m), null)
 
   const cols: Col<IntradayStrategy>[] = [
     { id: 'status', header: 'Status', value: (s) => s.status, cell: (s) => <StatusBadge status={s.status} short />, width: 110 },
@@ -130,7 +130,8 @@ export default function Intraday() {
     { id: 'ret', header: 'Return', title: 'Total over the tested sessions, after costs', align: 'right', value: (s) => s.metrics.return_pct, cell: (s) => <Pct v={s.metrics.return_pct} />, mobile: 'change' },
     { id: 'ann', header: 'Annualised', align: 'right', value: (s) => s.metrics.annualised_pct, cell: (s) => <Pct v={s.metrics.annualised_pct} />, hideBelow: 1420 },
     { id: 'tax', header: 'After tax', align: 'right', value: (s) => s.metrics.after_tax_return_pct, cell: (s) => <Pct v={s.metrics.after_tax_return_pct} /> },
-    { id: 'avg', header: 'Avg trade', align: 'right', value: (s) => s.metrics.avg_trade_pct, cell: (s) => <Pct v={s.metrics.avg_trade_pct} dp={2} /> },
+    { id: 'gross', header: 'Before costs', title: 'The average trade before brokerage, STT, exchange fees, GST and slippage', align: 'right', value: (s) => s.metrics.avg_trade_gross_pct, cell: (s) => <Pct v={s.metrics.avg_trade_gross_pct} dp={2} /> },
+    { id: 'avg', header: 'After costs', title: 'The average trade after every cost: what you would actually keep', align: 'right', value: (s) => s.metrics.avg_trade_pct, cell: (s) => <Pct v={s.metrics.avg_trade_pct} dp={2} /> },
     { id: 'dd', header: 'Max DD', align: 'right', value: (s) => s.metrics.max_dd_pct, cell: (s) => <Risk v={s.metrics.max_dd_pct} /> },
     { id: 'sh', header: 'Sharpe', align: 'right', value: (s) => s.metrics.sharpe, cell: (s) => <Ratio v={s.metrics.sharpe} />, hideBelow: 1200 },
     { id: 'win', header: 'Win %', align: 'right', value: (s) => s.metrics.win_rate, cell: (s) => <Pct v={s.metrics.win_rate} signed={false} color={false} />, hideBelow: 1100 },
@@ -143,7 +144,7 @@ export default function Intraday() {
     <div>
       <PageHeader
         title="Intraday research"
-        subtitle={d?.generated_at ? <>Backtest of {dateTimeIST(d.generated_at)}{d.elapsed_s != null ? ` (${duration(d.elapsed_s)})` : ''} · research only, no orders</> : 'Research only: no intraday orders are produced'}
+        subtitle={d?.generated_at ? <>Backtest of {dateTimeIST(d.generated_at)}{d.elapsed_s != null ? ` (${duration(d.elapsed_s)})` : ''} · live signals only from strategies with a real edge</> : 'Live signals come only from strategies with a real edge after costs'}
         right={d ? <RerunControl run={d.run} label={d.available ? 'Re-run backtest' : 'Run backtest'} source={d.data?.source} /> : undefined}
       />
       {q.error && !d ? <div className="card"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div> : !d ? <div className="card"><SkeletonRows /></div> : (
@@ -153,9 +154,14 @@ export default function Intraday() {
               <AlertOctagon className={cn('mt-0.5 h-5 w-5 shrink-0', losers > 0 ? 'text-loss' : 'text-warn')} />
               <div className="text-[13px] leading-5">
                 <div className="font-semibold text-fg">{d.summary}</div>
+                {why && (
+                  <div className="mt-0.5 text-fg">
+                    Why: before costs the average trade makes between {pct(why.grossLo, { dp: 2 })} and {pct(why.grossHi, { dp: 2 })} - next to nothing, so there is no real edge to keep. Costs of {pct(why.costLo, { signed: false, dp: 2 })} to {pct(why.costHi, { signed: false, dp: 2 })} a trade then turn it into a loss. Nothing is broken and no 200-day / 200-EMA filter blocks them: these rules simply don't beat Indian intraday costs.
+                  </div>
+                )}
                 {d.costs && (
                   <div className="mt-0.5 text-muted">
-                    Every simulated trade pays brokerage, STT, exchange fees, GST and slippage: about {pct(d.costs.round_trip_pct, { signed: false, dp: 3 })} per round trip on {money(d.costs.value)}.
+                    Every backtest trade pays brokerage, STT, exchange fees, GST and slippage: about {pct(d.costs.round_trip_pct, { signed: false, dp: 3 })} per round trip on {money(d.costs.value)}.
                   </div>
                 )}
               </div>
@@ -177,6 +183,7 @@ export default function Intraday() {
                   <KV k="Sessions · symbols" v={`${d.data.sessions} · ${d.data.symbols}`} />
                   {d.costs && <KV k="Round trip on ₹1 L" v={`${money(d.costs.value)} → ${pct(d.costs.round_trip_pct, { signed: false, dp: 3 })}`} />}
                   <p className="mt-2 text-2xs text-muted">{d.data.note}</p>
+                  {(d.data.fyers_coverage?.symbols ?? 0) === 0 && <HistoryBackfill sessions={d.data.sessions} running={!!d.run.running} />}
                 </div>
               ) : <p className="text-[13px] text-muted">{d.reason}</p>}
               {Object.keys(d.rules).length > 0 && (
@@ -199,13 +206,10 @@ export default function Intraday() {
                   <KpiTile label="Significant edges" value={strategies.filter((s) => s.metrics.significant && (s.metrics.return_pct ?? 0) > 0).length} sub="positive and beyond luck" />
                 </KpiStrip>
               )}
-              <Card title="Results after all costs" subtitle="Click a strategy for its equity and trades" flush>
+              <Card title="Results after all costs" subtitle="Click a strategy for its equity curve" flush>
                 <DataTable id="intraday" data={strategies} columns={cols} rowKey={(s) => s.key} onRowClick={(s) => setSel(s.key === sel ? null : s.key)} rowClassName={(s) => cn(s.key === sel && 'bg-accent/[0.06]')} keyboard />
               </Card>
               {selected && <StrategyPanel s={selected} sessions={d.data?.sessions ?? null} />}
-              <Card title="Today's setups (simulated)" subtitle={<>What each strategy would have done {setupDay ? <>on <span className="num">{date(setupDay)}</span></> : 'in the latest session'} on {d.data?.source === 'yahoo' ? 'delayed (~15 min) ' : ''}5-minute data{d.data?.source ? ` (${d.data.source})` : ''}. Not orders: intraday strategies are research only.</>} flush>
-                <DataTable id="intraday.today" data={today} columns={tradeCols(true)} rowKey={(r) => `${r.strategy_key}${r.symbol}${r.entry_time}`} empty={<EmptyState compact title={marketClosed ? 'Market closed today' : 'No setups today'}>{marketClosed ? `No session today (${clk?.holiday_name ?? (clk?.session === 'weekend' ? 'weekend' : 'holiday')}): setups appear on the next trading day.` : clk?.session === 'pre_open' ? 'The market has not opened yet.' : 'No strategy has triggered so far today.'}</EmptyState>} />
-              </Card>
             </>
           )}
         </div>

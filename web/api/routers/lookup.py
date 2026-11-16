@@ -1,16 +1,16 @@
-"""5. screener, symbols, sparklines and 6. chart, stock."""
+"""5. screener, symbols, sparklines, live quotes and 6. chart, stock."""
 from __future__ import annotations
 
 from typing import Literal
 
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path as PathParam, Query
 
 from scanner.providers import INDEX_SYMBOLS
 
 from ..errors import ApiException, SafeJSONResponse, feature_unavailable, not_found
-from ..models import ChartResponse, ScreenerResponse, SparklinesResponse, StockSnapshot, SymbolsResponse
-from ..services import chart_data, data, holdings_svc, market_derived, strategies as st
+from ..models import ChartResponse, QuotesResponse, ScreenerResponse, SparklinesResponse, StockSnapshot, SymbolsResponse
+from ..services import chart_data, data, holdings_svc, market_derived, quotes_svc, strategies as st
 from ..util import fmt_date, inum, num, ser_list, spct, today_ist
 
 router = APIRouter(prefix="/api", tags=["lookup"])
@@ -138,7 +138,7 @@ def sparklines(symbols: str, days: int = Query(60, ge=5, le=400)):
 
 @router.get("/chart/{symbol}", response_model=None, response_class=SafeJSONResponse,
             responses={200: {"model": ChartResponse}})
-def chart(symbol: str, tf: Literal["1d", "1w"] = "1d",
+def chart(symbol: str, tf: Literal["1d", "1w", "1mo"] = "1d",
           range: Literal["3m", "6m", "1y", "2y", "5y", "max"] = "1y",  # noqa: A002
           indicators: str | None = None):
     sym = symbol.strip().upper()
@@ -217,3 +217,18 @@ def stock(symbol: str):
         "results_on": results_on,
         "strategies": roles, "your_holding": your, "corporate_actions": sorted(cas, key=lambda c: c["date"], reverse=True),
     }
+
+
+@router.get("/quotes", response_model=QuotesResponse)
+def live_quotes(symbols: str = Query(..., max_length=2500, description="up to 100 NSE symbols, comma separated")):
+    """Live prices between scans: FYERS real time when logged in, else Yahoo (~15 min delayed); the last close
+    while the market is shut."""
+    return quotes_svc.quotes(quotes_svc.parse(symbols))
+
+
+@router.get("/chart/{symbol}/intraday", response_model=None, response_class=SafeJSONResponse)
+def chart_intraday(symbol: str = PathParam(..., pattern=r"^[A-Za-z0-9][A-Za-z0-9&_.-]{0,24}$"),
+                   tf: Literal["1m", "5m", "15m", "30m", "1h"] = "5m", days: int = Query(3, ge=1, le=20)):
+    """5- or 15-minute candles of the last `days` sessions, with each session's VWAP; the last one may be forming."""
+    from ..services import intraday_chart
+    return intraday_chart.build(symbol, tf, days)

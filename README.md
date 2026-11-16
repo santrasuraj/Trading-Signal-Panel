@@ -18,24 +18,461 @@ A personal, evidence-based tool for the Indian stock market. Every day it:
 
 | When (IST) | What to do |
 |---|---|
-| Every trading morning, after 6 AM (best before 9:14 AM) | **🔑 Log in to Fyers.** Use **Log in to Fyers** in Quant Desk (Settings › Fyers), or double-click `1_login.bat`. A token made before 6 AM stops working at 6 AM, and the 9:14 intraday live feed waits for the login. SEBI rules require a daily login since April 2026. |
-| Any time | Double-click **`3_dashboard.bat`** (Quant Desk opens at http://127.0.0.1:8600), then start a scan in **Settings › Scan** (**Full scan**). A scan takes a few minutes because it re-tests every strategy (a re-check without download took about 2.5 minutes on 24 Oct 2026); longer when it downloads new prices. The old Streamlit dashboard (`3b_dashboard_streamlit.bat`) has a **🔄 Run scan now** button. |
+| Every trading morning, after 6 AM (best before 9:14 AM) | **🔑 Log in to Fyers.** Click the **Fyers** chip in Quant Desk's top bar, then **Log in with Fyers** (no command needed; see below). A token made before 6 AM stops working at 6 AM, and the 9:14 intraday live feed waits for the login. SEBI rules require a daily login since April 2026. |
+| Any time | Double-click **`3_dashboard.bat`** (Quant Desk opens at http://127.0.0.1:8600). It keeps itself current: after an update it restarts its server by itself, and an open page shows **Quant Desk was updated - Reload**, then start a scan in **Settings › Scan** (**Full scan**). A scan takes a few minutes because it re-tests every strategy (a re-check without download took about 2.5 minutes on 24 Oct 2026); longer when it downloads new prices. |
 | 3:40 PM / 7:15 PM | Automatic Telegram summaries, if you set them up (section 6). |
 | **After about 7 PM** | **Best time to decide.** NSE's official end-of-day data is published, so signals are final. |
 
 Orders marked *provisional* are based on live or delayed quotes, not NSE's official close (that includes the 3:40 PM
-scan). They can change until the official data is published, after about 6 PM.
+scan). They can change until the official data is published, after about 6 PM. During the session today's volume is
+the real volume traded so far, never an estimate of the full day, so a breakout that needs heavy volume shows only once
+that volume has actually traded.
+
+No demo, sample or simulated data anywhere: every price, volume, open interest and disclosure comes from NSE, FYERS
+or Yahoo. Backtests and paper trading are calculations on those real prices, and every page labels them as such.
+
+### One answer per stock: BUY · SELL · HOLD · NO EDGE
+The **Today** page (`g d`) and the top of every **Chart** page give one answer per stock, taken only from tested rules
+(`web/api/services/action_svc.py`):
+
+| Answer | When |
+|---|---|
+| **BUY** | A strategy whose own survivorship-free backtest, after costs and tax, is *working* buys it at the next open, and no working strategy exits it. The card shows the entry reference, quantity, stop-loss, the risk if stopped, the backtest's yearly return with its timing range and worst drop, and the strategy's live signal record. |
+| **SELL (exit)** | You hold it and a working strategy exits it, or your own stop-loss is hit. |
+| **HOLD** | You hold it and no exit fired. |
+| **NO EDGE** | Anything else, with how close each working strategy is to acting (its rank and next review, or "holds it in its model since …"). |
+
+**BUY (late entry).** A stock a working strategy already holds (bought on an earlier day) is a BUY only when that
+strategy's **late-entry test** says joining that late still paid: every trade of its 8-year survivorship-free backtest
+re-run with the entry 5, 10 or 21 trading days after the model's own, exit unchanged, against the average top-500
+stock over the same days after ~0.45% costs (`scanner/late_entry.py`, Late entry card on each strategy page). On
+11 Nov 2026: Earnings gap-up (working) still pays up to 10 days late (+2.3% vs the average stock after costs, t 2.1),
+so the 4 stocks it bought 4-9 days earlier showed as BUY; momentum leaders shows no edge once late.
+
+Buys of strategies whose backtest is *mixed* or *too new* are shown as "unproven buy" lines, never as the answer;
+not-working strategies never appear. Results days, the F&O ban list, the regime filter and provisional (intraday)
+scans are risk chips that never change the answer. Candle and chart patterns, option positioning, F&O build-ups and
+Claude never decide it: none of them shows an edge after costs in this app's own tests. A strategy's SELL is an exit of
+its own long position, so it is never counted as a bearish forecast anywhere (options verdict, outlook).
+
+### Live prices on every page
+Prices reach every page through one event stream (`/api/stream/quotes`, Server-Sent Events): the top bar, Chart (toolbar,
+side panel, last candle), Today, Portfolio (value, P&L, today's P&L and a live stop-loss / target check between scans),
+Screener (price and 1D of the first 100 rows), Overview (VIX, movers) and Signals. Every price carries its source and
+age: **Live 10:42:17** (FYERS WebSocket, about a second behind the exchange), **FYERS** (REST, ≤30 s), a red
+**DELAYED 15 MIN** badge (Yahoo, when you are not logged in to FYERS; click it to log in), **Last trade 15:29:58**
+(after the close, until NSE's official close after ~18:00) or **Close 10 Nov**.
+
+The live service (`4_intraday_live.bat`, started at 09:14) streams up to 100 symbols on the FYERS Standard plan and
+follows the screen: the symbols on the open pages come first (`data/intraday/live/subscriptions.json`), then the F&O
+instruments for big trades, then the most liquid stocks for the 5-minute bars. It writes `quotes.json` twice a second;
+symbols it doesn't stream fall back to FYERS REST quotes (cached 30 s and shared by every tab) and then Yahoo. FYERS
+Prime (₹499/month + GST) raises the stream to 5,000 symbols.
+
+### Watchlists, price alerts and intraday charts
+- **Watchlist** page (`g w`): your own lists with live prices, each stock's source stamp and its one tested answer.
+  The star on any chart adds the stock to your first list.
+- **Price alerts** (Watchlist page, or the bell on any chart): price at or above / at or below a level, or the day's
+  change at or above / below a percentage. An alert fires **once** (re-arm it to use it again): a pop-up in the app,
+  a browser notification when allowed, and a Telegram message when it is set up (section 6). The live service checks
+  alerts on every FYERS tick batch, twice a second, even with Quant Desk closed; without a FYERS login the app checks
+  them on Yahoo prices, about 15 minutes late, and the fired alert says so. Stored in `data/alerts.json` (fired:
+  `data/alerts_fired.jsonl`).
+- Alert and watchlist symbols are streamed by the live feed right after the symbols on screen (`data/watchlists.json`),
+  within the FYERS plan's symbol limit.
+- **Intraday charts** (Chart page, `5m` / `15m`, key `i`): candles of the last 1-10 sessions with each session's VWAP and
+  volume, from the FYERS feed and history (Yahoo fills older days); the last candle follows the live price. They cover
+  the ~150 most liquid F&O stocks and the symbols the live feed streams (add a stock to a watchlist to include it).
+
+### Your own scans, with an 8-year backtest in one click
+The **Scans** page (`g x`) builds a scan from up to 8 rules ("all" or "any"): 34 fields (price, SMAs / EMAs, MACD,
+returns, relative strength, RSI, 20-day and 52-week highs / lows, ATR, volatility, volume vs average, traded value,
+delivery %), compared with a number or another field (`close > 1.02 × sma50`), or *crosses above / below*.
+- **Run today**: the matching stocks of your universe on the stored prices, "new" when they started matching that day,
+  prices following the live price.
+- **Backtest 8 years**: the scan's event study on the survivorship-free top 500 since Aug 2018 (`scanner/scans.py`,
+  the same test as every pattern here): each time a stock *starts* to match, buy at the next open, hold 5 / 10 / 20 days,
+  compared with the average member over the same days, ~0.45% round-trip costs subtracted, t-statistic on monthly
+  averages, by year and the last 25 events. A few seconds (the first one loads the data, ~10 s).
+- Save scans; six popular setups are there as examples. In the 11 Nov 2026 data none of them has an edge after costs
+  (RSI(2) oversold in an uptrend beats the average stock before costs only, t 3.2), and "close above the 200-day"
+  at the moment it starts **worked in reverse** (t -4.7). Most scans show no edge; this tells you which.
+
+### Could a strategy's backtest be luck?
+Every strategy page has a **Robustness** card (`web/api/services/robustness.py`): a 10,000-path Monte Carlo of the
+backtest's own daily returns (21-day blocks: the spread of yearly returns and drops, how often it lost money or trailed
+the average stock), the **deflated Sharpe ratio** (Bailey & Lopez de Prado 2014: corrected for the ~19 strategies tried
+here, since the best of many looks good by chance), every rolling 12-month window, and the first half against the
+second. Verdict: *likely real* (deflated Sharpe 95%+ and 75%+ of the histories beat the average stock), *could be luck*
+or *likely luck*. On 11 Nov 2026: momentum leaders "could be luck" (deflated 66%), trend breakout and low volatility
+"likely luck".
+
+### Checks on the app itself (Benchmarks page, `g k`)
+- **Walk-forward of the "working" rule** (`web/api/services/walkforward.py`): each month-end, the rule the Action card
+  uses (beat both the Nifty 50 and the average stock over 12 and 6 months, no loss to date) is applied with only the
+  data up to then, and the strategies it calls working are held for the next month. Sep 2020 - Nov 2026: following it
+  made +26.4%/yr vs +17.4% holding every strategy, +21.5% the average stock and +13.4% the Nifty 50 (t 2.1 vs every
+  strategy).
+- **Speed and depth measured on this PC** next to what Trade Ideas, TrendSpider, NinjaTrader and MetaTrader publish,
+  and the FYERS tick-to-screen latency measured in your browser.
+- **Options direction for an index from the index itself** (`scanner/index_study.py`): NIFTY's options verdict uses
+  NIFTY's own history of today's setup (trend vs the 50 / 200-day average, RSI band), not a study measured on stocks.
+- **Index options for every NSE index** (Signals page, Index options tab; `GET /api/options/indices`): NIFTY, BANKNIFTY,
+  FINNIFTY, MIDCPNIFTY and NIFTYNXT50 (`options.underlyings` in config.yaml), the nearest two expiries of each with the
+  scan's daily verdict (BUY CALL / BUY PUT / NO TRADE and why), ATM call and put prices, implied volatility, the move
+  the options price, and PCR / max pain for reference. Each index's direction comes from its own NSE history
+  (data/nse/index_history.parquet, since Aug 2018) and every verdict settles at NSE's official index close. SENSEX and
+  BANKEX trade on BSE, which the app has no data source for. A BUY comes with its trade in premiums (entry at the ask,
+  stop and target re-priced from the index's levels with Black-76 at the option's IV, lot, capital, maximum loss); a
+  NO TRADE shows the option nearest to passing and why it fails, and "Why each verdict" lists every check. The journal
+  keeps all of it, and the closest option of every NO TRADE is scored at expiry too, so the record shows whether
+  skipping them was right. The evening scan fetches any configured index chain the day's options task missed.
+- **Dated capital-gains tax**: gains realised before 23 Jul 2024 are taxed at the old 15% / 10% (+ cess, Rs 1 lakh LTCG
+  exemption), later ones at 20% / 12.5% (`tax: dated: 0` in config.yaml uses today's rates for every year).
+- **Scans in plain English** (Scans page, needs `ANTHROPIC_API_KEY` in `.env`): Claude turns the idea into the builder's
+  rules, says what it could not express, and you check, run and backtest it.
+
+### Chart tools
+- **Draw** (1D / 1W chart): levels, trendlines and Fibonacci retracements, saved per stock (`data/drawings.json`);
+  a level becomes a price alert in one click.
+- **Indicators**: SMA 20 / 50 / 100 / 200, EMA 9 / 21 / 50 / 200, Bollinger, Keltner and Donchian channels, Supertrend,
+  volume, and panes for RSI, MACD, Stochastic, ADX (+DI / -DI), ATR, on-balance volume, CCI, money flow, Williams %R and
+  rate of change (textbook parameters).
+
+### Placing orders on your own FYERS account (Orders page, `g e`)
+Off until you switch it on (Orders page, type ENABLE). Then every BUY / SELL card has **Buy on FYERS… / Sell on
+FYERS…**, which opens an order ticket prefilled from the signal (quantity sized for your capital, limit at the live
+price, the strategy's stop-loss):
+1. **Review order** sends nothing: the server returns the exact FYERS order, every check, the charges and the risk if
+   stopped (`web/api/services/orders_svc.py`).
+2. Tick *I have checked this order* and **Send** within 60 s. One attempt only: if FYERS doesn't answer, the app says
+   "check the order book" and never resends (a retry could buy twice).
+
+Checks enforced on the server (limits in `config.yaml` → `orders:`): switched on, kill switch off, logged in to FYERS
+today, market open (no after-market orders through the API), limit orders only (unless `allow_market`), the limit within
+3% of the last price, one order at most 10% of capital, at most 20 orders a day, at least 1 s apart, no repeat of the
+same order within 2 minutes, **daily-loss lockout** (today's P&L below -2% of capital: no new buys for the day; exits are
+always allowed), and for a delivery sell no more than you hold. The **kill switch** blocks every new order and cancels
+every pending one. Once a delivery buy fills, **Protect** places a FYERS GTT OCO sell: the target above the price and the
+stop-loss below it, whichever comes first, live across days. Slippage of each signal's fill against its reference price
+and an append-only audit of everything sent or blocked (`data/orders_audit.jsonl`) are on the same page.
+While the live service runs (`4_intraday_live.bat`, market hours) it also listens on FYERS' order socket: a fill,
+rejection or cancellation of any of your orders shows as a notice on every open page within about a second
+(`scanner/intraday/order_feed.py`, read-only; without it the Orders page checks every 5 s). Each filled order is kept in
+`data/fills.jsonl`, since FYERS' order book only covers today: that is your trade history for the Coach.
+
+SEBI's retail algo framework (in force for all brokers from 1 Apr 2026) applies to API orders: register this PC's
+**static IP** in the FYERS API dashboard and log in every trading day. Below 10 orders a second your own orders need no
+strategy registration; the app stays at 1 a second. Your own account only: the app never trades for anyone else.
+
+### Replay (`g y`): practise on real past sessions
+Pick a stock and a past day, or **Random, blind** (the name and date stay hidden until the end, so memory can't help),
+then reveal one bar at a time (Space play / pause, → next bar, `b` buy, `s` sell). 5- and 15-minute replays cover the
+~150 most liquid F&O stocks over the months in the intraday store, after two sessions of context; Daily replays the
+next 60 sessions from any date since 2018 (long only: delivery can't be sold short). Market orders fill at the last
+close plus slippage, stops and targets on the bars after (at the open when the price gaps past them, the stop first
+when one bar touches both), intraday positions are squared off at the close, and FYERS' real charges apply. A finished
+session with trades is saved to `data/replay_log.jsonl` with the P&L recomputed on the server from the bars, never
+taken from the browser; the page shows your practice record (win rate, per trade, R, profit factor, exits).
+
+### Charts: types, drawings, multi-chart (`g c`, `g l`)
+- **Chart types** on the daily / weekly chart: candles, Heikin Ashi (smoothed; indicators and drawings still line up),
+  Renko (1-5% bricks) and three-line break (time left out, so they get their own simple chart).
+- **Drawings**: level, trendline, Fibonacci, zone, text note and anchored VWAP (from any bar). A level or a trendline
+  becomes an alert in one click; a trendline alert follows the line as it rises or falls.
+- **Multi-chart** (`/charts`): 1, 2 or 4 charts, each its own stock and timeframe (1W / 1D / 15m / 5m / 1m), or one
+  stock on four timeframes at once.
+
+### Alerts beyond price
+Besides price, day-change and trendline alerts (checked on every live tick), alerts on **RSI(14)**, a **moving-average
+cross** (10 to 200 days), a **saved scan getting a new stock**, and a **candle pattern with a tested edge** on a stock
+(only patterns whose 8-year study verdict is "edge"). The RSI / average / scan ones use the live price on the daily
+history (`scanner/rule_alerts.py`) and are checked by the 5-minute intraday job, the open dashboard and each scan;
+patterns after each scan. Telegram and, after **Turn on notifications** (Watchlist > Alerts), a desktop notification.
+
+### Installable app
+The dashboard can be installed as an app (the install icon in Edge / Chrome's address bar): its own window and a
+Start-menu / taskbar icon. Notifications then show with the window in the background, and a click opens the right page.
+Only the build files are cached; prices, signals and orders always come from the server. A phone gets alerts through
+Telegram (the dashboard runs on this PC).
+
+### Live scans
+Scans > **Live prices** runs the scan on today's live prices (re-run every minute): today's candle is the last bar,
+indicators included; only stocks with a live quote can match. The bell on a saved scan sets a new-hit alert.
+
+### Practice account (`g u`) and trading from the chart
+A practice account on today's live prices: the same order ticket as the real one (switch **Practice / Real · FYERS**),
+market and limit orders, stop-loss and target, intraday shorts squared off at 15:20, FYERS charges, nothing sent to
+FYERS (`web/api/services/sim_svc.py`, `data/sim_account.json`). On a chart, **Trade on chart** opens a ticket at the
+price you click; the **Market depth** card shows FYERS' five best bids and offers (needs today's login, refreshed every
+2 s while open) and a click on a price opens a ticket there. Personal use only: NSE's data policy does not allow
+offering simulated trading on live prices to others.
+
+### Auto-trader (practice) `/autotrade`
+A high-speed engine that takes the app's signals automatically, within about a second, in **its own practice
+account** (capital from config.yaml; `web/api/services/autotrade_svc.py`, `data/autotrade.json`). Nothing is ever
+sent to FYERS. Off until you press **Start**; it runs in the dashboard's server, so the dashboard must be open.
+- **Intraday signals** (all, or proven only) and **live OI build-ups**: entered at the live price plus slippage with
+  the signal's stop and target, which act on every price update; closed by the strategy's own exit, the stop, the
+  target or the 15:00 square-off. One position per stock, a per-trade size cap, max positions and trades a day, a
+  daily loss stop, and no entry more than a few minutes after the strategy's own entry bar.
+- **Index option BUY verdicts**: one lot from 09:20 at the stored chain's ask with exact charges, settled at expiry at
+  NSE's official close. **Options signals** (below): each new one taken at one lot while fewer than "Max option
+  positions" are open, closed when its signal closes. **Daily strategies**: switches the practice bot on for the
+  working strategies.
+- Every trade records its **speed** (signal lag behind the strategy's entry bar, reaction in ms, price age) and
+  **slippage** against the signal's price, and the page totals them per strategy next to the backtest label.
+- **Stop and close all** is the kill switch. FYERS real-time prices need today's login (`1_login.bat`); without it the
+  engine trades on Yahoo prices ~15 minutes late and says so. True HFT (microseconds, co-located at the exchange) is
+  not possible for retail traders; speed multiplies an edge, it doesn't create one.
+
+**The speed path** (with the FYERS live feed running; the **Speed** card on the page shows each part and its
+P50 / P95 / P99):
+- **ZeroMQ tick bus** (`scanner/intraday/bus.py`, pyzmq): the live feed publishes every tick and every write of new
+  bars on `127.0.0.1:5557` (loopback only; `intraday.bus_port` in config.yaml to change it) in a fixed binary layout.
+  The dashboard subscribes: stops and targets of the engine's positions are checked on **every tick** instead of
+  once a second, and quotes for entries are milliseconds old. Without pyzmq or the live feed, everything falls back to
+  the files as before.
+- **Live signal engine** (`scanner/intraday/live_engine.py`, in the dashboard server): the 5-minute task rebuilt
+  everything from scratch each run (~20 s on 151 stocks, then up to 5 minutes until the next run). The engine keeps the
+  earlier sessions in memory, carries each stock's state to today, and on each new bar rebuilds only today: signals
+  about **1 second after a bar closes** (the live feed also flushes 1 s after each 5-minute close). Same
+  `run_intraday_signals` code as the task, so the signals are identical (tests/test_live_engine.py).
+- **Numba** (`scanner/intraday/fast.py`): the bar-by-bar loops of the strategies (stop / target walk, stop entries,
+  VWAP, sweeps, retests) compiled to machine code. On 30 stored sessions the 15 strategies of the time went from
+  10.5 s to 3.3 s with every one of the 1,947 trades identical; the year-long backtest uses it too. Switched on in the
+  dashboard server and the backtest; the short 5-minute task runs the same functions as plain Python (importing Numba
+  would cost it more than it saves).
+- **Latency metrics** (`web/api/services/latency_svc.py`): tick transport, exchange to PC, bar close to signals,
+  signals to fill, strategy decision to fill, tick to exit. Also at `/api/metrics` in Prometheus' format for Grafana
+  (prometheus-client).
+- Not used, on purpose: C++/Rust HFT stacks (NautilusTrader, HftBacktest, Aeron, LMAX Disruptor, QuickFIX, SBE) are
+  for co-located microsecond trading with direct exchange access, which a retail FYERS account doesn't have - FYERS'
+  own round trip is ~0.1-0.5 s. uvloop doesn't run on Windows. Redis / QuestDB would be extra servers to run for
+  state the engine keeps in memory and Parquet already stores. Polars / TA-Lib / QuantLib: after the changes above,
+  pandas is no longer on the hot path, indicators are computed inside the compiled loops, and the option verdicts
+  price from NSE history, not a model.
+
+### Options signals (Signals page > Options)
+The app's signals as concrete option trades, live during market hours (09:15-15:30): an option opens within seconds of
+its signal (the live engine's new signals wake the loop; without the FYERS feed, the 5-minute task's file) and open ones
+are re-marked every minute on NSE's chains (`scanner/option_signals.py`, `web/api/services/optsig_svc.py`, journal `data/results/option_signals.json`). Each row
+gives the contract, entry premium (the ask; sold legs at the bid), stop and target in premium, lot, capital and the
+maximum loss after charges, labelled with the evidence behind it. Practice only: nothing is sent to FYERS.
+- **From intraday signals** on F&O stocks: LONG buys the call, SHORT the put, nearest 0.55 delta on the nearest expiry
+  at least 2 days out, only within 15 minutes of the signal's entry bar (later, the price has moved on). Stop and target are the signal's own levels re-priced; it closes with the strategy's exit, at
+  its stop / target, or at 15:00.
+- **From the stock strategies**: a working daily strategy's BUY becomes a 0.70-delta call on the expiry at least 25
+  days out, with a premium stop from the strategy's stop and no premium target: the strategy's own exit (a SELL, or
+  the stock leaving its holdings) closes it, or 3 days before expiry.
+- **Volatility (IV rank)**: an F&O underlying with IV rank and percentile both 70+ sells a defined-risk iron condor on
+  the monthly expiry nearest 30 days, or the other monthly one when that has too little open interest - at least 10
+  days out either way (shorts near 0.16 delta, wings 1.5% / 4% further, at least 15% of the width in
+  credit; out at half the credit, a loss of one credit, or 5 days before expiry); 15 and under buys the ATM straddle.
+  Untested: its backtest on NSE's daily option closes is shown next to it. On two years to Nov 2026, selling the condor
+  **only when IV rank was high** lost money on NIFTY and BANKNIFTY (2 trades each), while selling one every month made
+  money (18 trades each): far too few trades to trust either.
+- **Index verdicts**: the index options view above.
+- The directional sources can't be backtested on options here (no intraday option prices are stored), so each shows
+  its strategy's backtest label and builds its own record, after charges, on the page. Positions still open when the
+  dashboard isn't running are marked and closed at NSE's official close by the nightly F&O download.
+
+### Company research from NSE's filings `/company/SYMBOL`
+What Screener.in, Tijori, Trendlyne, StockEdge and Sensibull show, built from the same public filings they start from.
+Their own pages are not copied: their terms forbid copying their data or using it as a database (Screener.in: personal,
+non-commercial viewing only; Trendlyne: no machine-readable database without written permission; StockEdge: no
+automated use).
+- **Ten-plus years of financials** (`scanner/financials.py`): profit & loss back to 2005 (NSE's own line items before
+  2019, XBRL after), balance sheets from FY2019, cash flows from FY2020, the last 12 quarters; consolidated and
+  standalone kept apart (a switch on the page). ROCE, ROE, debt/equity, margins, cash conversion, payout, 3/5/10-year
+  compounded growth, P/E and P/B on the live price. Banks get their own lines (interest earned/expended, NII,
+  cost-to-income, NPAs). Every year links to its filing; numbers are as filed (EPS not adjusted for later bonuses).
+  New screener fields (ROCE, ROE, debt/equity, operating margin, 3/5-year growth, cash conversion), point in time.
+- **Business segments**: revenue and result by segment, from the results XBRL.
+- **Peers**: the same industry (banks next to banks), with market cap, P/E, P/B, ROCE, ROE, debt, growth.
+- **Filings timeline** (`documents_svc.py`): call transcripts, investor presentations, call schedules and recordings,
+  results, board outcomes, ratings, deals and annual reports since 2004, each linking to NSE's file.
+- **Investor portfolios** (Smart money > Investor portfolios, `investors_svc.py`): each well-known investor's, fund
+  house's or institution's holdings across companies and what changed last quarter, from the shareholding filings
+  (every public holder with 1%+). Under 1% is not disclosed, so "left" can also mean "now below 1%".
+- **IV rank / IV percentile** (Volatility page and the company page, `scanner/iv_history.py`): each F&O underlying's
+  ~30-day at-the-money implied volatility from NSE's daily F&O file, against its own past year. Kept current by the
+  nightly F&O refresh; a year of history is one button (~5 minutes).
+- **Quality-value-momentum score** (`scanner/qvm.py`): our own 0-100 score - ROE and low debt, earnings and book yield,
+  6/12-month momentum - each a percentile, averaged. On the company page and the Company screener, and backtested as the
+  EXPERIMENTAL strategy "Quality-value-momentum score" (top 20, quarterly) by the same engine as every strategy.
+  Its backtest means little until every company's financials are fetched.
+- Company screener > **Fetch all companies** now also fetches the ten-year financials (about two hours the first time,
+  in the background; then only new filings). A company page fetches its own the first time it is opened.
+- Not available from public sources, so not here: broker target prices, market-share data, Pine Script.
+
+### Strategy builder (`g j`)
+Describe a strategy in plain English (Claude turns it into rules; it never says whether they work) or build it from
+the rule editor: entry rules from the scan fields, exits by stop, target, trailing stop, holding days or exit rules,
+up to 50 positions, ranked by any field. **Test 8 years** runs it exactly like the built-in strategies: the
+survivorship-free top 500, costs, slippage, tax, the "working" test, plus the first 70% of the years against the last
+30%. **Optimise exits** tries 27 exit settings with a walk-forward: each year uses the settings that did best on the
+years before it only, shown next to the hindsight best and a deflated Sharpe ratio, so the optimism of tuning is
+visible. A spec is data, never code (`scanner/custom.py`); saved in `data/custom_strategies.json`.
+
+### Live setups (`g g`)
+Today's intraday events from the live bars, newest first: gaps of 2%+, opening-range breaks (first 15 minutes), fresh
+highs / lows of the day (after 30+ minutes without one), VWAP crosses (after 30+ minutes on the other side), volume
+spikes (4x the day's average bar, Rs 20 lakh+ a minute) and 52-week breaks. Completed bars only, so an event never
+disappears. Filter by group or to your watchlists and holdings; optional desktop notifications while the page is open.
+Without the day's live service it replays the last stored session. Facts about the tape, not tested signals.
+
+### Exit plans: trailing stops and scale-out targets
+- Practice account (order ticket > Exit plan): a trailing stop (% or points behind the best price, never loosens), two
+  scale-out targets (part at each) and "stop to entry after target 1".
+- Real holdings (Orders > Protect): a trailing-stop suggestion (your % under the highest close since you bought); one
+  click puts it in the stop field, Protect still asks before anything is sent (cancel the old GTT first).
+
+### Trade journal (`/journal`)
+Every trade in one list: real FYERS fills (first-in first-out), the practice account and finished replays. Add a setup
+tag, tags, mistakes, notes, a 1-5 "followed my plan" rating and a chart screenshot. Statistics by setup, mistake, hour
+and weekday of entry, holding time and side; how far trades went against / for you while open (MAE / MFE: the room
+your stop needs, and how much of the move you kept).
+
+### Economic calendar, IPOs, announcements
+The Calendar adds RBI policy decisions (FY 2026-27 schedule), US Fed decisions (2026-27), India's CPI / WPI / IIP / GDP
+release days and the Budget (release rules: the official calendars have the final word; add your own events in
+data/econ_events.json), NSE IPOs (subscription dates, price band) and the latest NSE announcements from your stocks
+(routine filings hidden). Each stock's chart side panel lists its announcements with links to NSE's PDFs.
+
+### Options backtester (`/options-backtest`)
+Ten strategies (straddles, strangles, iron condor / butterfly, credit and debit spreads) on NIFTY or BANKNIFTY, one
+position per monthly or weekly expiry: strikes as % from the index, entry with N days left, stop and profit target
+checked at each close, slippage, and the real charges (Rs 20 a leg, STT 0.0625% / 0.1% from Oct 2024, exercise STT,
+exchange, stamp, GST). Data: NSE's daily F&O bhavcopy (`scanner/option_history.py`, NIFTY / BANKNIFTY options within
+20% and 70 days, a few MB a year): "Fetch 2 years of history" once (~1.2 MB a day from NSE), then the 19:30 F&O job
+adds each day. Daily closes only: an intraday spike through a stop is not seen.
+
+### Company numbers
+Revenue, profit, EPS, growth against the same quarter a year ago, net margin and P/E from NSE's quarterly filings
+(Integrated Filing - Financials, XBRL; consolidated when filed), on each stock's chart side panel. "Fetch all" (once,
+~1 hour in the background) fills the universe; the 19:30 job then checks stored companies weekly. Scans get P/E, EPS,
+revenue growth, profit growth and net margin, point in time (each quarter counts from the day it was filed).
+
+### More drawings, chart layouts, Point & Figure, Kagi, volume by price
+- Drawing tools add a ray, a parallel channel (3 clicks), an Andrews pitchfork (3 clicks), a measure tool (% , rupees,
+  days) and up / down arrows.
+- Layouts: name the chart's indicators, chart type, timeframe and options; apply them to any stock in one click.
+- Chart types add Point & Figure (X / O columns, % boxes, 3-box reversal) and Kagi (reversal %, thick above the last
+  shoulder, thin below the last waist). The side panel shows volume by price over the bars shown (point of control,
+  70% value area).
+
+### Higher timeframes
+- Daily chart: weekly SMA 10 & 30 on the price, weekly RSI 14 as a pane (each week's value from its last day).
+- Intraday charts: the previous session's high, low and close and the daily SMA 20 / 50 / 200 as lines.
+- Scans: weekly SMA 10 / 30, weekly RSI 14 and the 4-week return (completed weeks only, no look-ahead), with a
+  "Weekly uptrend, daily pullback" preset.
+
+### Automatic trendlines
+The chart patterns add automatic trendlines: the newest falling line through two swing highs 20+ bars apart that no
+close crossed (a breakout when a close goes above it) and the rising line through two swing lows (a breakdown). Drawn
+on the chart, usable as pattern alerts, and re-tested every Saturday with the other patterns (forward returns against
+the universe after costs): the chart shows their tested record.
+
+### Your own formulas
+Chart > Formulas: write an indicator such as `(close - sma(close, 50)) / atr(14)` in a small safe formula language
+(fields open, high, low, close, volume; + - * / and ** with a number; sma, ema, rsi, highest, lowest, ref, stdev, sum,
+roc, atr, abs, log, sqrt, max, min), check it, save it, and show it on the price or in its own pane. Saved formulas are
+scan fields under "Your formulas". Nothing else is accepted: a formula can only compute.
+
+### Market calendar (`g q`)
+Results dates (NSE's event calendar), ex-dividend / rights / bonus / split / buyback dates (NSE's corporate actions),
+F&O expiries (weekly and monthly, from NSE's contract list) and market holidays, 2 weeks to 3 months ahead, nearest
+first. Your holdings and watchlist stocks are flagged; a dividend shows its amount, its yield on the last close and the
+"buy by" day (with T+1 settlement the record date is the ex-date: own the shares at the close of the trading day
+before). Each source can fail on its own: the page says which.
+
+### Tax harvesting (`/tax`)
+Each holdings.csv lot as short or long term (long = held more than 12 months), with the date it turns long term; this
+financial year's tax on gains already booked (type your broker's tax P&L totals, or the real orders Quant Desk recorded
+are used) after the set-off rules; and before 31 March: long-term winners to sell and buy back on a later day to use
+the Rs 1.25 lakh exemption, losers that cut the tax on booked gains (only as many shares as still lower it), and
+short-term winners worth waiting for. Shares bought before 1 Feb 2018 (grandfathered cost) are flagged, not computed.
+Not tax advice.
+
+### Option strategy builder (`/option-builder`)
+Eleven ready-made strategies (spreads, straddles, strangles, iron condor / butterfly) placed at the money on a stored
+chain, every leg editable (side, call / put / future, strike, lots, price, volatility). Profit and loss at expiry and
+"today" (any number of days ahead, volatility shifted), breakevens, maximum profit and loss (or "unlimited"), net
+credit / debit, the position's delta / theta / vega / gamma and the chance of profit (lognormal at the at-the-money
+volatility: a model). Black-76 on the chain's forward; margin is not computed.
+
+### Portfolio risk (`g z`)
+Money at risk to your stops, one-day loss estimates (95% / 99% value at risk and expected shortfall from today's
+holdings replayed over two years), beta to the Nifty 50 and what -5/-10/-20% would do, the worst day in the store for
+today's holdings, the deepest fall, concentration (largest holding, industries, effective number of stocks) and a
+correlation matrix with pairs that move together.
+
+### Your strategies in every scan, basket orders
+- Strategy builder > **Re-test in every scan**: a saved strategy joins the daily scan like the built-in ones (re-tested
+  on the survivorship-free universe, a "working" status); its BUY / SELL appear on Today only while it is working.
+- Today > **Review all**: the day's BUYs / SELLs in one basket, practice or real. Real orders are reviewed with every
+  check (nothing sent), then sent one at a time at least a second apart, each once; one that fails doesn't stop the rest.
+
+### Seasonality, market heatmap
+- **Seasonality** (chart side panel): each calendar month's average return over the years in the store (8-9 here),
+  up years, and a t-statistic; only months with |t| >= 2 over 8+ years count as a pattern, the rest is noise.
+- **Market heatmap** (`g v`): today's universe by industry, sized by 20-day traded value (NSE's day files carry no
+  market cap), coloured by today's live move or the 1W / 1M / 3M / 12M return; click a stock for its chart.
+
+### Order flow (intraday chart > Order flow)
+Without FYERS Prime: the live service splits each tick's new volume into bought (at or above the ask) and sold (at or
+below the bid; in between by the price move) per minute and price level (`scanner/intraday/orderflow.py`,
+`data/intraday/live/orderflow_YYYYMMDD.parquet`, 10 days kept). The chart shows delta per bar and cumulative delta under
+the candles, and the side panel today's volume profile (point of control, 70% value area). An estimate (a tick can
+bundle several trades); exact tick-by-tick order flow needs Prime.
+
+### More timeframes and indicators, smart watchlists
+- Charts: 1m, 5m, 15m, **30m, 1H** (starting 09:15 like NSE's), 1D, 1W and **monthly**; indicators now include
+  **Ichimoku** (9, 26, 52), **Parabolic SAR** and **Aroon 25** (26 indicators in all).
+- **Smart watchlists**: Watchlist > "Smart list from a scan" fills a list with a saved scan's stocks, refreshed after
+  each scan (and right away when created); its stocks stream live and can carry alerts like any list.
+
+### Dated charges and 1-minute history
+- Backtests charge the SEBI fee, stamp duty and NSE transaction charge **as they were on each trade date** (documented
+  changes of Jun 2020, Jul 2020, Oct 2024 and Mar 2026; everything else at today's rates).
+- **1-minute bars from FYERS** history after the daily archive (last 60 days; `intraday.one_minute_days`, ~150 calls a
+  day, 0 turns it off), alongside the ones the live feed builds.
+
+### Browser tests
+`npm run build` then `npm run e2e` in web/ui: Playwright drives the built dashboard in the Edge installed on this PC
+(no browser download), served by the real API on port 8620. Read-only: pages, a replay, chart types, the practice
+ticket (cancelled) and a strategy-builder test.
+
+### 1-minute charts, login reminder
+- **1-minute candles** (Chart › 1m, up to 5 sessions): the live service builds them from the same FYERS ticks as the
+  5-minute bars (`data/intraday/live/1m_YYYYMMDD.parquet`) and keeps them in the intraday store at each close, so they
+  exist for the symbols it streams, from the first session it runs with this version.
+- **08:45 login reminder** (task "NSE Scanner login reminder", added by the one-click setup on the Data & Settings
+  page): on a trading day without today's FYERS login it sends a Telegram message, and always logs a line to
+  `data/logs/reminders.log`. Nothing on holidays or once you are logged in.
+- **Paper** open positions are marked to the live price while the market is open.
+
+### Coach (`g h`): where your own trading leaks money
+Reads only your own record: replays, real fills (`data/fills.jsonl`, matched buy to sell first-in, first-out) and your
+holdings against their stops. It checks your process: trades without a stop, holding losers longer than winners, one
+loss wiping out several wins, busy sessions, the trade right after a loss, charges, and whether recent trades are
+better. With an `ANTHROPIC_API_KEY` in `.env`, **Write my review** sends those numbers (nothing else) to Claude for a
+written review with concrete if-then rules (one call, about Rs 5-15), kept until your numbers change. Fewer than ~30
+practice trades or ~15 real round trips: it says the patterns are first hints, not findings.
 
 ### Fyers login, step by step
-1. Click **Log in to Fyers** in Quant Desk (or double-click `1_login.bat`). The Fyers login page opens.
-2. Log in with your Fyers ID, PIN and TOTP.
-3. Your app's redirect address is `127.0.0.1:8000`, which your Docker setup is also using. So after login the browser may show an error page. **That's fine.** Copy the **full address** from the browser's address bar (it contains `auth_code=`), paste it into Quant Desk's login box (or the `1_login.bat` window), and press Enter.
-4. You'll see "✅ Logged in".
+No command to run: everything happens in Quant Desk.
+1. Click the **Fyers** chip in the top bar (or **Log in** in Settings › Fyers, or the yellow banner), then **Log in with Fyers**. The Fyers login page opens in a new tab.
+2. Log in there with your Fyers ID, PIN and TOTP.
+3. Fyers sends that tab back to your app's Redirect URL:
+   - If that is Quant Desk's own `http://127.0.0.1:8600/fyers/callback`, Quant Desk finishes the login by itself, the Fyers tab says "✓ Logged in" and closes, and the dialog closes. **One click.**
+   - If it is another address on a free port, Quant Desk listens there for the login (also one click).
+   - If it is `127.0.0.1:8000`, which your Docker setup also uses, the browser may show an error or another app's page. **That's fine.** Copy the **full address** from the address bar (it contains `auth_code=`), paste it into the dialog, and click **Complete login**.
 
-`1_login.bat` first tries to catch the redirect itself on that address. If another program (Docker) is using the port it
-says so and asks for the pasted address at once; otherwise it waits up to 5 minutes before asking.
+*To make it one click (one-time setup):* in the [Fyers API dashboard](https://myapi.fyers.in/dashboard), set your app's Redirect URL to `http://127.0.0.1:8600/fyers/callback`, then click **I've changed it in Fyers** in the login dialog (it writes `FYERS_REDIRECT_URI` in `.env` for you). If your Docker app uses the same Fyers app, create a second Fyers app for Quant Desk instead and put its App ID and Secret in `.env`.
 
-*To make login fully automatic:* in the [Fyers API dashboard](https://myapi.fyers.in/dashboard), change your app's Redirect URL to `http://127.0.0.1:8765/fyers/callback`. Then put the same address in `.env` as `FYERS_REDIRECT_URI`.
+`1_login.bat` still works as a fallback when Quant Desk isn't running.
 
 ---
 
@@ -46,16 +483,12 @@ says so and asks for the pasted address at once; otherwise it waits up to 5 minu
 | **Momentum leaders** | Holds the 15 strongest stocks by risk-adjusted 6- and 12-month return (NSE's momentum-index formula), reviewed monthly. A holding is kept while it stays in the top 30. Only stocks above their 200-day average. No new buys when Nifty is below its 200-day average. | The best-documented stock-selection effect, in India and globally. NSE's whitepaper backtest of Nifty200 Momentum 30 (Apr 2005 on): 18.6% CAGR vs 12.7% for the Nifty 200 (`docs/strategy_catalogue.md`, L1). Falls harder in crashes. |
 | **Trend-template breakout** | Buys a stock in a strong uptrend (above rising 50/150/200-day averages, near its high, top relative strength) when it breaks its 20-day high on heavy volume. 8% stop, no trailing stop (`trail_pct: 0`), exit below the 50-day average. | A practitioner method (Minervini). Works in bull phases. In our tests it roughly matched the average stock. |
 | Near 52-week high (off: tested and rejected) | Holds uptrending stocks closest to their 52-week high, reviewed monthly. | Academic (George & Hwang; Indian study by Raju 2023). Works best as a filter, not on its own. Never beat the average stock here. |
-| **Low volatility** | Holds the 20 steadiest large, liquid stocks, reviewed quarterly (Nifty100 Low Vol 30 method). | Lost less in crashes (2008: −43% vs −54%). Defensive; lags in strong rallies. |
-| RSI-2 pullback (off: tested and rejected) | Buys sharp dips in uptrending stocks. | Short-term reversal mostly works in illiquid stocks. After realistic costs it fails here. |
-| Old textbook rules (off: tested and rejected) | The v1 rules (50-DMA / 52-week breakouts, 5% stop / 10% target). | **Lost money** in every test (−15.9%/year in the 24 Oct 2026 point-in-time scan). Kept only for comparison. |
 
 Also re-tested after every scan (rules in `scanner/strategies.py`; numbers on the dashboard):
 
 | Strategy | What it does | Evidence grade |
 |---|---|---|
 | Sector rotation | Each month, the strongest stocks inside the 3 strongest industries (average 6-month return of their stocks), above their 200-day average; regime filter. | MODERATE (Moskowitz & Grinblatt 1999). Its point-in-time result is **flattered**: NSE lists industries only for today's index members, so companies that later dropped out can never be picked (83% of the test's stock-days have an industry). |
-| Golden cross trend | Buys a strong stock (RS 60+) when its 50-day average crosses above the 200-day; sells on the cross back down; 15% stop. | WEAK (`docs/strategy_catalogue.md` S11 graded it "skip: no evidence" for single stocks). |
 | Nifty trend timing (ETF) | Holds NIFTYBEES while Nifty is above its 200-day average, cash otherwise; checked monthly. | MODERATE (Faber): smaller crashes, not a higher return. |
 | Dual momentum (ETF rotation) | Each month the 2 ETFs (NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES, MON100) with the best positive 12-month return, otherwise cash. | MODERATE (Antonacci). |
 | VCP breakout | A leader near its 52-week high in a tight 15-day box breaks out on 1.5× volume; 7% stop, exit below the 50-day average. | WEAK |
@@ -63,7 +496,6 @@ Also re-tested after every scan (rules in `scanner/strategies.py`; numbers on th
 | Pullback in leaders (21-EMA) (off: tested and rejected 25 Oct 2026) | An RS-80+ stock in a stage-2 uptrend touches its 21-day EMA and closes above it; exit below the 50-day average or after 20 days; 7% stop. | WEAK. +8.5%/year in the 24 Oct 2026 point-in-time scan, below the Nifty 500 (+13.1%); profit factor 1.08 over 1,188 trades. |
 | Earnings gap-up (PEAD) | After results, a 4%+ gap up on 3× volume that holds; 8% stop, 40-day limit; no regime filter. | MODERATE (mixed in India) |
 | Bollinger squeeze breakout (off: tested and rejected 25 Oct 2026) | Narrowest bands in 6 months, then a close above the upper band in an uptrend; exit below the 20-day average; 8% stop. | WEAK. +6.9%/year in the 24 Oct 2026 point-in-time scan, below Nifty 50 (+10.6%); max drawdown −49%. |
-| NR7 breakout (off: tested and rejected 25 Oct 2026) | After the quietest day in 7, a close above that day's high in an uptrending leader; exit below the 10-day average or after 7 days; 5% stop. | WEAK. **Lost money** after costs in the 24 Oct 2026 point-in-time scan (−9.7%/year, 2,632 trades). |
 
 New on 25 Oct 2026, tested from the next scan on (no results yet; judge each by its own backtest, never by the
 papers behind it):
@@ -97,7 +529,7 @@ Same rules, same costs and tax, 2019-08-19 to 2026-10-22:
 | Nifty 500 index (the real one) | – | +13.3% | – | −38% | 0.80 | +12.0% |
 
 *Timing range* = the same rules rebalanced a few days earlier, or started a few weeks later.
-*After tax* = short-term gains taxed at 20.8% every April (buy & hold pays 13% once, at the end).
+*After tax* = short-term gains taxed every April at the rate of the day they were realised (15.6% before 23 Jul 2024, 20.8% after; buy & hold pays LTCG once, at the end).
 *Updated 23 Oct 2026* after fixing price-data errors in both data sets (missing NSE sessions, wrong "data
 corrections", three incomplete NSE files). Momentum point-in-time went 27.1% → 28.3% (inside its timing range),
 trend breakout 44.1% → 39.8% on today's list and 21.0% → 19.6% point-in-time.
@@ -128,8 +560,17 @@ What this shows:
 
 What is still not perfect:
 - **Timing luck:** the same strategy rebalanced a few days apart ends up several % a year apart (see the range).
-- **Rights issues are not adjusted** in the point-in-time prices, so an ex-rights day shows as a small loss
-  (slightly pessimistic). **Dividends are left out** of every line, the Nifty 500 index included (price returns).
+- **Total return.** Dividends are counted: a stock held before its ex-date pays its dividend in cash that day (NSE's
+  corporate-actions list, ~12,000 dividends since 2018, `scanner/dividends.py`), taxed at your slab from FY 2020-21
+  (before that the company paid dividend distribution tax). The indices they are compared with include dividends
+  too: the average stock gets the same dividends, and the Nifty 50 / 500 and factor indices accrue NSE's own daily
+  dividend yield (an approximation of NSE's TRI). Buy-and-hold benchmarks are taxed at LTCG at the end, slightly
+  generous to them. Effect on this data: average stock 14.0% -> 15.3% a year, Nifty 500 11.3% -> 12.7%, momentum
+  +0.6%, low volatility +1.7%. Pattern studies, scans and the late-entry test compare a stock with the average
+  member over the same days, so they stay on price returns.
+- **Rights issues are adjusted** in the point-in-time prices from their terms (NSE does not re-base the price for
+  them): the history before the ex-date is rescaled to the theoretical ex-rights price, (held x price + new x issue
+  price) / (held + new). 81 since 2018; Vodafone Idea's 2019 issue no longer shows as a 40% crash.
 - The universe ranks by traded value, re-ranked every day. NSE's Nifty 500 ranks by free-float company size and
   is reviewed twice a year.
 - A holding that stops trading (merger, delisting) is sold at its last price after 20 days without trades.
@@ -208,7 +649,7 @@ FYERS is the first choice for everything real-time and intraday. Every FYERS cal
 | Data calls (history, quotes) | 5/second, 50/minute, 5,000/day | **4/second, 45/minute, 4,500/day** |
 | User calls (profile, holdings) | 10/second, 200/minute, 100,000/day | 8/second, 180/minute, 90,000/day |
 | Rate-limit breaches | 3 in a day = account blocked for the day | **Stops using FYERS for the day after 2** |
-| WebSocket (live ticks) | up to 100 symbols, no REST cost | 100 most liquid intraday symbols |
+| WebSocket (live ticks) | up to 100 symbols, no REST cost | the `live_fno` index futures / options (default 20), then the most liquid intraday stocks (80) |
 
 Usage is counted in `data/fyers_usage.json`, which every process shares. If the day's budget runs out, everything falls back to NSE and Yahoo automatically, with no errors.
 
@@ -216,7 +657,7 @@ Usage is counted in `data/fyers_usage.json`, which every process shares. If the 
 |---|---|---|
 | Live prices in a scan | FYERS quotes → Yahoo | about 11 per scan (50 symbols per call) |
 | Today's intraday bars | FYERS WebSocket live feed → Yahoo (delayed) | 0 (WebSocket) |
-| Intraday history (1 year) | FYERS → Yahoo (60 days only) | about 600 once (`5_intraday_backfill.bat`, ~14 min), then about 150 a day |
+| Intraday history (1 year) | FYERS → Yahoo (60 days only) | about 600 once (automatic at 15:45 after a Fyers login, or **Download 1 year of FYERS history** on the Intraday page; ~14 min), then about 150 a day |
 | Completed daily candles | NSE official file → Yahoo | 0 (NSE is the exchange's own data) |
 
 ### The survivorship-free backtest universe (`scanner/pit.py`)
@@ -239,7 +680,7 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
   is then often a placeholder (BCG 2025: ₹2, opened at ₹21.80), so it is only trusted for a clean split ratio
   the market agrees with (CCAVENUE Oct 2026: 10:1 consolidation).
 - Checked against the main store (Oct 2026): 469 of 500 shared stocks agree within 2% on every day. The other 31:
-  12 rights issues (Yahoo adjusts them, NSE's prices here don't), 6 demergers where Yahoo used a different
+  12 rights issues (Yahoo adjusts them; the point-in-time prices now do too, from the issue terms), 6 demergers where Yahoo used a different
   factor (SIEMENS 2025, NMDC 2022 ...), 2 small demergers without a price gap that only Yahoo adjusts (Aarti
   Industries and TTML, July 2019), and Yahoo prices 2–4% off NSE on 18 Mar 2019 and 2 May 2025 (7 stocks, one day)
   and for about a week each between Apr 2024 and Nov 2025 (IIFL, Sobha, UPL, Thangamayil, M&M Finance, Adani
@@ -252,19 +693,96 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
 
 ## 5. Intraday (honest)
 
-- **Nine intraday strategies** are tested on 5-minute bars of the ~150 most liquid F&O stocks, using textbook parameters with no tuning:
-  - opening-range breakout (15-min and 5-min "in play")
-  - VWAP trend and VWAP pullback
-  - gap-and-go and gap fade
-  - morning-predicts-close momentum
-  - closing-hour trend
-  - narrow CPR breakout
-  - Supertrend
-- Every test uses FYERS intraday charges and slippage, squares off at 15:00 for F&O stocks (5 minutes before FYERS' 15:05 MIS cut-off) and 15:15 for others, and taxes profit as speculative business income.
-- **Result so far (60 Yahoo sessions, 29 Jul – 23 Oct 2026):** all nine strategies **lose money after costs**, eight of them by a statistically significant margin. This matches SEBI's July 2024 study, which found that 71% of individual intraday traders lost money.
-- **Three pre-registered research tests** were added on 25 Oct 2026 (large-cap gap fade, stocks-in-play ORB-15, NIFTYBEES last-half-hour momentum; `docs/intraday_data.md` §5). They have no results yet and none is expected to beat Indian MIS costs; they are there to measure that honestly, never to produce orders.
-- **One year of FYERS history** gives a much stronger test. Run `5_intraday_backfill.bat` once after logging in. A daily 15:45 task keeps it growing; FYERS itself only keeps a rolling year.
-- **Real-time setups:** `4_intraday_live.bat` builds live 5-minute bars from the FYERS WebSocket. The scheduled task starts it at 09:14.
+- **Removed on 15 Nov 2026:** the twelve earlier intraday strategies - opening-range breakout (15-min and 5-min "in play"), VWAP trend and pullback, gap-and-go / gap fade, morning-predicts-close momentum, closing-hour trend, narrow CPR breakout, Supertrend and the three pre-registered research tests (large-cap gap fade, stocks-in-play ORB-15, NIFTYBEES last-half-hour momentum). Every one lost money after costs in its backtest (the 60-session Yahoo test of 29 Jul - 23 Oct 2026 and the FYERS year after it); this matches SEBI's July 2024 study, which found 71% of individual intraday traders lost money. They are in git history before that date. The four daily strategies that lost in their tests went the same day: low volatility, golden cross, NR7 breakout and RSI-2 pullback.
+- Every intraday test uses FYERS intraday charges and slippage, squares off at 15:00 for F&O stocks (5 minutes before FYERS' 15:05 MIS cut-off) and 15:15 for others, and taxes profit as speculative business income.
+- **One year of FYERS history** gives a much stronger test. Nothing to run: the 15:45 task downloads it on the first afternoon you are logged in to Fyers (or click **Download 1 year of FYERS history** on the Intraday page), then keeps it growing; FYERS itself only keeps a rolling year.
+- **Why the removed strategies did not work:** before costs the average trade makes about nothing (between -0.2% and +0.3%), and brokerage, STT, exchange fees, GST and slippage take 0.15-0.30% a trade. The Intraday page shows both columns. No 200-day or 200-EMA filter is involved.
+- **Live bars:** `4_intraday_live.bat` builds live 5-minute bars from the FYERS WebSocket. The scheduled task starts it at 09:14.
+- **New-era strategies (13 Nov 2026):** three price-action / "smart money" setups taught by Indian trading channels, tested like the rest:
+  - **Liquidity sweep + retest at yesterday's high / low:** price trades through the level where stop-losses sit, closes back inside within 30 minutes (the trap), then retests it and holds. Entry on the next bar, stop just beyond the sweep, target twice the risk.
+  - **Liquidity sweep + retest at the opening range** (09:15-09:30 high / low), the same from 09:30.
+  - **Opening-range break-and-retest with VWAP:** a 5-minute close beyond the range on the right side of VWAP, then a retest of the range edge that holds.
+- **Live signals:** every 5 minutes from 09:20 to 15:05 (`intraday_sync.py --signals`) the strategies are run on today's bars (FYERS real time when logged in, else Yahoo ~15 min delayed) and their trades appear on the Signals page, Intraday tab.
+  - With `intraday.show_untested: true` (config.yaml, on) **every** strategy gives signals, each labelled with its backtest result: **Proven** (a profit beyond luck after costs over 40+ sessions), **Not proven**, **Lost in test** or **Untested** (not in the backtest yet). The tab can be narrowed to proven only. With `show_untested: false` only proven strategies give signals - the original rule.
+  - **Live F&O OI build-ups** are added as their own untested signals: a long build-up (open interest up 5%+ with the price up) above VWAP is a LONG, a short build-up below VWAP a SHORT; stop at the day's low / high, target twice the risk. There is no intraday OI history, so they can't be backtested.
+  - The same job refreshes NSE's live OI feed (data/fno/live_oi.json) every 5 minutes, so the F&O page's **Live today** view stays current without the page open or a FYERS login. Its Yahoo bars also make the Live setups page show today's session (~15 min delayed) instead of a replay.
+  - **AI plan** (each signal row): Claude reads the symbol's levels, the latest 5-minute bars and today's signals and writes an IF-THEN plan - key levels, up to two setups with entry zone, conditions to wait for, stop, two targets and what cancels it (needs `ANTHROPIC_API_KEY` in .env; roughly Rs 5-10 a plan).
+
+---
+
+## 5b. Options, F&O positioning and price action (positioning, not signals)
+
+Three Quant Desk pages describe what the derivatives market is doing. None of them gives buy or sell orders: no
+backtest in this app shows that PCR, max pain, open-interest levels or candle patterns predict prices.
+
+- **Options** (`scanner/options.py`): NSE's public option chain for the indices and F&O stocks in
+  `options.underlyings` (default NIFTY, BANKNIFTY; add a stock with the box on the page). The 09:12 task
+  (`intraday_sync.py --options`) stores a chain every `options.interval_seconds` in market hours; an unchanged
+  chain (same NSE time stamp) is not stored twice. The page shows:
+  - spot and forward, the put-call ratio and max pain;
+  - at-the-money implied volatility and the 25-delta skew;
+  - the straddle's expected move and the 1-SD range;
+  - open interest by strike, now, since yesterday or over the last 5-60 minutes;
+  - OI levels and build-ups per strike;
+  - **unusual activity**: strikes that traded more contracts than are open, or whose open interest jumped 10%+
+    within the window, ranked by premium traded.
+
+  Implied volatility and greeks are computed on the put-call-parity forward (Black-76). NSE's own IV column uses the
+  spot and gives calls and puts of one strike different values, so it is shown for reference only.
+  FYERS is not used for chains yet: its response has not been checked against a real one.
+- **Does it work?** (`scanner/options_research.py`, Options page): three popular claims checked on the stored
+  end-of-day chains:
+  - whether the price is pulled towards max pain by expiry (vs a 50% coin flip);
+  - whether expiry closes land inside spot ± straddle (about 57% if options are fairly priced);
+  - whether the put-call ratio says anything about the next day.
+
+  Each needs 60 days before it gets a verdict. Option signals would come only from a claim that holds.
+- **F&O positions** (`scanner/fno.py`): NSE's participant-wise open interest, the contracts FII, DII, Pro (brokers'
+  own money) and Client hold long and short in index and stock futures and options. NSE publishes totals per group
+  after the close and names no one. Also the day's futures build-ups (price vs open interest), basis, put-call
+  ratio and call / put walls for every F&O underlying, from the F&O bhavcopy. The 19:30 task
+  (`intraday_sync.py --fno`) adds each day; the first **Fetch** loads the last 30 trading days (about 30 MB).
+- **Price action** (`scanner/levels.py`, under each chart): pivots and the CPR for the next session, swing support
+  and resistance of the last year (with how often each level formed), trend versus the 20/50/200-day averages,
+  higher highs / lower lows, Supertrend, daily candle patterns and **chart patterns** (double top / bottom, head
+  and shoulders, triangles, wedges, rectangles, flags: forming or confirmed, with the breakout level, where the
+  pattern is void and the textbook target; about half of all stocks show one at any time). When the stock has
+  5-minute bars it adds
+  today's VWAP with 1-SD bands, the 15-minute opening range, the volume profile (point of control, value area) and
+  intraday patterns.
+
+- **Pattern evidence** (`scanner/pattern_study.py`, shown on every pattern): each candle and chart pattern tested
+  on the survivorship-free top 500, Aug 2018 - Oct 2026 (808,294 events): buy at the next open after the pattern
+  first appeared (using only data up to that day), compare with the average top-500 stock over the same 5 / 10 /
+  20 days, t-statistic on monthly averages. **No pattern beat the average stock after costs (~0.45% round trip).**
+  Gap-ups did worse than it (-0.20% over 10 days, t -5.0), ascending-triangle breakouts too (-0.36% over 20 days,
+  t -2.2). The closest to an edge, symmetrical-triangle breakouts, made +0.69% in 5 days (t 4.6) - +0.24% after
+  costs, gone by 20 days. It re-runs by itself every Saturday at 11:00 (an automatic job, ~17 minutes).
+- **Big trades live** (`scanner/fno_live.py`, Options page): the 09:14 live service (FYERS WebSocket, needs
+  today's FYERS login) also streams the nearest NIFTY and BANKNIFTY futures and NIFTY's nearest-expiry calls and
+  puts within 4 strikes of the money (`live_fno` in `config.yaml`; picked from FYERS' public symbol list). Every
+  single trade of Rs 5 crore notional (futures) or Rs 25 lakh premium (options) or more is kept with the side that
+  most likely started it: at the ask a buyer, at the bid a seller (tick rule). Totals per instrument show which side
+  was more aggressive today. These 20 symbols come off the 100 the live feed allows, so 80 stocks stay. Not yet
+  seen on a live session: the first one after a FYERS login confirms the tick fields.
+- **Claude's forecast** (`scanner/ai_forecast.py`, `web/api/services/forecast_svc.py`, Options page, needs
+  `ANTHROPIC_API_KEY` in `.env`). Claude (Opus 5.5) reads the stored chain near the money, NSE's participant
+  positions, the futures build-up, recent official closes and levels, and the app's tested readings. For the next
+  official close and the expiry close it gives:
+  - the chance the close ends above the spot it saw;
+  - a range for about 2 closes in 3;
+  - the level that would prove it wrong.
+
+  Its answer has a fixed JSON shape. Every forecast is journalled (`data/results/ai_forecasts.json`, with the exact
+  snapshot it read) and scored from NSE's official closes against a coin flip, "always up" and the options-implied
+  1-SD range. The 19:30 task (`intraday_sync.py --fno --ai-forecast`) stores the day's last chains and sends one
+  forecast per `ai_forecast.underlyings` (Batch API, half price); the 09:12 task collects the answers. "Ask Claude
+  now" on the page costs roughly Rs 8-13. A chain older than the last official close is never forecast.
+  **Unproven** until 60+ settled forecasts beat a coin flip beyond luck; it never changes the options verdict.
+
+What no one can show: who is behind a trade while it happens, or when a big trader will exit. NSE names buyers
+and sellers only later (block / bulk deals the same evening, insider disclosures within two days, shareholding
+each quarter: see Smart money).
 
 ---
 
@@ -272,7 +790,7 @@ Built only from NSE's own archive, for **every** NSE equity since August 2018, i
 
 1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token. Then send any message to your new bot, and message **@userinfobot** to get your chat ID.
 2. Put both in `.env` (`TELEGRAM_BOT_TOKEN=...`, `TELEGRAM_CHAT_ID=...`).
-3. Right-click **`setup_schedule.ps1`** and choose **Run with PowerShell**. This sets up weekday scans at 8:30 AM, 3:40 PM and 7:15 PM that send a summary to your phone, plus the two intraday jobs (section 5). Run it again after updating the app, so the tasks get the current settings.
+3. In Quant Desk, open **Settings › Automatic jobs** and click **Set up automatic jobs** (a banner offers the same when a job is missing; no window or command). This sets up weekday scans at 8:30 AM, 3:40 PM and 7:15 PM that send a summary to your phone, a live scan every 30 minutes from 9:45 AM to 3:15 PM (provisional signals on today's live candle, no Telegram), plus the three intraday jobs (section 5). While the market is open, the top bar and the Signals page also show live prices every 30 seconds (FYERS real time when logged in, else Yahoo ~15 min delayed). Click **Repair / update** there after updating the app, so the tasks get the current settings. The option chains (09:12), F&O positioning and Claude forecasts (19:30) and the weekly pattern study (Saturday 11:00) are set up the same way.
 
 If a scan fails, you get a Telegram alert; a scheduled scan skipped because another scan was running sends a short
 note too. Details go to `data\logs\scanner.log` (a scheduled scan that cannot even start, e.g. a missing
@@ -284,8 +802,8 @@ is stopped at the tasks' 45-minute limit.
 
 ## 7. Your holdings
 
-In Quant Desk, open **Portfolio** (old Streamlit dashboard: **💼 My holdings**):
-- add stocks by hand (symbol, quantity, buy price, **buy date**), or click **Import from Fyers** (Streamlit: **⬇️ Import my holdings from Fyers**);
+In Quant Desk, open **Portfolio**:
+- add stocks by hand (symbol, quantity, buy price, **buy date**), or click **Import from Fyers**;
 - the **buy date** lets the app adjust your buy price if the stock had a split or bonus since you bought, so no false "stop-loss hit" alerts;
 - alerts include: stop-loss hit, target reached, below the 50/200-day average, momentum rank, and renamed symbols.
 
@@ -322,8 +840,27 @@ scanner/
   holdings.py    holdings file, corporate-action-adjusted buy price
   lock.py        one scan at a time across processes
   intraday/      5-minute bars (Yahoo, FYERS history and live WebSocket), MIS backtests -> intraday.json
+  intraday/quote_hub.py  live quotes from the FYERS WebSocket (quotes.json) and the screen's subscriptions
+  watch.py       watchlists and one-shot price alerts (checked by the live service and the dashboard)
+  scans.py       your own scans: rules over whole-market factors, today's matches, 8-year point-in-time backtest
+  late_entry.py  does a strategy's edge survive joining its trades 5 / 10 / 21 days late (late-entry BUYs)
+  index_study.py an index's own history of today's setup (options direction for NIFTY / BANKNIFTY)
+  options.py     NSE option chains: parsing, Black-76 IV / greeks, PCR, max pain, OI levels, unusual activity
+  options_research.py  do PCR / max pain / the straddle's expected move hold up on the stored days?
+  fno.py         NSE participant-wise OI and F&O bhavcopy: FII/DII/Pro/Client positions, futures build-ups
+  fno_live.py    big trades live: index futures / near-the-money options on the FYERS feed, large trades by side
+  levels.py      price action: pivots, swing S/R, trend, candle / chart patterns, VWAP / opening range / profile
+  pattern_study.py  every candle / chart pattern tested on the point-in-time top 500 (event study, after costs)
 web/             Quant Desk: FastAPI backend (web/api) and React app (web/ui), started by 3_dashboard.bat
-app.py           old Streamlit dashboard (3b_dashboard_streamlit.bat; scans run in a background process)
+  api/routers/stream.py        live prices as Server-Sent Events (one stream per tab)
+  api/services/action_svc.py   one answer per stock: BUY / SELL (exit) / HOLD / NO EDGE (Today, Chart)
+  api/services/intraday_chart.py  5 / 15-minute candles with VWAP for the Chart page
+  api/services/robustness.py   Monte Carlo, deflated Sharpe and consistency per strategy
+  api/services/orders_svc.py   your own FYERS orders: preview, checks, place once, kill switch, protection, audit
+  api/services/replay_svc.py   market replay: past sessions bar by bar, results recomputed with real charges
+  api/services/coach_svc.py    trade coach: your own record's process checks, and Claude's review of them
+  api/services/sim_svc.py      practice account on live prices; depth_svc.py: FYERS market depth
+  api/services/builder_svc.py  strategy builder: plain English -> spec, tests, walk-forward optimiser
 run_scan.py      CLI / scheduler entry point (status file, rotating log, Telegram)
 intraday_sync.py intraday jobs: backfill, 15:45 archive, live feed, re-test
 login.py         daily Fyers OAuth login
@@ -338,6 +875,5 @@ For the web API, `scanner.pit.comparison_report()` returns the same comparison (
 ### Roadmap
 | Next | Why |
 |---|---|
-| Adjust rights issues in the point-in-time prices (needs the RIGHTS rows of NSE's notices) | A little more accuracy |
 | Sector strength from NSE sector indices | Avoid weak sectors |
 | Momentum + low-volatility combined portfolio | Smoother returns |

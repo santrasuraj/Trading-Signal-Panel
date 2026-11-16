@@ -5,6 +5,13 @@ up to 100 symbols (the Standard plan's WebSocket limit) - the most liquid stocks
 universe - builds 5-minute bars from the ticks, and every few seconds writes:
   data/intraday/live/YYYYMMDD.parquet   completed bars of today
   data/intraday/live/forming.json       the bar currently forming per symbol, and when the last tick came
+  data/intraday/live/prints_YYYYMMDD.parquet, book.json   large trades and order-book totals (footprints.py)
+  data/intraday/live/orders_feed.json   your FYERS order updates from the order socket (order_feed.py, read-only)
+  data/intraday/live/1m_YYYYMMDD.parquet, forming_1m.json   the same ticks as 1-minute bars (1-minute charts)
+  data/intraday/live/orderflow_YYYYMMDD.parquet   buyer- / seller-initiated volume per minute and price (orderflow.py)
+and publishes every tick and every write of new bars on the ZeroMQ tick bus (bus.py), so the dashboard's auto-trader
+and live signal engine react within milliseconds instead of polling those files. A flush also lands BAR_SETTLE_S after
+each 5-minute boundary, so the bar that just closed is written ~1 s after the close, not up to FLUSH_SECONDS later.
 At the end of the session the completed bars are merged into the intraday store, so they are kept
 even though FYERS' REST history only covers a rolling year. The intraday scanner reads these files
 for today's setups instead of Yahoo's ~15-minute delayed data, as long as ticks keep arriving.
@@ -23,17 +30,22 @@ from datetime import datetime
 
 import pandas as pd
 
+from .. import watch
 from ..providers import load_token
 from ..settings import IST, LOG_DIR, ist_now
 from . import data as idata
+from . import bus, order_feed, orderflow, quote_hub
 from .fyers_sync import is_trading_day
 
 MAX_SYMBOLS = 100               # FYERS Standard plan WebSocket limit (all connections together)
 FLUSH_SECONDS = 5
+BAR_SETTLE_S = 1.0              # a flush this long after each 5-minute boundary (the closed bar's next ticks are in)
+SETUP_CHECK_S = 120         # live setups on Telegram: checked every 2 minutes
 SESSION_END = (15, 31)
 LOGIN_POLL_SECONDS = 60
 STALE_SECONDS = 120             # no tick for this long during the session = the live feed is not working
 FORMING_FILE_NAME = "forming.json"
+FORMING_1M_NAME = "forming_1m.json"
 LOCK_FILE_NAME = ".live.lock"
 
 
@@ -47,9 +59,13 @@ def live_file(root, day=None):
     return live_dir(root) / f"{(day or ist_now().date()):%Y%m%d}.parquet"
 
 
-def load_live(root, day=None) -> pd.DataFrame:
-    """Today's completed live bars (empty if the live service hasn't run today)."""
-    p = live_file(root, day)
+def live_file_1m(root, day=None):
+    return live_dir(root) / f"1m_{(day or ist_now().date()):%Y%m%d}.parquet"
+
+
+def load_live(root, day=None, one_minute: bool = False) -> pd.DataFrame:
+    """Today's completed live bars (empty if the live service hasn't run today); `one_minute`: the 1-minute ones."""
+    p = live_file_1m(root, day) if one_minute else live_file(root, day)
     if not p.exists():
         return idata.empty_bars()
     try:
@@ -82,11 +98,11 @@ def _iso(epoch: float | None) -> str | None:
     return datetime.fromtimestamp(epoch, IST).isoformat(timespec="seconds") if epoch else None
 
 
-def _write(root, done: pd.DataFrame, forming: dict, last_tick: str | None = None) -> None:
+def _write(root, done: pd.DataFrame, forming: dict, last_tick: str | None = None, one_minute: bool = False) -> None:
     """Merge newly completed bars into today's file and replace forming.json. Both writes are atomic and
     retried (on Windows a replace fails while a scan is reading the file); a failure raises, so the caller
-    keeps the bars for the next attempt instead of losing them."""
-    p = live_file(root)
+    keeps the bars for the next attempt instead of losing them. `one_minute`: the 1-minute files instead."""
+    p = live_file_1m(root) if one_minute else live_file(root)
     if len(done):
         old = pd.read_parquet(p) if p.exists() else idata.empty_bars()   # unreadable: raise, never overwrite
         allb = pd.concat([old, done], ignore_index=True) if len(old) else done
@@ -94,11 +110,24 @@ def _write(root, done: pd.DataFrame, forming: dict, last_tick: str | None = None
         tmp = p.with_suffix(".tmp")
         allb.to_parquet(tmp, index=False)
         idata._replace(tmp, p)
-    f = live_dir(root) / FORMING_FILE_NAME
+    f = live_dir(root) / (FORMING_1M_NAME if one_minute else FORMING_FILE_NAME)
     tmp = f.with_suffix(".tmp")
     tmp.write_text(json.dumps({"updated": ist_now().isoformat(timespec="seconds"), "last_tick": last_tick,
                                "bars": forming}, default=str), encoding="utf-8")
     idata._replace(tmp, f)
+
+
+def _wanted(root) -> list[str]:
+    """The user's symbols, in stream priority: the open screens (subscriptions.json), then active price alerts and
+    watchlists (scanner/watch.py) - those stay streamed with no dashboard open, so alerts fire on real-time ticks."""
+    out = quote_hub.read_subscriptions(live_dir(root))
+    try:
+        for s in watch.feed_symbols():
+            if s not in out:
+                out.append(s)
+    except Exception:
+        pass
+    return out
 
 
 def _token_ok(tok: dict | None) -> bool:
@@ -112,6 +141,14 @@ def _token_ok(tok: dict | None) -> bool:
         return float(claims["exp"]) > time.time() + 60
     except Exception:
         return False
+
+
+def _sleep_s(now: float, step: int = 300) -> float:
+    """Seconds until the next flush: FLUSH_SECONDS, or sooner so that one lands BAR_SETTLE_S after each 5-minute
+    boundary (epoch and IST 5-minute boundaries coincide: IST is UTC+5:30)."""
+    base = now - now % step
+    nxt = base + BAR_SETTLE_S if now < base + BAR_SETTLE_S else base + step + BAR_SETTLE_S
+    return max(0.05, min(FLUSH_SECONDS, nxt - now))
 
 
 def _session_over() -> bool:
@@ -155,35 +192,87 @@ def _stop_socket(sock) -> None:
         pass
 
 
-def run_live(symbols: list[str], root, interval: str = "5m", log=print) -> int:
-    """Stream ticks for up to 100 symbols until the session ends; returns the number of bars written."""
+def run_live(symbols: list[str], root, interval: str = "5m", log=print, fno: list[dict] | None = None,
+             fno_settings: dict | None = None, bus_port: int = bus.DEFAULT_PORT) -> int:
+    """Stream ticks for up to 100 symbols until the session ends; returns the number of bars written. `fno`: index
+    futures / options to stream too (scanner/fno_live.py) - their large trades are recorded, they make no bars."""
     lock = idata.FileLock(live_dir(root) / LOCK_FILE_NAME)
     if not lock.acquire(timeout=0):
         log("Live feed already running in another window - not starting a second one "
             "(FYERS allows 100 symbols across all connections).")
         return 0
     try:
-        return _run_live(symbols, root, interval, log)
+        return _run_live(symbols, root, interval, log, fno or [], fno_settings, bus_port)
     finally:
         lock.release()
 
 
-def _run_live(symbols: list[str], root, interval: str, log) -> int:
+def _run_live(symbols: list[str], root, interval: str, log, fno: list[dict], fno_settings: dict | None,
+              bus_port: int = bus.DEFAULT_PORT) -> int:
     tok = _wait_for_login(log)
     if tok is None:
         log("The session ended before a valid FYERS login was found - no live bars today.")
         return 0
     from fyers_apiv3.FyersWebsocket import data_ws
 
-    tickers = [s if ":" in s else f"NSE:{s}-EQ" for s in symbols[:MAX_SYMBOLS]]
+    fno = fno[:MAX_SYMBOLS]
+    fno_tickers = [i["ticker"] for i in fno]
+    base = [s if ":" in s else f"NSE:{s}-EQ" for s in symbols]
+    # The screen's symbols (quote_hub.subscriptions.json) come first, then F&O, then the liquid stocks.
+    tickers = quote_hub.plan_tickers(_wanted(root), base, fno_tickers, MAX_SYMBOLS)
+    book = quote_hub.QuoteBook()              # every tick's latest price: the screen's live quotes
     builder = idata.TickBarBuilder(interval)
+    builder1 = idata.TickBarBuilder("1m")      # the same ticks as 1-minute bars (1-minute charts, archived at the close)
+    flowb = orderflow.OrderFlowBuilder()        # estimated buy / sell volume per minute and price (order flow)
+    try:
+        orderflow.cleanup(live_dir(root))
+    except Exception:
+        pass
+    from ..footprints import FootprintRecorder
+    recorder = FootprintRecorder()            # large trades + order-book totals for Big money live (footprints.py)
+    from ..fno_live import FnoRecorder
+    fno_rec = FnoRecorder(fno, fno_settings) if fno else None    # large futures / options trades (fno_live.py)
     lock = threading.Lock()
     status = {"live": False, "errors": 0, "ticks": 0, "last_tick": None}
+    pub = bus.open_publisher(bus_port, log)    # ticks / new bars to the dashboard in milliseconds (None = files only)
 
     def on_message(msg):
         if isinstance(msg, dict) and msg.get("ltp") is not None:
+            recv = time.time()
+            try:
+                book.on_tick(msg)
+            except Exception:                  # a quote glitch must never stop the bars
+                pass
+            if pub is not None:
+                try:
+                    pub.tick_msg(msg, recv, quote_hub.from_ticker(str(msg.get("symbol") or "")))
+                except Exception:              # nor a bus glitch
+                    pass
+            if not str(msg.get("symbol") or "").endswith("-EQ") and not (fno_rec is not None and fno_rec.wants(msg.get("symbol"))):
+                with lock:                     # an index (or other non-stock) on the screen: a quote only, no bars
+                    status["ticks"] += 1
+                    status["last_tick"] = time.time()
+                return
+            if fno_rec is not None and fno_rec.wants(msg.get("symbol")):
+                with lock:                     # F&O: large trades only - no bars, no stock footprints
+                    try:
+                        fno_rec.on_tick(msg)
+                    except Exception:
+                        pass
+                    status["ticks"] += 1
+                    status["last_tick"] = time.time()
+                return
             with lock:
                 builder.on_tick(msg)
+                builder1.on_tick(msg)
+                try:
+                    flowb.on_tick(msg)
+                except Exception:              # an order-flow glitch must never stop the bars
+                    pass
+                try:
+                    recorder.on_tick(msg)
+                except Exception:              # a footprint glitch must never stop the bars
+                    pass
                 status["ticks"] += 1
                 status["last_tick"] = time.time()
             if not status["live"]:
@@ -201,8 +290,50 @@ def _run_live(symbols: list[str], root, interval: str, log) -> int:
     def on_connect():
         # Also called after every reconnect (subscribe again) - and by the SDK even when it could not
         # connect at all, so only ticks, never this callback, mark the feed as live.
-        sock.subscribe(symbols=tickers, data_type="SymbolUpdate")
+        sock.subscribe(symbols=list(tickers), data_type="SymbolUpdate")
         log(f"Live: subscribing to {len(tickers)} symbols")
+
+    def resubscribe() -> None:
+        """Follow the screen: subscribe to symbols a page, holding or watchlist now needs, and drop the ones
+        that made room for them, staying within the symbol limit."""
+        nonlocal tickers
+        want = quote_hub.plan_tickers(_wanted(root), base, fno_tickers, MAX_SYMBOLS)
+        add, drop = [t for t in want if t not in tickers], [t for t in tickers if t not in want]
+        if not add and not drop:
+            return
+        if drop:
+            sock.unsubscribe(symbols=drop, data_type="SymbolUpdate")
+        if add:
+            sock.subscribe(symbols=add, data_type="SymbolUpdate")
+        tickers = want
+        log(f"Live: now streaming {len(want)} symbols (+{len(add)} for the screen, -{len(drop)})")
+
+    stop_quotes = threading.Event()
+    feed = order_feed.OrderFeed(live_dir(root))         # your order updates (fills, rejections) pushed by FYERS
+
+    def quote_writer() -> None:
+        """quotes.json about twice a second while ticks arrive: the browser's live prices. Also the bus heartbeat."""
+        beat = 0.0
+        while not stop_quotes.wait(quote_hub.WRITE_EVERY_S):
+            if pub is not None and time.monotonic() - beat >= 1.0:
+                beat = time.monotonic()
+                try:
+                    pub.heartbeat()
+                except Exception:
+                    pass
+            try:
+                if book.write_if_changed(live_dir(root), idata._replace):
+                    _, quotes = book.snapshot()
+                    fired = watch.evaluate(quotes)            # price alerts fire on the tick, dashboard open or not
+                    if fired:
+                        watch.notify(fired)
+                        log("Alerts: " + "; ".join(watch.message(a) for a in fired))
+            except Exception:
+                pass                           # the next round tries again
+            try:
+                feed.write(idata._replace)     # cheap when nothing changed; a heartbeat once a minute
+            except Exception:
+                pass
 
     sock = data_ws.FyersDataSocket(access_token=f"{tok['client_id']}:{tok['access_token']}", log_path=str(LOG_DIR),
                                    litemode=False, write_to_file=False, reconnect=True, reconnect_retry=10,
@@ -212,44 +343,124 @@ def _run_live(symbols: list[str], root, interval: str, log) -> int:
     # never keep this process alive after the session (our own loop below keeps it alive until then).
     sock.background_flag = True
     written, write_fails = 0, 0
+    threading.Thread(target=quote_writer, name="quotes", daemon=True).start()
+    osock = None
     try:
         sock.connect()
+        try:
+            osock = order_feed.start_socket(tok, feed, log, LOG_DIR)
+        except Exception as e:                              # orders still show on the page's own poll
+            log(f"Order updates: could not start the FYERS order socket ({type(e).__name__}: {e})")
+        last_setups = 0.0
         while not _session_over():
-            time.sleep(FLUSH_SECONDS)
+            time.sleep(_sleep_s(time.time()))
+            if time.monotonic() - last_setups >= SETUP_CHECK_S:     # live setups on Telegram, if switched on
+                last_setups = time.monotonic()
+                try:
+                    from .. import notify_settings
+                    from . import setups
+                    cfg = notify_settings.read()
+                    if (cfg.get("setups") or {}).get("on"):
+                        threading.Thread(target=setups.telegram_new, args=(root, ist_now().date(), cfg),
+                                         kwargs={"log": log}, name="setups-telegram", daemon=True).start()
+                except Exception as e:
+                    log(f"Live setups: {type(e).__name__}: {e}")
+            try:
+                order_feed.keep_subscribed(osock, feed)
+            except Exception:
+                pass
+            if status["live"]:
+                try:
+                    resubscribe()
+                except Exception as e:
+                    log(f"Live: changing the subscription failed ({type(e).__name__}: {e})")
             with lock:
                 done = builder.flush()
                 forming, last = _forming(builder), status["last_tick"]
+                done1, forming1 = builder1.flush(), _forming(builder1)
+            try:
+                _write(root, done1, forming1, one_minute=True)
+            except Exception:                                # the 5-minute bars matter more: retry these next round
+                with lock:
+                    builder1.done[:0] = done1.to_dict("records")
             try:
                 _write(root, done, forming, _iso(last))     # outside the lock: ticks keep flowing meanwhile
                 written += len(done)
                 write_fails = 0
+                if pub is not None and len(done):
+                    pub.bars("5m", len(done))                # the live signal engine recomputes now
+
             except Exception as e:                           # keep the bars and try again on the next round
                 with lock:
                     builder.done[:0] = done.to_dict("records")
                 write_fails += 1
                 if write_fails == 1 or write_fails % 60 == 0:
                     log(f"Live: writing bars failed ({type(e).__name__}: {e}) - retrying")
+            try:
+                with lock:
+                    flow_df_due = flowb.dirty
+                if flow_df_due:
+                    with lock:
+                        frame = flowb.frame()
+                        flowb.dirty = False
+                    p = live_dir(root) / orderflow.file_name(ist_now().date())
+                    frame.to_parquet(p.with_suffix(".oftmp"), index=False)
+                    idata._replace(p.with_suffix(".oftmp"), p)
+            except Exception as e:
+                log(f"Live: writing order flow failed ({type(e).__name__}: {e})")
+            try:                                             # large trades / book (footprints): separate from the bars
+                with lock:
+                    recorder.flush(ist_now().date())
+                    if fno_rec is not None:
+                        fno_rec.flush(ist_now().date(), live_dir(root))
+            except Exception as e:
+                log(f"Live: writing footprints failed ({type(e).__name__}: {e})")
     finally:
+        stop_quotes.set()
+        if pub is not None:
+            pub.close()
         _stop_socket(sock)
+        order_feed.stop_socket(osock)
+        feed.set_connected(False)
+        try:
+            feed.write(idata._replace)
+        except Exception:
+            pass
+        try:
+            book.write_if_changed(live_dir(root), idata._replace)     # the last trade of the day stays on screen
+        except Exception:
+            pass
         now = ist_now().replace(tzinfo=None)
         with lock:
             # end of session (or stopped early): close the bars whose time is over, keep everything in the store
-            for key, b in list(builder.cur.items()):
-                if b["ts"] + pd.Timedelta(minutes=builder.step) <= now:
-                    builder.done.append(builder.cur.pop(key))
+            for bld in (builder, builder1):
+                for key, b in list(bld.cur.items()):
+                    if b["ts"] + pd.Timedelta(minutes=bld.step) <= now:
+                        bld.done.append(bld.cur.pop(key))
             done = builder.flush()
             forming, last = _forming(builder), status["last_tick"]
+            done1, forming1 = builder1.flush(), _forming(builder1)
         try:
             _write(root, done, forming, _iso(last))
             written += len(done)
         except Exception as e:
             log(f"Live: final write failed ({type(e).__name__}: {e})")
         try:
+            _write(root, done1, forming1, one_minute=True)
+        except Exception as e:
+            log(f"Live: final write of the 1-minute bars failed ({type(e).__name__}: {e})")
+        try:
             today = load_live(root)
             if len(today):
                 idata.IntradayStore(root / "bars").save(idata.clean_bars(today, interval), interval)
         except Exception as e:
             log(f"Live: saving today's bars to the intraday store failed ({type(e).__name__}: {e})")
+        try:   # 1-minute bars are kept from the live feed only (FYERS' 1-minute history would cost ~150 more calls a day)
+            today1 = load_live(root, one_minute=True)
+            if len(today1):
+                idata.IntradayStore(root / "bars").save(idata.clean_bars(today1, "1m"), "1m")
+        except Exception as e:
+            log(f"Live: saving today's 1-minute bars failed ({type(e).__name__}: {e})")
         log(f"Live session ended: {written} bars written, {status['ticks']} ticks, {status['errors']} errors")
     return written
 

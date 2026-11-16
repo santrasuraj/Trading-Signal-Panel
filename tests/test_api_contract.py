@@ -11,10 +11,12 @@ import json
 import math
 import shutil
 import socket
+import sys
 import typing
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 import requests
 from fastapi.testclient import TestClient
@@ -143,7 +145,7 @@ GET_ENDPOINTS = [
     ("/api/health", M.Health), ("/api/status", M.AppStatus), ("/api/overview", M.OverviewResponse),
     ("/api/market/breadth?range=1y", M.BreadthResponse), ("/api/strategies", M.StrategyListResponse),
     ("/api/strategies?horizon=swing", M.StrategyListResponse), ("/api/strategies/momentum", M.StrategyDetail),
-    ("/api/strategies/earnings_gap", M.StrategyDetail), ("/api/strategies/rsi2_pullback", M.StrategyDetail),
+    ("/api/strategies/earnings_gap", M.StrategyDetail), ("/api/strategies/near_high", M.StrategyDetail),
     ("/api/strategies/momentum/curve?range=3y", M.CurveResponse),
     ("/api/strategies/momentum/trades?page_size=20", M.TradesPage), ("/api/signals", M.SignalsResponse),
     ("/api/screener?preset=all", M.ScreenerResponse), ("/api/screener?preset=momentum", M.ScreenerResponse),
@@ -158,6 +160,18 @@ GET_ENDPOINTS = [
     ("/api/scan/log?lines=20", M.ScanLog), ("/api/fyers/status", M.FyersStatus), ("/api/config", M.ConfigResponse),
     ("/api/costs/preview?value=33333", M.CostPreview), ("/api/data/health", M.DataHealth),
     ("/api/intraday", M.IntradayResponse),
+    ("/api/options/status", M.OptStatus),
+    ("/api/options/research", M.OptResearchResponse),
+    ("/api/options/bigtrades", M.OptBigTradesResponse),
+    ("/api/fno/status", M.FnoStatus),
+    ("/api/fno/positions", M.FnoPositionsResponse),
+    ("/api/fno/futures", M.FnoFuturesResponse),
+    ("/api/fno/live", M.FnoLiveResponse),
+    ("/api/levels/NIFTY50", M.LevelsResponse),
+    ("/api/levels/evidence", M.PatternEvidenceResponse),
+    ("/api/outlook/IGIL", M.OutlookResponse),
+    ("/api/outlook/NIFTY50", M.OutlookResponse),
+    ("/api/ai/status", M.AiStatus),
 ]
 
 
@@ -171,11 +185,12 @@ def test_openapi_lists_every_contract_path(client):
     paths = set(spec["paths"])
     for url, _ in GET_ENDPOINTS:
         p = url.split("?")[0]
-        p = p.replace("/momentum", "/{key}").replace("/earnings_gap", "/{key}").replace("/rsi2_pullback", "/{key}")
+        p = p.replace("/momentum", "/{key}").replace("/earnings_gap", "/{key}").replace("/near_high", "/{key}")
         p = p.replace("/IGIL", "/{symbol}").replace("/NIFTY50", "/{symbol}")
         assert p in paths, p
     for p in ("/api/holdings/import/fyers", "/api/scan", "/api/fyers/login", "/api/fyers/login/complete",
-              "/api/intraday/run"):
+              "/api/intraday/run", "/api/options/refresh", "/api/options/chain/{symbol}",
+              "/api/options/history/{symbol}", "/api/fno/refresh"):
         assert p in paths, p
     # every response field is "required" in the schema, so generated TS has no optional fields
     assert set(spec["components"]["schemas"]["AsOf"]["required"]) >= {"live_source", "complete_upto", "stale"}
@@ -482,9 +497,44 @@ def test_trusted_host_only(client):
 
 
 def test_spa_fallback_blocks_path_traversal(client):
-    for url in ("/..%2f..%2fconfig.yaml", "/../../.env", "/%2e%2e/%2e%2e/.env"):
+    for url in ("/..%2f..%2fconfig.yaml", "/../../.env", "/%2e%2e/%2e%2e/.env",
+                "/assets/..%2f..%2f..%2fconfig.yaml", "/assets/%5C..%5C..%5C..%5Cconfig.yaml"):
         r = client.get(url)
         assert "FYERS" not in r.text and "capital:" not in r.text
+
+
+def test_dist_file_rejects_network_and_absolute_paths_before_touching_disk(monkeypatch, tmp_path):
+    """On Windows, resolving \\\\host\\share\\x (the URL /%5C%5Chost%5Cshare%5Cx) opens an SMB connection that
+    sends the user's NTLM hash to that host. Such paths must be refused as text: the filesystem is never asked."""
+    from web.api.main import dist_file
+    root = tmp_path.resolve()
+    (root / "assets").mkdir()
+    (root / "assets" / "index-Be40HyvD.js").write_text("ok", encoding="utf-8")
+    (root / "favicon.svg").write_text("<svg/>", encoding="utf-8")
+    assert dist_file(root, "assets/index-Be40HyvD.js") == root / "assets" / "index-Be40HyvD.js"
+    assert dist_file(root, "favicon.svg") == root / "favicon.svg"
+    assert dist_file(root, "assets/missing-x.js") is None
+
+    def boom(*a, **k):
+        raise AssertionError("the filesystem was asked about an unsafe path")
+    monkeypatch.setattr(Path, "is_file", boom)
+    monkeypatch.setattr(Path, "resolve", boom)
+    for p in ("\\\\evil.host\\share\\x", "assets/\\\\evil.host\\share\\x", "//evil.host/share/x", "/evil.host/share",
+              "C:/Windows/win.ini", "c:", "C:\\Windows\\win.ini", "../.env", "assets/../../config.yaml", "./x",
+              "assets//x.js", "assets/", ".env", "x\\..\\..\\config.yaml", "file.txt:stream", "a\x00b"):
+        assert dist_file(root, p) is None, p
+
+
+def test_assets_are_served_through_the_guard(client):
+    from web.api.main import DIST
+    built = sorted((DIST / "assets").glob("*.js")) if (DIST / "assets").is_dir() else []
+    if not built:
+        pytest.skip("web/ui/dist is not built")
+    r = client.get(f"/assets/{built[0].name}")
+    assert r.status_code == 200 and "immutable" in r.headers["cache-control"]
+    assert client.get("/assets/no-such-file-x1.js").status_code == 404      # a 404, never index.html as a script
+    r = client.get("/")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
 
 
 # ------------------------------------------------------------------ scan
@@ -584,9 +634,14 @@ def test_holdings_round_trip(mclient, env):
     assert r.status_code == 200, r.text
     body = r.json()
     M.HoldingsPutResponse.model_validate(body)
-    assert body["saved"] == 2
+    before = (env / "holdings.csv").read_text(encoding="utf-8")
+    assert body["saved"] == 0                       # all or nothing: a rejected row is never silently dropped
     assert [(x["index"], x["reason"]) for x in body["rejected"]] == [(1, "negative quantity"), (2, "buy date is in the future")]
     assert body["unknown_symbols"] == ["ZZZUNKNOWN"]
+    assert (env / "holdings.csv").read_text(encoding="utf-8") == before          # file untouched
+    rows = [rows[0], rows[3]]                       # the user fixes (here: removes) the two bad rows
+    r = mclient.put("/api/holdings", json={"rows": rows}, headers=GUARD)
+    assert r.status_code == 200 and r.json()["saved"] == 2 and r.json()["rejected"] == []
     text = (env / "holdings.csv").read_text(encoding="utf-8")
     assert text.splitlines()[0] == "symbol,qty,buy_price,buy_date,stop_loss_pct,target_pct"
     assert "INFY" in text and "ZZZUNKNOWN" in text and "ZZZNOTREAL" not in text
@@ -693,7 +748,7 @@ def test_fyers_status_never_leaks_secrets(mclient, monkeypatch, env):
     text = json.dumps(body)
     assert "supersecret" not in text and "tok-SECRET-123" not in text and "ABCD1234EF" not in text
     assert body["client_id_masked"] == "ABCD****-100" and body["token_present"] and not body["logged_in_today"]
-    assert body["login_modes"] == ["paste", "window"]
+    assert body["login_modes"] == ["direct", "paste", "window"]
 
 
 def test_fyers_status_says_when_rate_limit_protection_is_on(mclient, monkeypatch, env):
@@ -771,6 +826,163 @@ def test_fyers_paste_login_complete_writes_token(mclient, env, monkeypatch):
     done = mclient.post("/api/fyers/login/complete", json={"redirect_url": f"http://x/?auth_code=C&state={state}"},
                         headers=GUARD).json()
     assert done["ok"] is True and done["user_name"] is None and done["status"]["verified"] is None
+
+
+def _fake_fyers(monkeypatch, redirect: str) -> dict:
+    """Fyers app credentials in the environment and a Fyers that never leaves the test."""
+    from web.api.services import fyers_svc
+    monkeypatch.setenv("FYERS_CLIENT_ID", "ABCD1234EF-100")
+    monkeypatch.setenv("FYERS_SECRET_KEY", "s3cret")
+    monkeypatch.setenv("FYERS_REDIRECT_URI", redirect)
+
+    class FakeSession:
+        def __init__(self, **kw):
+            self.kw = kw
+
+        def generate_authcode(self):
+            return "https://api-t1.fyers.in/api/v3/generate-authcode?state=" + self.kw["state"]
+
+    import fyers_apiv3.fyersModel as fm
+    monkeypatch.setattr(fm, "SessionModel", FakeSession)
+    exchanged: dict = {}
+
+    def exchange(session, code):
+        exchanged["code"] = code
+        return {"access_token": "NEWTOKEN"}
+    monkeypatch.setattr(fyers_svc, "_exchange_code", exchange)
+    monkeypatch.setattr(fyers_svc.providers.FyersProvider, "__init__", lambda self, *a, **k: None)
+    monkeypatch.setattr(fyers_svc, "_profile", lambda p: (True, "Test User"))
+    return exchanged
+
+
+def test_fyers_one_click_login_on_the_apps_own_callback(mclient, env, monkeypatch):
+    """The Fyers app's Redirect URL is this app's callback: logging in on the Fyers tab is all it takes. Only the
+    login started here (its random state) is accepted, once."""
+    from web.api.services import fyers_svc
+    exchanged = _fake_fyers(monkeypatch, fyers_svc.APP_CALLBACK)
+    token_file = env / "data" / "fyers_token.json"
+    before = token_file.read_text(encoding="utf-8") if token_file.exists() else None
+    st = get_ok(mclient, "/api/fyers/status", M.FyersStatus)
+    assert st["direct_mode"] == "app" and st["callback_url"] == "http://127.0.0.1:8600/fyers/callback"
+    r = mclient.post("/api/fyers/login", json={"mode": "direct"}, headers=GUARD).json()
+    M.FyersLoginResponse.model_validate(r)
+    assert r["mode"] == "direct" and r["capture"] == "app"
+    state = r["login_url"].split("state=")[1]
+
+    forged = mclient.get("/fyers/callback?s=ok&code=200&auth_code=EVIL&state=forged")   # a link from another site
+    assert forged.status_code == 400 and "Security check failed" in forged.text
+    assert (token_file.read_text(encoding="utf-8") if token_file.exists() else None) == before
+
+    ok = mclient.get(f"/fyers/callback?s=ok&code=200&auth_code=C&state={state}")
+    assert ok.status_code == 200 and "Logged in to Fyers as Test User" in ok.text
+    assert ok.headers["cache-control"] == "no-store" and ok.headers["content-type"].startswith("text/html")
+    assert exchanged["code"] == "C" and json.loads(token_file.read_text(encoding="utf-8"))["access_token"] == "NEWTOKEN"
+    assert "NEWTOKEN" not in ok.text
+    assert get_ok(mclient, "/api/fyers/status", M.FyersStatus)["logged_in_today"]
+
+    again = mclient.get(f"/fyers/callback?s=ok&code=200&auth_code=C&state={state}")      # single use
+    assert again.status_code == 400 and "expired" in again.text
+    err = mclient.get("/fyers/callback?s=error&message=<b>Invalid app</b>")
+    assert err.status_code == 400 and "&lt;b&gt;Invalid app&lt;/b&gt;" in err.text and "<b>Invalid" not in err.text
+
+
+def test_fyers_one_click_login_on_a_free_local_port(mclient, env, monkeypatch):
+    """Another local Redirect URL whose port is free: a one-shot listener catches the redirect there."""
+    from web.api.services import fyers_svc
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    _fake_fyers(monkeypatch, f"http://127.0.0.1:{port}/cb")
+    assert get_ok(mclient, "/api/fyers/status", M.FyersStatus)["direct_mode"] == "listener"
+    r = mclient.post("/api/fyers/login", json={"mode": "direct"}, headers=GUARD).json()
+    assert r["mode"] == "direct" and r["capture"] == "listener"
+    state = r["login_url"].split("state=")[1]
+    assert requests.get(f"http://127.0.0.1:{port}/other?auth_code=C&state={state}", timeout=10).status_code == 404
+    got = requests.get(f"http://127.0.0.1:{port}/cb?auth_code=C&state={state}", timeout=10)
+    assert got.status_code == 200 and "Logged in to Fyers as Test User" in got.text
+    assert json.loads((env / "data" / "fyers_token.json").read_text(encoding="utf-8"))["access_token"] == "NEWTOKEN"
+    t = fyers_svc._listener.get("thread")
+    if t is not None:
+        t.join(timeout=5)
+    assert fyers_svc._listener["server"] is None and fyers_svc._port_free("127.0.0.1", port)   # the listener is gone
+
+
+def test_fyers_one_click_falls_back_to_paste_when_the_port_is_taken(mclient, env, monkeypatch):
+    """Docker (or anything) on the Redirect URL's port gets Fyers' redirect, not this app: paste the address."""
+    busy = socket.socket()
+    busy.bind(("127.0.0.1", 0))
+    busy.listen(1)
+    try:
+        _fake_fyers(monkeypatch, f"http://127.0.0.1:{busy.getsockname()[1]}/api/v1/auth/callback")
+        assert get_ok(mclient, "/api/fyers/status", M.FyersStatus)["direct_mode"] == "paste"
+        r = mclient.post("/api/fyers/login", json={"mode": "direct"}, headers=GUARD).json()
+        assert r["mode"] == "paste" and r["capture"] == "paste" and any("paste" in i for i in r["instructions"])
+    finally:
+        busy.close()
+    from web.api.services import fyers_svc
+    assert fyers_svc.capture_mode("https://example.com/cb") == "paste"
+    assert fyers_svc.capture_mode("http://127.0.0.1:8600/settings") == "paste"           # the app's own port, not its callback
+    assert fyers_svc.capture_mode("http://localhost:8600/fyers/callback/") == "app"
+
+
+def test_fyers_direct_setup_sets_only_the_redirect_line(mclient, env, monkeypatch):
+    from web.api.services import fyers_svc
+    monkeypatch.setenv("FYERS_REDIRECT_URI", "http://127.0.0.1:8000/api/v1/auth/callback")
+    (env / ".env").write_text("# my settings\nFYERS_CLIENT_ID=ABCD1234EF-100\nFYERS_SECRET_KEY=s3cret\n"
+                              "FYERS_REDIRECT_URI=http://127.0.0.1:8000/api/v1/auth/callback\nTELEGRAM_CHAT_ID=42\n",
+                              encoding="utf-8")
+    _err(mclient.post("/api/fyers/direct-setup"), 403, "CSRF")
+    r = mclient.post("/api/fyers/direct-setup", headers=GUARD)
+    assert r.status_code == 200, r.text
+    st = M.FyersStatus.model_validate(r.json())
+    assert st.direct_mode == "app" and st.redirect_uri == fyers_svc.APP_CALLBACK
+    assert (env / ".env").read_text(encoding="utf-8").splitlines() == [
+        "# my settings", "FYERS_CLIENT_ID=ABCD1234EF-100", "FYERS_SECRET_KEY=s3cret",
+        "FYERS_REDIRECT_URI=http://127.0.0.1:8600/fyers/callback", "TELEGRAM_CHAT_ID=42"]
+    assert "s3cret" not in r.text
+
+
+def test_fyers_callback_port_matches_the_server():
+    """The callback Fyers is told about must be where web/serve.py actually listens."""
+    import re as _re
+    from web.api.services import fyers_svc
+    serve = (Path(__file__).resolve().parent.parent / "web" / "serve.py").read_text(encoding="utf-8")
+    m = _re.search(r'HOST, PORT = "127\.0\.0\.1", (\d+)', serve)
+    assert m and int(m.group(1)) == fyers_svc.APP_PORT
+
+
+def test_automation_api(mclient, monkeypatch):
+    from web.api.services import automation_svc as auto
+    monkeypatch.setattr(auto.os, "name", "nt")
+    monkeypatch.setattr(auto.subprocess, "run", lambda args, **kw: SimpleNamespace(returncode=1, stdout="", stderr="not found"))
+    auto._cache.update(at=0.0, status=None)
+    try:
+        st = get_ok(mclient, "/api/automation", M.AutomationStatus)
+        assert st["available"] and st["missing"] == len(auto.JOBS) and not any(j["registered"] for j in st["jobs"])
+        _err(mclient.post("/api/automation/setup"), 403, "CSRF")
+    finally:
+        auto._cache.update(at=0.0, status=None)
+
+
+def test_intraday_history_download_needs_todays_fyers_login(mclient, env, monkeypatch):
+    from web.api.services import intraday_job
+    started = []
+    monkeypatch.setattr(intraday_job.subprocess, "Popen", lambda *a, **k: started.append(a) or SimpleNamespace(poll=lambda: None, pid=1))
+    e = _err(mclient.post("/api/intraday/run", json={"backfill": True}, headers=GUARD), 409, "FYERS_LOGIN_REQUIRED")
+    assert "Log in with Fyers" in e["hint"] and not started
+
+
+def test_intraday_results_carry_the_before_costs_trade(mclient, env):
+    """The before-costs average trade and the FYERS coverage reach the page (they explain why no strategy works)."""
+    f = env / "data" / "results" / "intraday.json"
+    raw = json.loads(f.read_text(encoding="utf-8"))
+    raw["strategies"][0]["metrics"]["avg_trade_gross_pct"] = 0.319
+    raw["data"]["fyers_coverage"] = {"symbols": 0, "from": None, "to": None}
+    f.write_text(json.dumps(raw), encoding="utf-8")
+    d = get_ok(mclient, "/api/intraday", M.IntradayResponse)
+    assert d["strategies"][0]["metrics"]["avg_trade_gross_pct"] == 0.319
+    assert d["data"]["fyers_coverage"] == {"symbols": 0, "from": None, "to": None}
 
 
 def test_profile_check_tells_rejected_from_unknown():
@@ -851,6 +1063,74 @@ def test_intraday_is_honest(client):
         assert d["summary"].startswith(f"All {len(losers)} intraday strategies lost money after costs")
 
 
+def test_buy_signals_carry_a_strength_that_adds_up(client):
+    d = get_ok(client, "/api/signals", M.SignalsResponse)
+    buys = [o for g in d["groups"] for o in g["orders"] if o["action"] == "BUY" and not o["comparison_only"]]
+    assert buys, "the fixture scan has buy orders"
+    for o in buys:
+        s = o["strength"]
+        assert 0 <= s["score"] <= 100 and s["score"] == round(sum(p["points"] for p in s["parts"]))
+        assert {p["key"] for p in s["parts"]} == {"evidence", "status", "agreement", "track", "results"}
+    assert all(o["strength"] is None for g in d["groups"] for o in g["orders"]
+               if o["action"] == "SELL" or o["comparison_only"])
+
+
+def test_signal_track_record_follows_journaled_buys(client):
+    d = get_ok(client, "/api/signals/track-record", M.TrackRecordResponse)
+    assert d["min_closed"] == 10 and d["total"] == len(d["signals"])
+    assert sum(s["live"]["signals"] for s in d["strategies"]) == d["overall"]["signals"] == d["total"]
+    for r in d["signals"]:
+        if r["state"] in ("open", "closed"):
+            assert r["entry_date"] > r["signal_date"] and r["qty"] >= 1      # fills at the NEXT open
+    dates = [r["signal_date"] for r in d["signals"]]
+    assert dates == sorted(dates, reverse=True)
+    if d["signals"]:
+        key = d["signals"][0]["strategy_key"]
+        f = get_ok(client, f"/api/signals/track-record?strategy={key}&state=open", M.TrackRecordResponse)
+        assert all(r["strategy_key"] == key and r["state"] == "open" for r in f["signals"]) and f["total"] == d["total"]
+    assert client.get("/api/signals/track-record?state=bogus").status_code == 422
+
+
+def test_quotes_endpoint_shape_and_validation(client):
+    d = get_ok(client, "/api/quotes?symbols=NIFTY50,IGIL", M.QuotesResponse)
+    if d["session"] not in ("open", "post_close"):    # just after the close the last trade still shows (quotes_svc)
+        assert d["source"] == "close" and {x["symbol"] for x in d["quotes"]} <= {"NIFTY50", "IGIL"}
+    assert client.get("/api/quotes?symbols=bad%20one").status_code == 422
+    assert client.get("/api/quotes").status_code == 422
+
+
+def test_intraday_signals_need_a_proven_strategy(client):
+    d = get_ok(client, "/api/intraday/signals", M.IntradaySignalsResponse)
+    if not d["proven"]:
+        assert d["signals"] == [] and d["note"].startswith("No intraday strategy has a proven edge after costs")
+
+
+def test_intraday_signals_only_from_proven_strategies_of_the_current_backtest(mclient, env):
+    from web.api.util import now_ist
+    res = env / "data" / "results"
+    bt = json.loads((res / "intraday.json").read_text(encoding="utf-8"))
+    for i, s in enumerate(bt["strategies"]):
+        s["status"] = "working" if i == 0 else "not-working"
+    good, bad = bt["strategies"][0]["key"], bt["strategies"][1]["key"]
+    (res / "intraday.json").write_text(json.dumps(bt), encoding="utf-8")
+    sig = {"strategy_name": "x", "symbol": "AAA", "side": "LONG", "entry_time": "09:30", "entry": 100.0, "stop": 99.0,
+           "qty": 10, "amount": 1000.0, "state": "open", "exit_time": None, "exit": None, "last": 101.0,
+           "reason": "open", "pnl": 8.0, "ret_pct": 0.8}
+    f = {"generated_at": now_ist().isoformat(timespec="seconds"), "backtest_at": bt["generated_at"],
+         "signals": [{**sig, "strategy_key": good}, {**sig, "strategy_key": bad, "symbol": "BBB"}],
+         "source": "yahoo", "bars_to": "2026-10-23T11:25:00", "note": "1 signal today."}
+    (res / "intraday_signals.json").write_text(json.dumps(f), encoding="utf-8")
+    caches.clear_all()
+    d = get_ok(mclient, "/api/intraday/signals", M.IntradaySignalsResponse)
+    assert [p["key"] for p in d["proven"]] == [good] and d["delayed"]
+    assert [x["symbol"] for x in d["signals"]] == ["AAA"]          # a strategy that is not proven never shows
+    f["backtest_at"] = "2020-01-01T00:00:00+05:30"                   # computed against an older backtest
+    (res / "intraday_signals.json").write_text(json.dumps(f), encoding="utf-8")
+    caches.clear_all()
+    d = get_ok(mclient, "/api/intraday/signals", M.IntradaySignalsResponse)
+    assert d["signals"] == [] and "not been computed today" in d["note"]
+
+
 def test_intraday_run_starts_background_job(mclient, env, monkeypatch):
     from web.api.services import intraday_job
 
@@ -914,10 +1194,14 @@ def test_screener_preset_and_sparkline_limits(client):
     assert list(sp["series"]) == ["IGIL"] and len(sp["series"]["IGIL"]) == 20
 
 
-def test_screener_results_within_filter(client):
-    """Missing results dates are NaN in a pandas-3 string column: the filter must not compare NaN with a date."""
-    from datetime import date
+def test_screener_results_within_filter(client, monkeypatch):
+    """Missing results dates are NaN in a pandas-3 string column: the filter must not compare NaN with a date.
+    'Today' is the fixture scan's day: its results calendar (23 Oct - 6 Nov 2026) is in the past on later runs."""
+    from datetime import date, datetime
+    from web.api import util
     from web.api.util import today_ist
+    scan_day = datetime(2026, 10, 23, 12, 28, tzinfo=util.now_ist().tzinfo)
+    monkeypatch.setattr(util, "now_ist", lambda: scan_day)
     allr = get_ok(client, "/api/screener?preset=all&min_turnover_cr=0", M.ScreenerResponse)["rows"]
     s = get_ok(client, "/api/screener?preset=all&min_turnover_cr=0&results_within=30", M.ScreenerResponse)
     assert s["rows"] and len(s["rows"]) < len(allr)                  # some symbols report, most do not
@@ -1008,3 +1292,236 @@ def test_openapi_file_is_current():
     committed = json.loads(OPENAPI_FILE.read_text(encoding="utf-8"))
     assert committed == json.loads(json.dumps(create_app(warm=False).openapi())), \
         "web/api/openapi.json is out of date: run python -m web.api.main --openapi"
+
+
+# ------------------------------------------------------------------ review fixes (Nov 2026)
+def test_curves_from_another_scan_are_not_used(env):
+    """curves.parquet carries its scan's id (daily._save): curves of another scan never mix with latest.json."""
+    from web.api.services import data
+    path = env / "data" / "results" / "curves.parquet"
+    df = pd.read_parquet(path)
+    df.attrs["scan_id"] = "2000-01-01T00:00:00+05:30"
+    df.to_parquet(path)
+    caches.clear_all()
+    assert data.curves() is None
+    df.attrs["scan_id"] = latest_fixture(env)["generated_at"]
+    df.to_parquet(path)
+    caches.clear_all()
+    assert data.curves() is not None
+
+
+def test_file_cache_keeps_the_last_good_read_while_a_file_is_mid_write(tmp_path):
+    p = tmp_path / "x.json"
+    p.write_text('{"a": 1}', encoding="utf-8")
+    c = caches.FileCache(lambda f: json.loads(f.read_text(encoding="utf-8")))
+    assert c.get(p) == {"a": 1}
+    p.write_text('{"a": ', encoding="utf-8")                 # caught half-written
+    assert c.get(p) == {"a": 1}
+    p.write_text('{"a": 2}', encoding="utf-8")               # retried on the next request
+    assert c.get(p) == {"a": 2}
+    q = tmp_path / "other.json"
+    q.write_text("{", encoding="utf-8")
+    assert c.get(q) is None                                 # never another file's value
+    p.unlink()
+    assert c.get(p) is None                                 # really gone: missing
+
+
+def test_status_does_not_flash_no_scan_while_latest_is_replaced(mclient, env):
+    first = get_ok(mclient, "/api/status", M.AppStatus)["latest"]
+    assert first is not None
+    path = env / "data" / "results" / "latest.json"
+    good = path.read_text(encoding="utf-8")
+    path.write_text(good[: len(good) // 2], encoding="utf-8")       # a scan replacing it, caught mid-way
+    assert get_ok(mclient, "/api/status", M.AppStatus)["latest"] == first
+    path.write_text(good, encoding="utf-8")
+
+
+def test_a_corrupt_saved_scan_is_skipped(mclient, env):
+    res = env / "data" / "results"
+    (res / "scan_20991231_2359.json").write_bytes(b'\xff\xfe{"generated_at": "x", broken')    # not even UTF-8
+    (res / "scan_20991231_2358.json").write_text('{"generated_at": "2099-12-31", "elapsed_s": 1e999e}', encoding="utf-8")
+    caches.clear_all()
+    for url, model in (("/api/scan/history", M.ScanHistory), ("/api/data/health", M.DataHealth)):
+        body = get_ok(mclient, url, model)
+        assert "scan_20991231_2359.json" not in json.dumps(body), url
+
+
+def test_data_health_shows_only_errors_since_the_last_finished_scan(mclient):
+    """A scan error that a later scan got past is history, not 'Last error' (a 2-week-old crash stayed on screen)."""
+    from web.api.paths import P
+    P.scan_log.parent.mkdir(parents=True, exist_ok=True)
+    old = "2026-10-24 20:59:39,411 ERROR Scan failed: boom\n"
+    done = "2026-11-07 12:22:15,856 INFO Done in 1069.6s: 14 strategies tested on 485 stocks.\n"
+    P.scan_log.write_text(old + done, encoding="utf-8")
+    assert get_ok(mclient, "/api/data/health", M.DataHealth)["logs"]["last_error"] is None
+    new = "2026-11-07 12:30:00,000 ERROR Smart money: NSE refused\n"
+    P.scan_log.write_text(old + done + new, encoding="utf-8")
+    assert get_ok(mclient, "/api/data/health", M.DataHealth)["logs"]["last_error"] == new.strip()
+
+
+def test_intraday_job_status_is_written_atomically(tmp_path, monkeypatch):
+    """The job's status file is replaced, never rewritten in place (a poll mid-write saw an empty file)."""
+    from web.api.services import intraday_job
+    import scanner.intraday.run as irun
+    status = tmp_path / "intraday_status.json"
+    seen = []
+    real_replace = __import__("scanner.store", fromlist=["_replace"])._replace
+
+    def spy(src, dst):
+        seen.append((str(src).endswith(".tmp"), str(dst)))
+        real_replace(src, dst)
+    monkeypatch.setattr("scanner.store._replace", spy)
+    monkeypatch.setattr(irun, "run_intraday_all", lambda cfg, update, log: (log("working"), {"elapsed_s": 1, "strategies": []})[1])
+    monkeypatch.setattr("scanner.settings.load_config", lambda: {})
+    monkeypatch.setattr(sys, "argv", ["intraday_job", "--status", str(status), "--no-update"])
+    assert intraday_job.main() == 0
+    assert seen and all(tmp and dst == str(status) for tmp, dst in seen)
+    assert json.loads(status.read_text(encoding="utf-8"))["state"] == "done"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+# ------------------------------------------------------------------ one answer per stock (action_svc)
+def test_today_gives_one_tested_answer_per_stock(client):
+    d = get_ok(client, "/api/today", M.TodayResponse)
+    sig = get_ok(client, "/api/signals", M.SignalsResponse)
+    working_buys = {o["symbol"] for g in sig["groups"] if g["strategy"]["status"] == "working"
+                    and not g["strategy"]["comparison_only"] for o in g["orders"] if o["action"] == "BUY"}
+    states = {c["symbol"]: c["state"] for c in d["actions"] + d["holds"]}
+    assert all(s in ("BUY", "SELL", "HOLD") for s in states.values())
+    for c in d["actions"]:
+        assert c["primary"] is not None or c["state"] == "SELL"
+        if c["state"] == "BUY":
+            assert c["symbol"] in working_buys and c["primary"]["status"] == "working"
+            assert c["holding"] is None                       # a stock you hold is HOLD, never BUY again
+    assert d["counts"] == {"buy": sum(c["state"] == "BUY" for c in d["actions"]),
+                           "sell": sum(c["state"] == "SELL" for c in d["actions"]), "hold": len(d["holds"])}
+    assert (d["empty_note"] is None) == bool(d["actions"])
+
+
+def test_action_card_never_answers_from_an_unproven_strategy(client):
+    sig = get_ok(client, "/api/signals", M.SignalsResponse)
+    for g in sig["groups"]:
+        for o in g["orders"][:3]:
+            c = get_ok(client, f"/api/action/{o['symbol']}", M.ActionCard)
+            assert c["state"] in ("BUY", "SELL", "HOLD", "NO_EDGE")
+            if c["primary"]:
+                assert c["primary"]["status"] == "working"
+            assert all(u["status"] != "working" and u["status"] != "not-working" for u in c["unproven"])
+            if g["strategy"]["status"] == "not-working":
+                assert all(x["strategy_key"] != g["strategy"]["key"] for x in c["others"] + c["unproven"] + c["exits"])
+    unknown = get_ok(client, "/api/action/NOSUCHSTOCK", M.ActionCard)
+    assert unknown["state"] == "NO_EDGE" and unknown["primary"] is None
+
+
+# ------------------------------------------------------------------ watchlists, alerts, intraday candles
+def test_watchlists_and_alerts_round_trip(client):
+    H = {"X-Quant-Desk": "1"}
+    d = get_ok(client, "/api/watchlists", M.WatchlistsResponse)
+    assert d["lists"][0]["name"]
+    r = client.put("/api/watchlists", json={"lists": [{"name": "Main", "symbols": ["igil", "NIFTY50"]}]}, headers=H)
+    assert r.status_code == 200 and r.json()["lists"][0]["symbols"] == ["IGIL", "NIFTY50"]
+    assert client.put("/api/watchlists", json={"lists": []}).status_code == 403          # CSRF header required
+    r = client.post("/api/alerts", json={"symbol": "IGIL", "kind": "above", "value": 1}, headers=H)
+    assert r.status_code == 200, r.text
+    a = r.json()
+    assert a["active"] and a["symbol"] == "IGIL"
+    bad = client.post("/api/alerts", json={"symbol": "IGIL", "kind": "above", "value": -5}, headers=H)
+    assert bad.status_code == 422 or bad.json()["error"]["code"] == "VALIDATION"
+    lst = get_ok(client, "/api/alerts", M.AlertsResponse)
+    assert [x["id"] for x in lst["alerts"]] == [a["id"]]
+    assert client.patch(f"/api/alerts/{a['id']}", json={"active": False}, headers=H).json()["active"] is False
+    assert client.delete(f"/api/alerts/{a['id']}", headers=H).json() == {"deleted": True}
+    assert get_ok(client, "/api/alerts", M.AlertsResponse)["alerts"] == []
+    cards = get_ok(client, "/api/actions?symbols=IGIL,NIFTY50", M.ActionsResponse)["cards"]
+    assert [c["symbol"] for c in cards] == ["IGIL", "NIFTY50"]
+    client.put("/api/watchlists", json={"lists": [{"name": "Main", "symbols": []}]}, headers=H)
+
+
+def test_intraday_chart_says_when_a_symbol_has_no_bars(client):
+    r = client.get("/api/chart/NOSUCHSTOCK/intraday?tf=5m&days=3")
+    assert r.status_code in (404, 501) and r.json()["error"]["code"] in ("FEATURE_UNAVAILABLE", "NOT_FOUND")
+    assert client.get("/api/chart/IGIL/intraday?tf=7m").status_code == 422
+
+
+# ------------------------------------------------------------------ scans, robustness, drawings
+def test_scans_catalog_run_and_validation(client):
+    H = {"X-Quant-Desk": "1"}
+    cat = client.get("/api/scans/catalog").json()
+    assert len(cat["fields"]) >= 30 and cat["presets"]
+    r = client.post("/api/scans/run", json=cat["presets"][1], headers=H)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["count"] == len(d["rows"]) or d["count"] > len(d["rows"])
+    assert all(isinstance(x["new_today"], bool) for x in d["rows"])
+    bad = client.post("/api/scans/run", json={"rules": [{"left": "nope", "op": ">", "right": {"value": 1}}]}, headers=H)
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "VALIDATION"
+    assert client.post("/api/scans/run", json=cat["presets"][0]).status_code == 403     # CSRF header required
+    s = client.post("/api/scans", json=cat["presets"][0], headers=H).json()
+    assert [x["id"] for x in client.get("/api/scans").json()["scans"]] == [s["id"]]
+    assert client.delete(f"/api/scans/{s['id']}", headers=H).json() == {"deleted": True}
+
+
+def test_strategy_robustness_report(client):
+    key = client.get("/api/strategies").json()["strategies"][0]["key"]
+    r = client.get(f"/api/strategies/{key}/robustness")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["verdict"] in ("likely_real", "maybe_luck", "likely_luck")
+    mc = d["monte_carlo"]
+    if mc:
+        assert mc["paths"] == 10_000 and mc["cagr_pct"]["p5"] <= mc["cagr_pct"]["p50"] <= mc["cagr_pct"]["p95"]
+    assert client.get("/api/strategies/nope_nope/robustness").status_code == 404
+
+
+def test_chart_drawings_round_trip(client):
+    H = {"X-Quant-Desk": "1"}
+    body = {"drawings": [{"kind": "hline", "price": 100}, {"kind": "trend", "a": {"t": "2026-01-02", "v": 90}, "b": {"t": "2026-02-02", "v": 95}}]}
+    r = client.put("/api/drawings/IGIL", json=body, headers=H)
+    assert r.status_code == 200 and [d["kind"] for d in r.json()["drawings"]] == ["hline", "trend"]
+    assert len(client.get("/api/drawings/IGIL").json()["drawings"]) == 2
+    assert client.put("/api/drawings/IGIL", json={"drawings": [{"kind": "circle"}]}, headers=H).status_code == 422
+    client.put("/api/drawings/IGIL", json={"drawings": []}, headers=H)
+
+
+# ------------------------------------------------------------------ research: walk-forward, benchmarks, late entry, from-text
+def test_walk_forward_and_benchmarks(client):
+    r = client.get("/api/research/walk-forward")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["verdict"] in ("pays", "hurts", "no_difference") and len(d["curve"]["t"]) == d["months"]
+    b = client.get("/api/research/benchmarks").json()
+    assert {x["key"] for x in b["rows"]} >= {"chart", "scan_today", "monte_carlo", "full_scan"}
+    assert all(x["value"] is None or x["value"] >= 0 for x in b["rows"])
+
+
+def test_late_entry_and_text_scans_degrade_cleanly(client, monkeypatch):
+    key = client.get("/api/strategies").json()["strategies"][0]["key"]
+    r = client.get(f"/api/strategies/{key}/late-entry")
+    assert r.status_code in (200, 501)
+    if r.status_code == 200:
+        assert r.json()["lags"] == [0, 5, 10, 21]
+    from web.api.services import ai_svc
+    monkeypatch.setattr(ai_svc, "_key", lambda: "")
+    t = client.post("/api/scans/from-text", json={"text": "stocks at a new 52-week high"}, headers={"X-Quant-Desk": "1"})
+    assert t.status_code == 501 and t.json()["error"]["code"] == "FEATURE_UNAVAILABLE"
+
+
+# ------------------------------------------------------------------ orders (never reach FYERS here: no token in the fixture)
+def test_orders_are_off_two_step_and_guarded(client):
+    H = {"X-Quant-Desk": "1"}
+    v = client.get("/api/orders").json()
+    assert v["enabled"] is False and v["kill"] is False and v["logged_in"] is False
+    t = {"symbol": "IGIL", "side": "BUY", "qty": 1, "type": "LIMIT", "product": "CNC", "limit_price": 100.0}
+    assert client.post("/api/orders/preview", json=t).status_code == 403          # CSRF header required
+    pv = client.post("/api/orders/preview", json=t, headers=H).json()
+    failed = {c["key"] for c in pv["checks"] if c["blocking"] and not c["ok"]}
+    assert pv["ok"] is False and pv["preview_id"] is None and {"enabled", "login"} <= failed
+    assert client.post("/api/orders/place", json={"preview_id": "0" * 16, "confirm": True}, headers=H).status_code == 422
+    assert client.post("/api/orders/enable", json={"on": True, "phrase": "yes"}, headers=H).status_code == 422
+    assert client.post("/api/orders/enable", json={"on": True, "phrase": "ENABLE"}, headers=H).json() == {"enabled": True}
+    k = client.post("/api/orders/kill", json={"on": True, "reason": "test"}, headers=H).json()
+    assert k["kill"] is True
+    assert client.post("/api/orders/kill", json={"on": False}, headers=H).json()["kill"] is False
+    client.post("/api/orders/enable", json={"on": False}, headers=H)
+    events = [e["event"] for e in client.get("/api/orders").json()["audit"]]
+    assert {"preview", "enabled", "kill_on", "kill_off", "disabled"} <= set(events)

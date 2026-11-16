@@ -36,8 +36,10 @@ export function Card({
 }
 
 // ------------------------------------------------------------------ Button
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'subtle'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'subtle' | 'buy' | 'sell'
 const VARIANT: Record<Variant, string> = {
+  buy: 'bg-profit text-white hover:brightness-110 border border-transparent',
+  sell: 'bg-loss text-white hover:brightness-110 border border-transparent',
   primary: 'bg-accent-strong text-white hover:brightness-110 border border-transparent',
   secondary: 'bg-raised text-fg border border-line hover:border-line-strong',
   subtle: 'bg-transparent text-fg border border-line hover:bg-raised',

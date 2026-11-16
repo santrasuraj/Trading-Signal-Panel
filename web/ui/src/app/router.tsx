@@ -6,7 +6,35 @@ import { Onboarding } from '@/pages/Onboarding'
 
 // Every page is its own chunk: lightweight-charts and TanStack Table load only with the pages that use them.
 const Overview = lazy(() => import('@/pages/Overview'))
+const Today = lazy(() => import('@/pages/Today'))
+const Watchlist = lazy(() => import('@/pages/Watchlist'))
+const Scans = lazy(() => import('@/pages/Scans'))
+const Benchmarks = lazy(() => import('@/pages/Benchmarks'))
+const Orders = lazy(() => import('@/pages/Orders'))
+const Replay = lazy(() => import('@/pages/Replay'))
+const Charts = lazy(() => import('@/pages/Charts'))
+const Sim = lazy(() => import('@/pages/Sim'))
+const Builder = lazy(() => import('@/pages/Builder'))
+const Heatmap = lazy(() => import('@/pages/Heatmap'))
+const Calendar = lazy(() => import('@/pages/Calendar'))
+const Tax = lazy(() => import('@/pages/Tax'))
+const Risk = lazy(() => import('@/pages/Risk'))
+const OptionBuilder = lazy(() => import('@/pages/OptionBuilder'))
+const Setups = lazy(() => import('@/pages/Setups'))
+const Journal = lazy(() => import('@/pages/Journal'))
+const OptionsBacktest = lazy(() => import('@/pages/OptionsBacktest'))
+const Bot = lazy(() => import('@/pages/Bot'))
+const AutoTrade = lazy(() => import('@/pages/AutoTrade'))
+const Companies = lazy(() => import('@/pages/Companies'))
+const Company = lazy(() => import('@/pages/Company'))
+const ResultsReaction = lazy(() => import('@/pages/ResultsReaction'))
+const Rotation = lazy(() => import('@/pages/Rotation'))
+const Volatility = lazy(() => import('@/pages/Volatility'))
+const IntradayBacktest = lazy(() => import('@/pages/IntradayBacktest'))
+const Rebalance = lazy(() => import('@/pages/Rebalance'))
+const Coach = lazy(() => import('@/pages/Coach'))
 const Signals = lazy(() => import('@/pages/Signals'))
+const SignalTrack = lazy(() => import('@/pages/SignalTrack'))
 const Strategies = lazy(() => import('@/pages/Strategies'))
 const StrategyDetail = lazy(() => import('@/pages/StrategyDetail'))
 const Screener = lazy(() => import('@/pages/Screener'))
@@ -16,6 +44,8 @@ const Paper = lazy(() => import('@/pages/Paper'))
 const Market = lazy(() => import('@/pages/Market'))
 const SmartMoney = lazy(() => import('@/pages/SmartMoney'))
 const Intraday = lazy(() => import('@/pages/Intraday'))
+const Options = lazy(() => import('@/pages/Options'))
+const Fno = lazy(() => import('@/pages/Fno'))
 const Settings = lazy(() => import('@/pages/Settings'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
@@ -51,14 +81,43 @@ export const router = createBrowserRouter([
     errorElement: <RouteError />,
     children: [{ errorElement: <RouteError inline />, children: [
       { index: true, element: g(<Overview />) },
+      { path: 'today', element: g(<Today />) },
+      { path: 'watchlist', element: g(<Watchlist />) },
       { path: 'signals', element: g(<Signals />) },
+      { path: 'signals/track', element: g(<SignalTrack />) },
       { path: 'strategies', element: g(<Strategies />) },
       { path: 'strategies/:key', element: g(<StrategyDetail />) },
       { path: 'strategies/:key/:tab', element: g(<StrategyDetail />) },
       { path: 'screener', element: g(<Screener />) },
+      { path: 'scans', element: g(<Scans />) },
+      { path: 'benchmarks', element: g(<Benchmarks />) },
       { path: 'chart', element: <Navigate to="/chart/NIFTY50" replace /> },
       { path: 'chart/:symbol', element: g(<Chart />) },
       { path: 'portfolio', element: g(<Portfolio />) },
+      { path: 'orders', element: g(<Orders />) },
+      { path: 'replay', element: g(<Replay />) },
+      { path: 'charts', element: g(<Charts />) },
+      { path: 'sim', element: g(<Sim />) },
+      { path: 'builder', element: g(<Builder />) },
+      { path: 'heatmap', element: g(<Heatmap />) },
+      { path: 'calendar', element: g(<Calendar />) },
+      { path: 'tax', element: g(<Tax />) },
+      { path: 'risk', element: g(<Risk />) },
+      { path: 'option-builder', element: g(<OptionBuilder />) },
+      { path: 'setups', element: g(<Setups />) },
+      { path: 'journal', element: g(<Journal />) },
+      { path: 'options-backtest', element: g(<OptionsBacktest />) },
+      { path: 'bot', element: g(<Bot />) },
+      { path: 'autotrade', element: g(<AutoTrade />) },
+      { path: 'companies', element: g(<Companies />) },
+      { path: 'company', element: g(<Company />) },
+      { path: 'company/:symbol', element: g(<Company />) },
+      { path: 'results-reaction', element: g(<ResultsReaction />) },
+      { path: 'rotation', element: g(<Rotation />) },
+      { path: 'volatility', element: g(<Volatility />) },
+      { path: 'intraday-backtest', element: g(<IntradayBacktest />) },
+      { path: 'rebalance', element: g(<Rebalance />) },
+      { path: 'coach', element: g(<Coach />) },
       { path: 'paper', element: g(<Paper />) },
       { path: 'paper/:key', element: g(<Paper />) },
       { path: 'market', element: <Navigate to="/market/movers" replace /> },
@@ -66,6 +125,10 @@ export const router = createBrowserRouter([
       { path: 'smart-money', element: <Navigate to="/smart-money/today" replace /> },
       { path: 'smart-money/:tab', element: <SmartMoney /> },
       { path: 'intraday', element: <Intraday /> },
+      { path: 'options', element: <Options /> },
+      { path: 'options/:symbol', element: <Options /> },
+      { path: 'fno', element: <Navigate to="/fno/positions" replace /> },
+      { path: 'fno/:tab', element: <Fno /> },
       { path: 'settings', element: <Navigate to="/settings/data" replace /> },
       { path: 'settings/:section', element: <Settings /> },
       { path: '*', element: <NotFound /> },

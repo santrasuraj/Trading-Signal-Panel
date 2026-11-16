@@ -2,10 +2,11 @@
 // text and (where meaningful) an icon, so colour never carries meaning alone (spec 4.1).
 
 import { AlertTriangle, CalendarClock, Hourglass } from 'lucide-react'
-import type { Evidence, HoldingLevel, Horizon, IntradayStrategy, Lifecycle, Side, StrategyStatus, Tone } from '@/api/types'
+import type { Evidence, HoldingLevel, Horizon, IntradayStrategy, Lifecycle, Side, SignalProof, SignalStrength, StrategyStatus, Tone } from '@/api/types'
 import { cn } from '@/lib/csv'
 import { daysUntil, date } from '@/lib/format'
-import { EVIDENCE, EVIDENCE_ICON, FELL_LESS, HORIZON, LIFECYCLE, STATUS, TONE_DOT, TONE_TEXT, TONE_TINT } from '@/lib/vocab'
+import { EVIDENCE, EVIDENCE_ICON, FELL_LESS, HORIZON, LIFECYCLE, SIGNAL_PROOF, STATUS, TONE_DOT, TONE_TEXT, TONE_TINT } from '@/lib/vocab'
+import { Tip } from './ui'
 
 const pill = 'inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-2xs font-medium leading-none'
 
@@ -17,6 +18,18 @@ export function StatusBadge({ status, short, className, lost }: { status: Strate
     <span title={m.help} className={cn(pill, TONE_TINT[m.tone], TONE_TEXT[m.tone], className)}>
       <Icon className="h-3 w-3" strokeWidth={2.25} />
       {short ? m.short : m.label}
+    </span>
+  )
+}
+
+/** An intraday signal's backtest label: Proven / Not proven / Lost in test / Untested. */
+export function ProofBadge({ status }: { status: SignalProof }) {
+  const m = SIGNAL_PROOF[status] ?? SIGNAL_PROOF.untested
+  const Icon = m.icon
+  return (
+    <span title={m.help} className={cn(pill, TONE_TINT[m.tone], TONE_TEXT[m.tone])}>
+      <Icon className="h-3 w-3" strokeWidth={2.25} />
+      {m.label}
     </span>
   )
 }
@@ -150,4 +163,30 @@ export function EdgeVerdict({ s }: { s: Pick<IntradayStrategy, 'metrics'> }) {
   return v === 'yes' ? <span className="font-medium text-profit">yes</span>
     : v === 'loses' ? <span className="text-loss" title="The average day is a loss beyond luck (95% confidence)">loses (significant)</span>
     : <span className="text-faint">no</span>
+}
+
+const GRADE: Record<SignalStrength['grade'], { label: string; tone: keyof typeof TONE_TEXT }> = {
+  strong: { label: 'Strong', tone: 'profit' }, good: { label: 'Good', tone: 'accent' }, fair: { label: 'Fair', tone: 'warn' }, weak: { label: 'Weak', tone: 'muted' },
+}
+
+/** Signal strength (0-100) with its breakdown on hover: a ranking aid, not a forecast. */
+export function StrengthBadge({ s, className }: { s: SignalStrength; className?: string }) {
+  const g = GRADE[s.grade]
+  const tip = (
+    <span className="block w-64 space-y-1 text-left">
+      <span className="block font-semibold">Strength {s.score}/100 · {g.label}</span>
+      {s.parts.map((p) => (
+        <span key={p.key} className="flex justify-between gap-3">
+          <span><span className="font-medium">{p.label}</span> <span className="opacity-75">{p.note}</span></span>
+          <span className="num shrink-0">{p.points}/{p.max}</span>
+        </span>
+      ))}
+      <span className="block pt-1 opacity-75">Ranks today's signals against each other; it is not a forecast.</span>
+    </span>
+  )
+  return (
+    <Tip text={tip}>
+      <span className={cn(pill, 'num cursor-help', TONE_TINT[g.tone], TONE_TEXT[g.tone], className)}>{s.score} · {g.label}</span>
+    </Tip>
+  )
 }

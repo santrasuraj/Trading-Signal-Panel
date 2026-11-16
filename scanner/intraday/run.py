@@ -1,4 +1,5 @@
-"""Intraday pipeline: universe -> 5-minute bars -> per-day context -> backtests + today's live setups.
+"""Intraday pipeline: universe -> 5-minute bars -> per-day context -> backtests, and live signals from the
+strategies whose backtest passed.
 
 Data: Yahoo gives the last ~60 sessions of 5-minute bars (no login). With a FYERS login,
 `intraday_sync.py --backfill` (fyers_sync.sync) extends history to ~1 year, and the daily 15:45
@@ -14,7 +15,7 @@ import math
 import os
 import time
 from dataclasses import asdict
-from datetime import date, timedelta
+from datetime import timedelta
 from statistics import NormalDist
 
 import numpy as np
@@ -34,6 +35,8 @@ from .strategies import S_0945, build_intraday_strategies
 
 INTRADAY_DIR = DATA_DIR / "intraday"
 RESULT_FILE = RESULTS_DIR / "intraday.json"
+SIGNALS_FILE = RESULTS_DIR / "intraday_signals.json"
+SIGNAL_HISTORY_DAYS = 45            # calendar days of 5-minute history before today that live signals build on
 FNO_URL = "https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv"
 SEBI_FACTS = {
     "source": "SEBI, Analysis of Intraday Trading by Individuals in Equity Cash Segment (July 2024)",
@@ -84,7 +87,8 @@ def intraday_universe(cfg: dict, frames: dict) -> tuple[list[str], dict]:
     return liquid + etfs, info
 
 
-def update_bars(symbols: list[str], cfg: dict | None = None, log=print) -> tuple[pd.DataFrame, list[str]]:
+def update_bars(symbols: list[str], cfg: dict | None = None, log=print,
+                today_only: bool = False) -> tuple[pd.DataFrame, list[str]]:
     """FYERS first, Yahoo only as fallback. Returns (all 5-minute bars incl. today's, sources used).
       1. Completed days: top up from FYERS through the shared rate limiter (0 calls when up to date;
          a big first-time backfill is left to `intraday_sync.py --backfill` so a scan never burns budget).
@@ -93,13 +97,15 @@ def update_bars(symbols: list[str], cfg: dict | None = None, log=print) -> tuple
       3. Yahoo (~15 min delayed): today's bars for every other symbol (or all of them when the live feed
          stopped), and the last ~60 sessions only when FYERS hasn't covered them.
     Where sources overlap the better one wins (fyers > fyers_ws > yahoo), so tick-built bars never replace
-    the official FYERS bars archived at 15:45."""
+    the official FYERS bars archived at 15:45.
+    `today_only` (live signals every few minutes): no FYERS history calls and no ~60-session Yahoo
+    download, only today's bars on top of what is stored."""
     ic = (cfg or {}).get("intraday") or {}
     store = idata.IntradayStore(INTRADAY_DIR / "bars")
     days = int(ic.get("history_days", 365))
     sources: list[str] = []
     fy = None
-    if cfg is not None:
+    if cfg is not None and not today_only:
         try:
             fy, _ = get_fyers(cfg)
         except Exception:
@@ -114,11 +120,11 @@ def update_bars(symbols: list[str], cfg: dict | None = None, log=print) -> tuple
     # per symbol: FYERS history ending more than 4 days before the last complete session is stale
     have = fyers_sync.load_state(INTRADAY_DIR)["symbols"]
     cutoff = (fyers_sync.last_complete_day() - timedelta(days=4)).isoformat()
-    stale = {s for s in symbols
-             if str((have.get(s) if isinstance(have.get(s), dict) else {}).get("to") or "") < cutoff}
+    stale = set() if today_only else {s for s in symbols
+                                      if str((have.get(s) if isinstance(have.get(s), dict) else {}).get("to") or "") < cutoff}
     if symbols and len(symbols) - len(stale) >= len(symbols) / 2:
         sources.append("fyers")
-    live_today = idata.clean_bars(live_feed.load_live(INTRADAY_DIR), "5m")   # a bad tick must not reach the setups
+    live_today = idata.clean_bars(live_feed.load_live(INTRADAY_DIR), "5m")   # a bad tick must not reach the store
     now = ist_now().replace(tzinfo=None)
     covered: set[str] = set()                         # symbols whose today's bars come from the live feed
     if len(live_today):
@@ -148,16 +154,41 @@ def update_bars(symbols: list[str], cfg: dict | None = None, log=print) -> tuple
     return bars, sources
 
 
+def _daily_context(sym: str, frames: dict) -> tuple:
+    """One stock's context from the daily store, per daily date: (dates, close, high, low, ATR(14), narrow-CPR flag,
+    20-day turnover in Rs crore). It changes once a day, so the live signal engine keeps it (build_days' daily_cache)."""
+    dh, dl, dc, dv = frames["high"], frames["low"], frames["close"], frames["volume"]
+    H, L, C = dh[sym].dropna(), dl[sym].dropna(), dc[sym].dropna()
+    prev_c = C.shift(1)
+    tr = pd.concat([H - L, (H - prev_c).abs(), (L - prev_c).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean().reindex(C.index).to_numpy()
+    P = (H + L + C) / 3
+    width = (2 * P - (H + L)).abs() / P            # |TC - BC| / P
+    narrow = (width <= width.rolling(20, min_periods=15).quantile(0.2)).reindex(C.index).fillna(False).to_numpy()
+    c_dates = C.index.values.astype("datetime64[D]")
+    c_vals, h_vals, l_vals = C.to_numpy(), H.reindex(C.index).to_numpy(), L.reindex(C.index).to_numpy()
+    # 20-day traded value in Rs crore up to each day (close x volume does not depend on the price scale)
+    vol = dv[sym].reindex(C.index) if sym in dv.columns else pd.Series(np.nan, index=C.index)
+    tv = ((C * vol).rolling(20, min_periods=15).mean() / 1e7).to_numpy()
+    return c_dates, c_vals, h_vals, l_vals, atr, narrow, tv
+
+
 def build_days(bars: pd.DataFrame, frames: dict, info: dict, large: set[str], results: dict,
-               missing_prev: set[str] | None = None) -> dict[str, list[Day]]:
+               missing_prev: set[str] | None = None, daily_cache: dict | None = None,
+               carry: dict | None = None) -> dict[str, list[Day]]:
     """Day objects per symbol with context from the daily store (previous day's official high/low/close,
     daily ATR, narrow-CPR flag, 20-day turnover) and from earlier intraday days (relative early volume,
     09:45 move size). A stock-day is kept only when the stock was liquid as of that day (20-day turnover
     to the previous day >= min_turnover_cr; ETFs always). Symbols whose daily store lacks the previous
     session are added to `missing_prev`. Vectorised with numpy: bars are sorted once and each day is a
-    contiguous slice."""
+    contiguous slice.
+    For the live signal engine (scanner/intraday/live_engine.py), which rebuilds today on every new bar:
+      `daily_cache`: each stock's daily-store context, computed once a day and reused.
+      `carry`: {symbol: (early volumes, 09:45 moves, last day seen)} - each stock's running state at the start and,
+      updated in place, at the end. Building the earlier days with an empty carry and then only today's bars with the
+      carry they left gives exactly the Days of one pass over both (tests/test_live_engine.py)."""
     out: dict[str, list[Day]] = {}
-    dh, dl, dc, dv = frames["high"], frames["low"], frames["close"], frames["volume"]
+    dc = frames["close"]
     b = bars.sort_values(["symbol", "ts"], kind="stable")
     sym_codes, sym_names = pd.factorize(b["symbol"].astype(str))
     ts = b["ts"].to_numpy("datetime64[m]")
@@ -169,24 +200,18 @@ def build_days(bars: pd.DataFrame, frames: dict, info: dict, large: set[str], re
         sym = sym_names[sym_codes[s0]]
         if sym not in dc.columns:
             continue
-        H, L, C = dh[sym].dropna(), dl[sym].dropna(), dc[sym].dropna()
-        prev_c = C.shift(1)
-        tr = pd.concat([H - L, (H - prev_c).abs(), (L - prev_c).abs()], axis=1).max(axis=1)
-        atr = tr.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean().reindex(C.index).to_numpy()
-        P = (H + L + C) / 3
-        width = (2 * P - (H + L)).abs() / P            # |TC - BC| / P
-        narrow = (width <= width.rolling(20, min_periods=15).quantile(0.2)).reindex(C.index).fillna(False).to_numpy()
-        c_dates = C.index.values.astype("datetime64[D]")
-        c_vals, h_vals, l_vals = C.to_numpy(), H.reindex(C.index).to_numpy(), L.reindex(C.index).to_numpy()
-        # 20-day traded value in Rs crore up to each day (close x volume does not depend on the price scale)
-        vol = dv[sym].reindex(C.index) if sym in dv.columns else pd.Series(np.nan, index=C.index)
-        tv = ((C * vol).rolling(20, min_periods=15).mean() / 1e7).to_numpy()
+        ctx = daily_cache.get(sym) if daily_cache is not None else None
+        if ctx is None:
+            ctx = _daily_context(sym, frames)
+            if daily_cache is not None:
+                daily_cache[sym] = ctx
+        c_dates, c_vals, h_vals, l_vals, atr, narrow, tv = ctx
         res = {np.datetime64(x, "D") for x in results.get(sym, [])}
         is_fno, is_large, is_etf = sym in info["fno"], sym in large, sym in info["etfs"]
-        days, early_vol, r1_hist = [], [], []
+        days = []
+        early_vol, r1_hist, prev_day = carry.get(sym, ([], [], None)) if carry is not None else ([], [], None)
         dvals = day_all[s0:s1]
         cuts = np.flatnonzero(dvals[1:] != dvals[:-1]) + 1
-        prev_day = None
         for a, z in zip(np.r_[0, cuts], np.r_[cuts, len(dvals)]):
             a, z = s0 + a, s0 + z
             d0 = day_all[a]
@@ -236,27 +261,26 @@ def build_days(bars: pd.DataFrame, frames: dict, info: dict, large: set[str], re
             if r1 is not None:
                 r1_hist.append(r1)
         out[sym] = days
+        if carry is not None:
+            carry[sym] = (early_vol, r1_hist, prev_day)
     return out
 
 
-def _trade_dict(t, live_slot: int | None = None, flat: int = FLAT_OTHER) -> dict:
-    def hhmm(slot):
-        m = 555 + slot * 5
-        return f"{m // 60:02d}:{m % 60:02d}"
-    d = {"symbol": t.symbol, "date": t.date, "side": "LONG" if t.side > 0 else "SHORT",
-         "entry_time": hhmm(t.entry_slot), "entry": round(t.entry_px, 2), "stop": round(t.stop, 2) if t.stop else None,
-         "exit_time": hhmm(t.exit_slot), "exit": round(t.exit_px, 2), "reason": t.reason,
-         "qty": t.qty, "pnl": round(t.pnl, 0), "ret_pct": round(t.ret_pct, 3)}
-    if live_slot is not None:
-        # today's bars end at the latest bar: walk_exit 'squares off' a running position there
-        d["open_now"] = t.reason == "square-off" and live_slot < flat
-        if d["open_now"]:
-            d["reason"] = "open (marked at last bar)"
-    return d
+def _top30(days: dict[str, list[Day]], info: dict) -> dict[pd.Timestamp, set[str]]:
+    """Top-30 by turnover as of each day (the "top30" strategy universe), plus the ETFs."""
+    by_date: dict[pd.Timestamp, list[tuple[float, str]]] = {}
+    for sym, ds in days.items():
+        if sym in info["etfs"]:
+            continue
+        for d in ds:
+            by_date.setdefault(d.date, []).append((d.ctx["liquidity"], sym))
+    return {dt: {sym for _, sym in sorted(v, reverse=True)[:30]} | info["etfs"] for dt, v in by_date.items()}
 
 
 def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True, log=print) -> dict:
     t0 = time.perf_counter()
+    from . import fast
+    fast.enable()                       # the year-long run: the compiled bar loops (fast.py) pay for their start-up
     frames = frames or load_store()
     symbols, info = intraday_universe(cfg, frames)
     if len(info["fno"]) < 50:
@@ -277,20 +301,12 @@ def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True,
     if missing_prev:
         log(f"Daily store misses the previous session for {len(missing_prev)} symbols on some days "
             f"(e.g. {sorted(missing_prev)[:5]}) - those days are skipped; run the daily scan to update it")
-    # top-30 by turnover as of each day (vwap_trend / supertrend universe), plus the ETFs
-    by_date: dict[pd.Timestamp, list[tuple[float, str]]] = {}
-    for sym, ds in days.items():
-        if sym in info["etfs"]:
-            continue
-        for d in ds:
-            by_date.setdefault(d.date, []).append((d.ctx["liquidity"], sym))
-    top30 = {dt: {sym for _, sym in sorted(v, reverse=True)[:30]} | info["etfs"] for dt, v in by_date.items()}
+    top30 = _top30(days, info)
     costs = IntradayCosts.from_config((cfg.get("intraday") or {}).get("costs"))
     capital = float((cfg.get("account") or {}).get("capital", 500000))
     ic = cfg.get("intraday") or {}
     today = pd.Timestamp(ist_today())
     now = ist_now()
-    live_slot = ((now.hour * 60 + now.minute) - 555) // 5
     out = []
     strategies = build_intraday_strategies(cfg)
     # Bonferroni: every enabled strategy on the same sessions - |t| >= 2 alone would flag one by luck too often
@@ -300,9 +316,6 @@ def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True,
                 if s.universe != "top30" or sym in top30.get(d.date, info["etfs"])]
         hist = [d for d in pool if d.date < today]
         res = run_intraday(s, hist, costs, capital, float(ic.get("risk_pct", 0.5)), float(ic.get("leverage", 2.0)))
-        live_days = [d for d in pool if d.date == today]
-        live = run_intraday(s, live_days, costs, capital, float(ic.get("risk_pct", 0.5)), float(ic.get("leverage", 2.0))) \
-            if live_days else None
         m = res.metrics
         m["significant"] = m.get("t_stat") is not None and abs(m["t_stat"]) >= t_crit
         m["t_crit"] = round(t_crit, 2)
@@ -318,9 +331,6 @@ def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True,
             "key": s.key, "name": s.name, "description": s.description, "evidence": s.evidence,
             "horizon": "intraday", "status": status, "metrics": m,
             "equity": [[d.date().isoformat(), round(v, 0)] for d, v in res.daily.items()],
-            "recent_trades": [_trade_dict(t) for t in res.trades[-40:]][::-1],
-            "today": [_trade_dict(t, live_slot, FLAT_FNO if t.symbol in info["fno"] else FLAT_OTHER)
-                      for t in (live.trades if live else [])],
         })
     order = {"working": 0, "mixed": 1, "unknown": 2, "not-working": 3}
     out.sort(key=lambda x: (order[x["status"]], -(x["metrics"].get("avg_day_pct") or -9)))
@@ -351,13 +361,197 @@ def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True,
         "cost_params": asdict(costs),   # the API states the round-trip cost these results were run with
         "sebi": SEBI_FACTS, "strategies": out,
     }
-    # per-process tmp + retried replace: the web job and the 15:45 task can finish together, and on Windows
-    # a replace fails while the API is reading the file
-    tmp = RESULT_FILE.with_name(f"{RESULT_FILE.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(result, indent=1, default=str), encoding="utf-8")
-    idata._replace(tmp, RESULT_FILE)
+    _write_json(RESULT_FILE, result)   # the web job and the 15:45 task can finish together
     log(f"Intraday done in {result['elapsed_s']}s: {len(out)} strategies on {result['data']['sessions']} sessions")
     return result
+
+
+def _hhmm(slot: int) -> str:
+    m = 555 + slot * 5
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _write_json(path, obj: dict) -> None:
+    # per-process tmp + retried replace: on Windows a replace fails while the API is reading the file
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(obj, indent=1, default=str), encoding="utf-8")
+    idata._replace(tmp, path)
+
+
+OI_KEY, OI_NAME = "oi_buildup", "F&O OI build-up (live)"
+OI_MAX_SIGNALS = 10
+OI_MAX_AGE_MIN = 20                  # a live OI snapshot older than this (the 5-minute job stopped) gives no signals
+
+
+def _status_note(status: str) -> str:
+    return {"working": "proven: beat costs beyond luck in the backtest",
+            "mixed": "not proven: positive in the backtest, but it could be luck",
+            "unknown": "not proven: too few backtest days to tell",
+            "not-working": "LOST money in the backtest after costs",
+            "untested": "untested: no backtest yet"}.get(status, status)
+
+
+def oi_buildup_signals(days_today: dict[str, Day], live_oi: dict | None, now, capital: float, risk_pct: float,
+                       leverage: float, costs: IntradayCosts) -> list[dict]:
+    """Live F&O positioning as signals: a LONG build-up (open interest up >= MIN_OI_PCT while the price is up) above
+    VWAP is a LONG; a SHORT build-up (OI up, price down) below VWAP is a SHORT. Entry = the last price, stop = the day's
+    low (high) so far, target twice the risk; the biggest OI changes first. There is no intraday OI history, so this is
+    never backtested - it is labelled 'untested'. `days_today`: today's Day per symbol (scanner bars)."""
+    from .. import fno_intraday as fi
+    v = live_oi or {}
+    if str(v.get("trade_date") or "")[:10] != now.date().isoformat():
+        return []
+    try:
+        fetched = pd.Timestamp(v.get("fetched_at") or v.get("nse_time"))
+        if fetched.tzinfo is None:
+            fetched = fetched.tz_localize(now.tzinfo)
+        if (pd.Timestamp(now) - fetched).total_seconds() > OI_MAX_AGE_MIN * 60:
+            return []
+    except (TypeError, ValueError):
+        return []
+    out = []
+    for r in v.get("rows") or []:
+        d = days_today.get(str(r.get("symbol")))
+        if d is None or d.prev_close <= 0:
+            continue
+        valid = np.flatnonzero(~np.isnan(d.c))
+        if not len(valid):
+            continue
+        li = int(valid[-1])
+        px = float(d.c[li])
+        chg = (px / d.prev_close - 1) * 100
+        kind = fi.classify(chg, r.get("oi_chg_pct"))
+        if kind not in ("long_buildup", "short_buildup"):
+            continue
+        side = 1 if kind == "long_buildup" else -1
+        vw = float(d.vwap()[li])
+        if (px < vw) if side > 0 else (px > vw):
+            continue                                     # price and positioning disagree: no signal
+        stop = float(np.nanmin(d.l[:li + 1])) if side > 0 else float(np.nanmax(d.h[:li + 1]))
+        risk = abs(px - stop)
+        if not (0.002 <= risk / px <= 0.03):
+            continue
+        qty = int(min(capital * risk_pct / 100 / risk, capital * leverage / 5 / px))
+        if qty < 1:
+            continue
+        out.append({
+            "strategy_key": OI_KEY, "strategy_name": OI_NAME, "symbol": d.symbol, "side": "LONG" if side > 0 else "SHORT",
+            "entry_time": _hhmm(min(li + 1, SLOTS - 1)), "entry": round(px, 2), "stop": round(stop, 2),
+            "target": round(px + side * 2 * risk, 2), "qty": qty, "amount": round(qty * px, 0), "state": "open",
+            "exit_time": None, "exit": None, "last": round(px, 2), "reason": "open", "pnl": 0.0, "ret_pct": 0.0,
+            "strategy_status": "untested", "proven": False,
+            "detail": (f"{'Long' if side > 0 else 'Short'} build-up: open interest {r['oi_chg_pct']:+.1f}%, price "
+                       f"{chg:+.2f}%, {'above' if side > 0 else 'below'} VWAP"),
+            "_rank": abs(float(r.get("oi_chg_pct") or 0))})
+    out.sort(key=lambda x: -x["_rank"])
+    for x in out:
+        x.pop("_rank")
+    return out[:OI_MAX_SIGNALS]
+
+
+def run_intraday_signals(cfg: dict, frames: dict | None = None, log=print, now=None, warm=None) -> dict:
+    """Today's live intraday signals. With intraday.show_untested: true (config.yaml) EVERY strategy gives signals and each
+    one carries its last backtest result (intraday.json): 'working' = a positive average day beyond luck
+    (Bonferroni-corrected) over 40+ sessions = proven; 'mixed' / 'unknown' = not proven; 'not-working' = lost money;
+    'untested' = not in the backtest yet (new strategies, live OI build-ups). With show_untested: false only proven
+    strategies give signals (the original rule).
+    Each signal is what a strategy does on today's bars so far (FYERS live feed, else Yahoo ~15 min delayed): an open
+    position (entered, not stopped or squared off by the last bar) or a closed one. Live F&O OI build-ups
+    (data/fno/live_oi.json, refreshed by the same 5-minute job) are added as their own 'untested' signals.
+    Cheap enough to repeat every few minutes: no FYERS history calls, only today's bars are fetched.
+    `warm` (live_engine.LiveEngine, in the dashboard server): the same signals from its in-memory day - the earlier
+    sessions built once, today's bars rebuilt on every new bar - instead of loading everything again.
+    Writes data/results/intraday_signals.json."""
+    t0 = time.perf_counter()
+    now = now or ist_now()
+    ic = cfg.get("intraday") or {}
+    show_untested = bool(ic.get("show_untested", False))       # config.yaml switches it on; off = the original rule
+    bt = load_intraday() or {}
+    tested = bt.get("strategies") or []
+    status_of = {s["key"]: str(s.get("status") or "unknown") for s in tested if s.get("key")}
+    proven = [s for s in tested if s.get("status") == "working"]
+    out = {"generated_at": now.isoformat(timespec="seconds"), "backtest_at": bt.get("generated_at"),
+           "tested": len(tested), "proven": [{"key": s["key"], "name": s.get("name") or s["key"]} for s in proven],
+           "show_untested": show_untested, "signals": [], "source": None, "bars_to": None, "note": ""}
+    if not show_untested and not bt:
+        out["note"] = "The intraday backtest has not run yet, so no strategy is proven: no signals."
+    elif not show_untested and not proven:
+        out["note"] = (f"No intraday strategy has a proven edge after costs ({len(tested)} tested): no signals. "
+                       "A strategy gives signals here only once its backtest shows a profit beyond luck.")
+    elif not fyers_sync.is_trading_day(now.date()) or (now.hour, now.minute) < (9, 20):
+        out["note"] = "The market has not opened today: signals start after the first 5-minute bars (09:20)."
+    else:
+        today = pd.Timestamp(now.date())
+        days = None
+        if warm is not None:                     # today's Days only, from the engine's carried state
+            info, todays, days = warm.prepare(cfg, now, log)
+        else:
+            frames = frames or load_store()
+            symbols, info = intraday_universe(cfg, frames)
+            bars, _ = update_bars(symbols, cfg, log=log, today_only=True)
+            # ~SIGNAL_HISTORY_DAYS before today: the per-day context (previous day, relative early volume) needs them
+            bars = bars[bars["symbol"].isin(symbols) & (bars["ts"] >= today - pd.Timedelta(days=SIGNAL_HISTORY_DAYS))]
+            todays = bars[bars["ts"] >= today]
+        if todays.empty:
+            out["note"] = "No 5-minute bars for today yet."
+        else:
+            if days is None:
+                large = set(get_universe("nifty50")[0]["symbol"])
+                results = results_history(bars["ts"].min().date() - timedelta(days=7), now.date(), log=log)
+                days = build_days(bars, frames, info, large, results)
+            top30 = _top30(days, info)
+            ic = cfg.get("intraday") or {}
+            costs = IntradayCosts.from_config(ic.get("costs"))
+            capital = float((cfg.get("account") or {}).get("capital", 500000))
+            live_slot = ((now.hour * 60 + now.minute) - 555) // 5
+            for s in (warm.strategies if warm is not None else build_intraday_strategies(cfg)):
+                status = status_of.get(s.key, "untested")
+                if not show_untested and status != "working":
+                    continue
+                live_days = [d for sym, ds in days.items() for d in ds if d.date == today
+                             and (s.universe != "top30" or sym in top30.get(d.date, info["etfs"]))]
+                if not live_days:
+                    continue
+                res = run_intraday(s, live_days, costs, capital, float(ic.get("risk_pct", 0.5)),
+                                   float(ic.get("leverage", 2.0)))
+                for t in res.trades:
+                    # today's bars end at the latest bar: walk_exit 'squares off' a running position there
+                    is_open = t.reason == "square-off" and live_slot < (FLAT_FNO if t.symbol in info["fno"] else FLAT_OTHER)
+                    out["signals"].append({
+                        "strategy_key": s.key, "strategy_name": s.name, "symbol": t.symbol,
+                        "side": "LONG" if t.side > 0 else "SHORT", "entry_time": _hhmm(t.entry_slot),
+                        "entry": round(float(t.entry_px), 2), "stop": round(float(t.stop), 2) if t.stop else None,
+                        "qty": int(t.qty), "amount": round(float(t.qty * t.entry_px), 0),
+                        "state": "open" if is_open else "closed", "exit_time": None if is_open else _hhmm(t.exit_slot),
+                        "exit": None if is_open else round(float(t.exit_px), 2), "last": round(float(t.exit_px), 2),
+                        "reason": "open" if is_open else t.reason, "pnl": round(float(t.pnl), 0),
+                        "ret_pct": round(float(t.ret_pct), 3), "target": None,
+                        "strategy_status": status, "proven": status == "working", "detail": _status_note(status)})
+            if show_untested:
+                from .. import fno_intraday as fi
+                days_today = {sym: d for sym, ds in days.items() for d in ds if d.date == today}
+                out["signals"] += oi_buildup_signals(days_today, fi.load(), now, capital, float(ic.get("risk_pct", 0.5)),
+                                                     float(ic.get("leverage", 2.0)), costs)
+            out["signals"].sort(key=lambda x: (x["state"] != "open", not x["proven"], x["entry_time"]))
+            out["source"] = ", ".join(sorted(todays["source"].astype(str).unique()))
+            out["bars_to"] = todays["ts"].max().isoformat()
+            n = len(out["signals"])
+            n_proven = sum(1 for x in out["signals"] if x["proven"])
+            if not show_untested:
+                names = ", ".join(s["name"] for s in out["proven"])
+                out["note"] = (f"{n} signal{'s' if n != 1 else ''} today from {names}." if n
+                               else f"No setups today so far from {names}.")
+            elif n:
+                out["note"] = (f"{n} signal{'s' if n != 1 else ''} today: {n_proven} from proven strategies, {n - n_proven} "
+                               "from strategies the backtest has not proven (each is labelled) - treat those as ideas "
+                               "to check, not proven trades.")
+            else:
+                out["note"] = "No setups today so far from any intraday strategy."
+    out["elapsed_s"] = round(time.perf_counter() - t0, 3 if warm is not None else 1)
+    out["engine"] = "live" if warm is not None else "job"
+    _write_json(SIGNALS_FILE, out)
+    log(f"Intraday signals: {out['note']}")
+    return out
 
 
 def _data_note(sources: list[str]) -> str:

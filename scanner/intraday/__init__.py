@@ -5,6 +5,6 @@
   live.py        real-time bars from the FYERS WebSocket during market hours
   engine.py      backtest rules: next-bar fills, stop-first, forced square-off, FYERS intraday costs
   strategies.py  the intraday strategies
-  run.py         pipeline: universe -> bars -> backtests + today's setups -> data/results/intraday.json
+  run.py         pipeline: universe -> bars -> backtests -> data/results/intraday.json
 Entry point for scheduled/manual jobs: intraday_sync.py in the project root.
 """

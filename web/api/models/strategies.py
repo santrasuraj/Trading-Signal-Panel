@@ -200,6 +200,22 @@ class TradeRow(Model):
     reason: str
 
 
+class StrengthPart(Model):
+    key: Literal["evidence", "status", "agreement", "track", "results"]
+    label: str
+    points: float
+    max: float
+    note: str
+
+
+class SignalStrength(Model):
+    """A transparent ranking aid for BUY signals (0-100, the sum of its parts), not a forecast."""
+    score: int
+    grade: Literal["strong", "good", "fair", "weak"]
+    agree: list[str]                              # other working strategies buying or holding the same stock
+    parts: list[StrengthPart]
+
+
 class Order(Model):
     strategy_key: str
     strategy_name: str
@@ -224,6 +240,7 @@ class Order(Model):
     provisional: bool
     below_min_position: bool
     you_hold_qty: float | None = None
+    strength: SignalStrength | None = None     # BUY orders of strategies that are not comparison-only
 
 
 class StrategyDetail(Model):

@@ -127,7 +127,7 @@ export function date(s?: string | null, o: { year?: boolean } = {}): string {
 /** Server-written sentences ('… next review on 30 Oct.'): glue "30 Oct 2026" together with no-break spaces so a
  *  date never splits across two lines. */
 export function keepDatesTogether(s: string): string {
-  return s.replace(/\b(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b( \d{4})?/g, (_m, d, mo, y) => `${d} ${mo}${y ? ` ${y.trim()}` : ''}`)
+  return s.replace(/\b(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b( \d{4})?/g, (_m, d, mo, y) => `${d}\u00A0${mo}${y ? `\u00A0${y.trim()}` : ''}`)
 }
 
 /** 'Oct 2026' */

@@ -173,7 +173,7 @@ def scan_files() -> list[dict]:
     for f in sorted(P.results.glob("scan_*.json"), reverse=True):
         try:
             h = _heads.get(file_key(f), lambda f=f: _head(f))
-        except OSError:
+        except (OSError, ValueError):     # unreadable, not UTF-8 or a broken number: skip it, never a 500
             continue
         out.append({"file": f.name, "path": f, **h})
     return out

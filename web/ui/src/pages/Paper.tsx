@@ -59,6 +59,11 @@ export default function Paper() {
     { id: 'open', header: 'Holding', align: 'right', value: (r) => r.open, cell: (r) => <span className="num">{r.open}{r.pending ? <span className="text-faint"> +{r.pending}</span> : ''}</span> },
     { id: 'closed', header: 'Closed', align: 'right', value: (r) => r.trades, cell: (r) => <span className="num">{r.trades}</span> },
   ]
+  // While every record is shorter than a verdict needs, the Verdict column said "Too early to judge" on every row:
+  // it is said once above the table instead.
+  const allEarly = !!d?.strategies.length && d.strategies.every((r) => r.days < minDays)
+  const longest = d?.strategies.length ? Math.max(...d.strategies.map((r) => r.days)) : 0
+  const shownCols = allEarly ? cols.filter((c) => c.id !== 'verdict') : cols
 
   return (
     <div>
@@ -70,7 +75,14 @@ export default function Paper() {
             The journal starts automatically with the next scan of a completed trading day (after ~6 PM or before 9:15 AM). Intraday scans are never journaled.
           </EmptyState>
         ) : (
-          <DataTable id="paper" data={d.strategies} columns={cols} rowKey={(r) => r.key} onRowClick={(r) => nav(`/paper/${r.key}`)} keyboard />
+          <>
+            {allEarly && (
+              <p className="border-b border-line px-4 py-2.5 text-[13px] text-muted">
+                <span className="font-medium text-fg">Too early to judge any strategy:</span> the longest record is <span className="num">{longest}</span> of the <span className="num">{minDays}</span> trading days a verdict needs. A holding of 0 means the money waits in cash.
+              </p>
+            )}
+            <DataTable id="paper" data={d.strategies} columns={shownCols} rowKey={(r) => r.key} onRowClick={(r) => nav(`/paper/${r.key}`)} keyboard />
+          </>
         )}
       </Card>
       {d?.available && (

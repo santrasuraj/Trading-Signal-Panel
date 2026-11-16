@@ -34,6 +34,8 @@ class Paths:
     @property
     def intraday_status(self) -> Path: return self.results / "intraday_status.json"
     @property
+    def intraday_signals(self) -> Path: return self.results / "intraday_signals.json"
+    @property
     def nse(self) -> Path: return self.data / "nse"
     @property
     def index_history(self) -> Path: return self.nse / "index_history.parquet"
@@ -67,6 +69,14 @@ class Paths:
     def login_bat(self) -> Path: return self.root / "1_login.bat"
     @property
     def run_scan(self) -> Path: return self.root / "run_scan.py"
+    @property
+    def options(self) -> Path: return self.data / "options"
+    @property
+    def fno(self) -> Path: return self.data / "fno"
+    @property
+    def intraday_bars(self) -> Path: return self.data / "intraday" / "bars"
+    @property
+    def intraday_live(self) -> Path: return self.data / "intraday" / "live"
 
     def universe(self, name: str) -> Path:
         return self.data / f"universe_{name}.csv"
@@ -77,17 +87,21 @@ P = Paths(settings.ROOT, settings.DATA_DIR)
 
 def configure(root: Path, data: Path) -> None:
     """Repoint the API and the scanner modules it calls at another root/data folder (tests)."""
-    from scanner import fyers_limits, holdings, lock, paper, providers, store
+    from scanner import fills, fno, fyers_limits, holdings, lock, options, paper, providers, store, watch
 
     from . import errors        # lazy: errors imports this module
 
     P.root, P.data = Path(root), Path(data)
     store.STORE_DIR = P.store
+    options.OPTIONS_DIR = P.options
+    fno.FNO_DIR = P.fno
     paper.JOURNAL_FILE = P.journal
     holdings.HOLDINGS_FILE = P.holdings
     lock.LOCK_FILE, lock.INFO_FILE = P.lock, P.lock_info
     providers.TOKEN_FILE = P.token
     fyers_limits.STATE_FILE, fyers_limits.LOCK_FILE = P.fyers_usage, P.fyers_usage_lock
+    watch.DATA_DIR = P.data
+    fills.DATA_DIR = P.data
     settings.CONFIG_FILE = P.config
     settings.HOLDINGS_FILE = P.holdings
     settings.TOKEN_FILE = P.token

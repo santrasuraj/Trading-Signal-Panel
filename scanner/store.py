@@ -587,6 +587,13 @@ def refresh_store(symbols: list[str], lookback_days: int, fyers=None, progress=N
     corp_actions: list[dict] = []
     changed = False
 
+    # A failure is remembered only for symbols still asked for: one that left the list (an index change, a removed
+    # holding, an NSE "DUMMY..." demerger placeholder of an older list) is never tried again, so its entry would sit
+    # in Data health as a "failed download" forever.
+    wanted = set(all_syms)
+    for s in [s for s in meta["failed"] if s not in wanted]:
+        meta["failed"].pop(s, None)
+
     def recently_failed(s: str) -> bool:
         fl = meta["failed"].get(s)
         return bool(fl) and fl.get("count", 0) >= 2 and \
