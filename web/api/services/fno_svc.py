@@ -177,10 +177,16 @@ def _live_worker() -> None:
             q = quotes_svc.quotes(stocks[i:i + quotes_svc.MAX_SYMBOLS])
             source = q["source"]
             prices.update({x["symbol"]: x for x in q["quotes"]})
-        fi.save({**feed, "prices": prices, "price_source": source, "fetched_at": now_ist().isoformat(timespec="seconds")})
+        view = {**feed, "prices": prices, "price_source": source, "fetched_at": now_ist().isoformat(timespec="seconds")}
+        fi.save(view)
     except Exception as e:      # the page shows the error; the last good snapshot stays on disk
         errors.log.exception("live F&O fetch failed")
         _live["error"] = f"{type(e).__name__}: {e}"[:300]
+        return
+    try:                        # intraday OI history for the build-up backtest (market hours only): never fails the fetch
+        fi.append_history(view)
+    except Exception:
+        errors.log.exception("storing the live OI snapshot in the OI history failed")
 
 
 def _kinds() -> dict[str, str]:

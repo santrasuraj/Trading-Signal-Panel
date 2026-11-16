@@ -31,6 +31,7 @@ from . import data as idata
 from . import fyers_sync
 from . import live as live_feed
 from .engine import FLAT_FNO, FLAT_OTHER, SLOTS, Day, IntradayCosts, run_intraday
+from .oi_buildup import OI_KEY, OI_MAX_AGE_MIN, OI_MAX_SIGNALS, OI_MIN_DAYS, OI_NAME, oi_rule
 from .strategies import S_0945, build_intraday_strategies
 
 INTRADAY_DIR = DATA_DIR / "intraday"
@@ -279,6 +280,53 @@ def _top30(days: dict[str, list[Day]], info: dict) -> dict[pd.Timestamp, set[str
     return {dt: {sym for _, sym in sorted(v, reverse=True)[:30]} | info["etfs"] for dt, v in by_date.items()}
 
 
+def strategy_status(m: dict, min_days: int = 40) -> str:
+    """The verdict every intraday strategy gets from its backtest metrics (m['significant'] set against the Bonferroni
+    t_crit): too few days = unknown; a positive average day beyond luck = working; positive but possibly luck = mixed;
+    else not-working (lost money after costs)."""
+    if m.get("days", 0) < min_days:
+        return "unknown"
+    if m.get("significant") and (m.get("avg_day_pct") or 0) > 0:
+        return "working"
+    return "mixed" if (m.get("avg_day_pct") or 0) > 0 else "not-working"
+
+
+def oi_backtest(days: dict[str, list[Day]], cfg: dict, costs: IntradayCosts, capital: float, ic: dict,
+                today: pd.Timestamp, log=print) -> dict:
+    """The F&O OI build-up on the OI snapshots this app stored (fno_intraday.load_history) and the same Days as the
+    other strategies (sessions before today). 'judged' once its backtest covers OI_MIN_DAYS sessions: it then gets a
+    status like the others; until then it stays 'untested'. Returns {"strategy", "result", "judged", "summary"} - the
+    summary goes to intraday.json's "oi_buildup" (and its note to the rules shown on the Intraday page)."""
+    from .. import fno_intraday as fi
+    from . import oi_buildup as ob
+    try:
+        snaps = fi.load_history(end=today - pd.Timedelta(days=1))
+    except Exception as e:             # a damaged history must not stop the other strategies' backtest
+        log(f"OI history unreadable ({type(e).__name__}: {e}) - the OI build-up stays untested")
+        snaps = None
+    sessions = set(ob.history_days(snaps, today))
+    pool = [d for ds in days.values() for d in ds if d.date < today and d.date.date() in sessions]
+    strategy = ob.build_strategy(cfg, snaps)
+    res = run_intraday(strategy, pool, costs, capital, float(ic.get("risk_pct", 0.5)), float(ic.get("leverage", 2.0)))
+    m = res.metrics
+    n = int(m.get("days", 0))
+    judged = n >= OI_MIN_DAYS
+    first, last = (min(sessions).isoformat(), max(sessions).isoformat()) if sessions else (None, None)
+    if judged:
+        note = (f"F&O OI build-up: tested on the {n} sessions of NSE OI snapshots this app stored ({first} to {last}), "
+                "fewer and later sessions than the other strategies; the live rule replayed at each 5-minute close.")
+    else:
+        note = (f"F&O OI build-up: untested - {n} of the {OI_MIN_DAYS} sessions of stored OI snapshots it needs "
+                "(NSE keeps no intraday OI history; this app stores each snapshot it fetches in market hours, "
+                "data/fno/oi_history).")
+    summary = {"status": "untested", "days": n, "min_days": OI_MIN_DAYS, "snapshot_sessions": len(sessions),
+               "snapshots": int(snaps["fetched"].nunique()) if snaps is not None and len(snaps) else 0,
+               "from": first, "to": last, "trades": int(m.get("trades", 0)),
+               "metrics": m if not judged else None,     # provisional while untested; judged ones are in "strategies"
+               "note": note}
+    return {"strategy": strategy, "result": res, "judged": judged, "summary": summary}
+
+
 def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True, log=print) -> dict:
     t0 = time.perf_counter()
     from . import fast
@@ -311,29 +359,30 @@ def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True,
     now = ist_now()
     out = []
     strategies = build_intraday_strategies(cfg)
+    try:                                 # judged once OI_MIN_DAYS sessions are stored
+        oi = oi_backtest(days, cfg, costs, capital, ic, today, log)
+    except Exception as e:               # never at the cost of the other strategies' results
+        log(f"OI build-up backtest failed ({type(e).__name__}: {e}) - it stays untested")
+        oi = {"judged": False, "summary": {"status": "untested", "days": 0, "min_days": OI_MIN_DAYS, "metrics": None,
+                                           "note": f"F&O OI build-up: untested - its backtest failed ({type(e).__name__})"}}
+    n_tested = len(strategies) + int(oi["judged"])
     # Bonferroni: every enabled strategy on the same sessions - |t| >= 2 alone would flag one by luck too often
-    t_crit = NormalDist().inv_cdf(1 - 0.025 / max(len(strategies), 1))
-    for s in strategies:
-        pool = [d for sym, ds in days.items() for d in ds
-                if s.universe != "top30" or sym in top30.get(d.date, info["etfs"])]
-        hist = [d for d in pool if d.date < today]
-        res = run_intraday(s, hist, costs, capital, float(ic.get("risk_pct", 0.5)), float(ic.get("leverage", 2.0)))
+    t_crit = NormalDist().inv_cdf(1 - 0.025 / max(n_tested, 1))
+    for s, res in [(s, None) for s in strategies] + ([(oi["strategy"], oi["result"])] if oi["judged"] else []):
+        if res is None:
+            pool = [d for sym, ds in days.items() for d in ds
+                    if s.universe != "top30" or sym in top30.get(d.date, info["etfs"])]
+            hist = [d for d in pool if d.date < today]
+            res = run_intraday(s, hist, costs, capital, float(ic.get("risk_pct", 0.5)), float(ic.get("leverage", 2.0)))
         m = res.metrics
         m["significant"] = m.get("t_stat") is not None and abs(m["t_stat"]) >= t_crit
         m["t_crit"] = round(t_crit, 2)
-        if m.get("days", 0) < 40:
-            status = "unknown"
-        elif m.get("significant") and (m.get("avg_day_pct") or 0) > 0:
-            status = "working"
-        elif (m.get("avg_day_pct") or 0) > 0:
-            status = "mixed"
-        else:
-            status = "not-working"
         out.append({
             "key": s.key, "name": s.name, "description": s.description, "evidence": s.evidence,
-            "horizon": "intraday", "status": status, "metrics": m,
+            "horizon": "intraday", "status": strategy_status(m), "metrics": m,
             "equity": [[d.date().isoformat(), round(v, 0)] for d, v in res.daily.items()],
         })
+    oi["summary"]["status"] = next((x["status"] for x in out if x["key"] == OI_KEY), "untested")
     order = {"working": 0, "mixed": 1, "unknown": 2, "not-working": 3}
     out.sort(key=lambda x: (order[x["status"]], -(x["metrics"].get("avg_day_pct") or -9)))
     span = (bars["ts"].min().date().isoformat(), bars["ts"].max().date().isoformat())
@@ -354,14 +403,17 @@ def run_intraday_all(cfg: dict, frames: dict | None = None, update: bool = True,
                   "selection": "each day the first trades by entry time (ties by priority), each sized on an equal "
                                "share of the leverage limit",
                   "significance": f"|t| >= {t_crit:.2f} (5% two-sided, Bonferroni-corrected for "
-                                  f"{len(strategies)} strategies tested on the same sessions)",
+                                  f"{n_tested} strategies tested on the same sessions"
+                                  + ("; the F&O OI build-up only on those with stored OI snapshots)" if oi["judged"]
+                                     else ")"),
                   "not_modelled": "Candidates = today's F&O list and today's most liquid stocks (the turnover filter "
                                   "and the top-30 list are applied as of each date within them, the list itself is "
                                   "not); no volume-participation cap; ex-dates not excluded; samples not split at "
                                   "the 3 Aug / 7 Sep 2026 auction changes",
-                  "tax": f"speculative business income at {costs.tax_pct}%"},
+                  "tax": f"speculative business income at {costs.tax_pct}%",
+                  "oi_buildup": oi["summary"]["note"]},
         "cost_params": asdict(costs),   # the API states the round-trip cost these results were run with
-        "sebi": SEBI_FACTS, "strategies": out,
+        "sebi": SEBI_FACTS, "strategies": out, "oi_buildup": oi["summary"],
     }
     _write_json(RESULT_FILE, result)   # the web job and the 15:45 task can finish together
     log(f"Intraday done in {result['elapsed_s']}s: {len(out)} strategies on {result['data']['sessions']} sessions")
@@ -380,12 +432,6 @@ def _write_json(path, obj: dict) -> None:
     idata._replace(tmp, path)
 
 
-OI_KEY, OI_NAME = "oi_buildup", "F&O OI build-up (live)"
-OI_MAX_SIGNALS = 10
-OI_MAX_AGE_MIN = 20                  # a live OI snapshot older than this (the 5-minute job stopped) gives no signals
-OI_MIN_MOVE_PCT = 0.2                # a build-up needs the price to have moved: a flat stock is neither long nor short
-
-
 def _status_note(status: str) -> str:
     return {"working": "proven: beat costs beyond luck in the backtest",
             "mixed": "not proven: positive in the backtest, but it could be luck",
@@ -395,12 +441,12 @@ def _status_note(status: str) -> str:
 
 
 def oi_buildup_signals(days_today: dict[str, Day], live_oi: dict | None, now, capital: float, risk_pct: float,
-                       leverage: float, costs: IntradayCosts) -> list[dict]:
+                       leverage: float, costs: IntradayCosts, status: str = "untested") -> list[dict]:
     """Live F&O positioning as signals: a LONG build-up (open interest up >= MIN_OI_PCT while the price is up) above
-    VWAP is a LONG; a SHORT build-up (OI up, price down) below VWAP is a SHORT. Entry = the last price, stop = the day's
-    low (high) so far, target twice the risk; the biggest OI changes first. There is no intraday OI history, so this is
-    never backtested - it is labelled 'untested'. `days_today`: today's Day per symbol (scanner bars)."""
-    from .. import fno_intraday as fi
+    VWAP is a LONG; a SHORT build-up (OI up, price down) below VWAP is a SHORT (oi_buildup.oi_rule, which the backtest
+    shares). Entry = the last price, stop = the day's low (high) so far, target twice the risk; the biggest OI changes
+    first. `status`: its backtest's (intraday.json) - 'untested' until oi_buildup.OI_MIN_DAYS sessions of OI snapshots
+    are stored. `days_today`: today's Day per symbol (scanner bars)."""
     v = live_oi or {}
     if str(v.get("trade_date") or "")[:10] != now.date().isoformat():
         return []
@@ -422,20 +468,12 @@ def oi_buildup_signals(days_today: dict[str, Day], live_oi: dict | None, now, ca
             continue
         li = int(valid[-1])
         px = float(d.c[li])
-        chg = (px / d.prev_close - 1) * 100
-        if abs(chg) < OI_MIN_MOVE_PCT:
-            continue                                     # unchanged price: rising OI says nothing about direction
-        kind = fi.classify(chg, r.get("oi_chg_pct"))
-        if kind not in ("long_buildup", "short_buildup"):
-            continue
-        side = 1 if kind == "long_buildup" else -1
-        vw = float(d.vwap()[li])
-        if (px < vw) if side > 0 else (px > vw):
-            continue                                     # price and positioning disagree: no signal
-        stop = float(np.nanmin(d.l[:li + 1])) if side > 0 else float(np.nanmax(d.h[:li + 1]))
+        side, stop, chg = oi_rule(px, d.prev_close, float(d.vwap()[li]), float(np.nanmin(d.l[:li + 1])),
+                                  float(np.nanmax(d.h[:li + 1])), r.get("oi_chg_pct"))
+        side, stop, chg = int(side), float(stop), float(chg)
+        if not side:
+            continue                                     # no build-up, no price move, against VWAP or a bad stop
         risk = abs(px - stop)
-        if not (0.002 <= risk / px <= 0.03):
-            continue
         qty = int(min(capital * risk_pct / 100 / risk, capital * leverage / 5 / px))
         if qty < 1:
             continue
@@ -444,7 +482,7 @@ def oi_buildup_signals(days_today: dict[str, Day], live_oi: dict | None, now, ca
             "entry_time": _hhmm(min(li + 1, SLOTS - 1)), "entry": round(px, 2), "stop": round(stop, 2),
             "target": round(px + side * 2 * risk, 2), "qty": qty, "amount": round(qty * px, 0), "state": "open",
             "exit_time": None, "exit": None, "last": round(px, 2), "reason": "open", "pnl": 0.0, "ret_pct": 0.0,
-            "strategy_status": "untested", "proven": False,
+            "strategy_status": status, "proven": status == "working",
             "detail": (f"{'Long' if side > 0 else 'Short'} build-up: open interest {r['oi_chg_pct']:+.1f}%, price "
                        f"{chg:+.2f}%, {'above' if side > 0 else 'below'} VWAP"),
             "_rank": abs(float(r.get("oi_chg_pct") or 0))})
@@ -532,11 +570,12 @@ def run_intraday_signals(cfg: dict, frames: dict | None = None, log=print, now=N
                         "reason": "open" if is_open else t.reason, "pnl": round(float(t.pnl), 0),
                         "ret_pct": round(float(t.ret_pct), 3), "target": None,
                         "strategy_status": status, "proven": status == "working", "detail": _status_note(status)})
-            if show_untested:
+            oi_status = status_of.get(OI_KEY, "untested")      # untested until its OI snapshots cover OI_MIN_DAYS
+            if show_untested or oi_status == "working":
                 from .. import fno_intraday as fi
                 days_today = {sym: d for sym, ds in days.items() for d in ds if d.date == today}
                 out["signals"] += oi_buildup_signals(days_today, fi.load(), now, capital, float(ic.get("risk_pct", 0.5)),
-                                                     float(ic.get("leverage", 2.0)), costs)
+                                                     float(ic.get("leverage", 2.0)), costs, oi_status)
             out["signals"].sort(key=lambda x: (x["state"] != "open", not x["proven"], x["entry_time"]))
             out["source"] = ", ".join(sorted(todays["source"].astype(str).unique()))
             out["bars_to"] = todays["ts"].max().isoformat()
