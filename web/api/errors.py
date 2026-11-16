@@ -71,22 +71,36 @@ def feature_unavailable(feature: str, message: str, hint: str | None = None) -> 
 
 
 def _clean(v: Any) -> Any:
+    if v is None or isinstance(v, (str, bool, int)):
+        return v
     if isinstance(v, float):
         return v if math.isfinite(v) else None
     if isinstance(v, dict):
-        return {k: _clean(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
+        return {k if k is None or isinstance(k, (str, int, float, bool)) else str(k): _clean(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple, set)):
         return [_clean(x) for x in v]
-    return v
+    # pandas / numpy values that reach a payload: their missing markers (NA, NaT) -> null, scalars -> plain Python
+    try:
+        import pandas as pd
+        if pd.api.types.is_scalar(v) and pd.isna(v):
+            return None
+    except (ImportError, TypeError, ValueError):
+        pass
+    if hasattr(v, "tolist"):                     # numpy scalars and arrays
+        return _clean(v.tolist())
+    if hasattr(v, "isoformat"):                  # dates, Timestamps
+        return v.isoformat()
+    return str(v)
 
 
 class SafeJSONResponse(JSONResponse):
-    """JSON with NaN/inf -> null (the stdlib encoder would raise). Fast path for clean payloads."""
+    """JSON with NaN/inf -> null and pandas' NA / numpy values made plain (the stdlib encoder would raise). Fast path
+    for clean payloads."""
 
     def render(self, content: Any) -> bytes:
         try:
             text = json.dumps(content, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-        except ValueError:
+        except (ValueError, TypeError):
             text = json.dumps(_clean(content), ensure_ascii=False, allow_nan=False, separators=(",", ":"))
         return text.encode("utf-8")
 

@@ -73,10 +73,16 @@ def start_refresh() -> dict:
 def screener() -> dict:
     """Every universe stock whose filings are stored: P/E, revenue and profit growth against a year ago, margin and
     EPS, next to its price trend from the last scan (screener.parquet)."""
-    import math
+    import pandas as pd
     sc = data.screener()
     if sc is None or sc.empty:
         return {"rows": [], "stored": 0, "universe": 0, "note": "No scan yet."}
+
+    def f(x, nd=1):      # pd.isna: NaN, None and pandas' NA (a new listing has no 200-day average yet)
+        return None if x is None or pd.isna(x) else round(float(x), nd)
+
+    def flag(x):
+        return None if x is None or pd.isna(x) else bool(x)
     rows = []
     from . import company_svc
     qvm = company_svc.scores()
@@ -84,14 +90,12 @@ def screener() -> dict:
         rec = fu.load(r.symbol)
         if not rec.get("quarters"):
             continue
-        s = fu.summary(rec, float(r.price) if r.price == r.price else None)
+        price = None if r.price is None or pd.isna(r.price) else float(r.price)
+        s = fu.summary(rec, price)
         lt = s.get("latest") or {}
         if not lt:
             continue
-
-        def f(x, nd=1):
-            return None if x is None or (isinstance(x, float) and math.isnan(x)) else round(float(x), nd)
-        fs = fin.snapshot(fin.load(r.symbol), float(r.price) if r.price == r.price else None)             if fin._file(r.symbol).exists() else {}
+        fs = fin.snapshot(fin.load(r.symbol), price) if fin._file(r.symbol).exists() else {}
         sq = qvm.get(r.symbol) or {}
         rows.append({"score": sq.get("score"), "quality": sq.get("quality"), "value": sq.get("value"),
                      "momentum": sq.get("momentum"), "roce": f(fs.get("roce")), "roe": f(fs.get("roe")), "de": f(fs.get("de"), 2), "opm": f(fs.get("opm")),
@@ -100,7 +104,7 @@ def screener() -> dict:
                      "pb": f(fs.get("pb"), 2),
                      "symbol": r.symbol, "company": r.company, "industry": r.industry, "price": f(r.price, 2),
                      "ret_3m": f(r.ret_3m), "ret_12m": f(r.ret_12m), "rs": f(r.rs, 0),
-                     "above_sma200": bool(r.above_sma200) if r.above_sma200 == r.above_sma200 else None,
+                     "above_sma200": flag(r.above_sma200),
                      "pct_from_52w_high": f(r.pct_from_52w_high), "turnover_cr": f(r.turnover_cr),
                      "qe": lt.get("qe"), "filed": lt.get("filed"), "revenue_cr": lt.get("revenue_cr"),
                      "profit_cr": lt.get("profit_cr"), "sales_growth": lt.get("sales_growth"),

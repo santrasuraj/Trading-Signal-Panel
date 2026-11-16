@@ -212,7 +212,10 @@ def test_state_stays_in_memory_until_the_file_changes(eng):
     assert at._load() is a                                       # no re-read while the file is unchanged
     st = _json.loads(at._path().read_text(encoding="utf-8"))
     st["settings"]["max_positions"] = 7
-    at._path().write_text(_json.dumps(st), encoding="utf-8")     # changed outside this process
+    at._path().write_text(_json.dumps(st), encoding="utf-8")     # changed outside this process ...
+    import os
+    m = at._path().stat().st_mtime_ns + 1_000_000_000              # ... a second later (Windows stamps a file's time
+    os.utime(at._path(), ns=(m, m))                                # in ticks: a busy machine can repeat the same one)
     b = at._load()
     assert b is not a and b["settings"]["max_positions"] == 7
 

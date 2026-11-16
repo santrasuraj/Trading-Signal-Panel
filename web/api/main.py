@@ -11,6 +11,7 @@ the NSE caches. Only explicit POSTs (scan, intraday run, Fyers login, Fyers hold
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
 import threading
@@ -82,6 +83,9 @@ def warm_up(app: FastAPI | None = None) -> None:
 
 def create_app(warm: bool = True) -> FastAPI:
     errors.setup_logging()
+    # Yahoo's library prints its own failures ("possibly delisted", "HTTP Error 404") into the server window; the app
+    # already handles a missing Yahoo answer (another source, or a message on the page), so only its crashes show
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
     @asynccontextmanager
     async def lifespan(_app):
