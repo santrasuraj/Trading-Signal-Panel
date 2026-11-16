@@ -5543,6 +5543,56 @@
     }
    }
   },
+  "/api/seasonal": {
+   "get": {
+    "tags": [
+     "views"
+    ],
+    "summary": "Seasonal",
+    "description": "Which stocks and sectors have tended to rise or fall in a calendar month (1-12) or an Indian market season\n(budget, fy_end, summer, monsoon, festive, year_end) against the NIFTY 500, how many such records chance alone\ngives, and a walk-forward test of buying them (point-in-time top 500, after costs). Default: this month.",
+    "operationId": "seasonal_api_seasonal_get",
+    "parameters": [
+     {
+      "name": "period",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 12,
+         "pattern": "^[a-z0-9_]+$"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Period"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/orderflow/{symbol}": {
    "get": {
     "tags": [

@@ -29,6 +29,7 @@ const Companies = lazy(() => import('@/pages/Companies'))
 const Company = lazy(() => import('@/pages/Company'))
 const ResultsReaction = lazy(() => import('@/pages/ResultsReaction'))
 const Rotation = lazy(() => import('@/pages/Rotation'))
+const Seasonality = lazy(() => import('@/pages/Seasonality'))
 const Volatility = lazy(() => import('@/pages/Volatility'))
 const IntradayBacktest = lazy(() => import('@/pages/IntradayBacktest'))
 const Rebalance = lazy(() => import('@/pages/Rebalance'))
@@ -114,6 +115,7 @@ export const router = createBrowserRouter([
       { path: 'company/:symbol', element: g(<Company />) },
       { path: 'results-reaction', element: g(<ResultsReaction />) },
       { path: 'rotation', element: g(<Rotation />) },
+      { path: 'seasonality', element: g(<Seasonality />) },
       { path: 'volatility', element: g(<Volatility />) },
       { path: 'intraday-backtest', element: g(<IntradayBacktest />) },
       { path: 'rebalance', element: g(<Rebalance />) },

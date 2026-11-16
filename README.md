@@ -417,6 +417,19 @@ correlation matrix with pairs that move together.
 ### Seasonality, market heatmap
 - **Seasonality** (chart side panel): each calendar month's average return over the years in the store (8-9 here),
   up years, and a t-statistic; only months with |t| >= 2 over 8+ years count as a pattern, the rest is noise.
+- **Seasonality page** (`/seasonality`, sidebar; `scanner/seasonal.py`, `GET /api/seasonal?period=`): pick a month, or
+  an Indian market season (Budget Jan-Feb, Financial year-end Mar, Summer and Q4 results Apr-May, Monsoon Jun-Sep,
+  Festive season and Q2 results Oct-Nov, Year-end Dec), and see the stocks that have tended to rise and to fall in it
+  against the NIFTY 500 (6+ years each): average return over the index, the years it beat or lagged it, a t-statistic,
+  a Consistent / Lean / Noise label, a square per year and, while the period is under way, this year's move so far.
+  Below: every sector against every period (click a column to open it) and NIFTY 500's own record. Two checks keep it
+  honest. **More than luck?** shuffles the month labels within each year (the same shuffle for every stock, so market
+  moves and sectors stay intact) and counts how many "consistent" stocks noise alone gives: in Nov 2026, 6 consistent
+  risers against ~14 by chance, but in the festive season 21 consistent fallers against ~12 (95% of shuffles under 18).
+  **Did buying them work?** walks forward from the fifth year: each month the 10 stocks with the best record in it over
+  the EARLIER years, from the point-in-time top 500 (delisted stocks included), bought at its start and sold at its end
+  after ~0.55% round-trip costs. To Oct 2026: +0.39% a month over the NIFTY 500 in 50 months (t 0.5), +2.2% a season in
+  24 seasons (t 1.0) - positive, not proven. Descriptive base rates, not a forecast.
 - **Market heatmap** (`g v`): today's universe by industry, sized by 20-day traded value (NSE's day files carry no
   market cap), coloured by today's live move or the 1W / 1M / 3M / 12M return; click a stock for its chart.
 

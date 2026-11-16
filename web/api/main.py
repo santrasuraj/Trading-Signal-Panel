@@ -69,6 +69,8 @@ def warm_up(app: FastAPI | None = None) -> None:
              lambda: smart_money_svc._derived(90)]
     from .services import late_entry_svc
     steps.append(lambda: late_entry_svc.report(wait=True))     # late-entry BUYs on Today (~10 s, the 8-year panel)
+    from .services import seasonal_svc
+    steps.append(seasonal_svc.view)                             # this month's seasonality page (~5 s cold)
     if app is not None:
         steps.append(app.openapi)
     for step in steps:
