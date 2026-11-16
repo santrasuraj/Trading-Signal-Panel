@@ -442,7 +442,11 @@ correlation matrix with pairs that move together.
   compared with the point-in-time NSE history; the 16 where the two differ by over 2 points (demergers such as SIEMENS
   Apr 2025 and rights issues, adjusted differently by each) are left out. Descriptive base rates, not a forecast.
 - **Market heatmap** (`g v`): today's universe by industry, sized by 20-day traded value (NSE's day files carry no
-  market cap), coloured by today's live move or the 1W / 1M / 3M / 12M return; click a stock for its chart.
+  market cap), coloured by today's live move or the 1W / 1M / 3M / 12M return; click a stock for its chart. It opens
+  at once at any hour: from 09:15 to 18:00 each move is the freshest price already at hand (live feed, else today's
+  FYERS / Yahoo quote, else the last scan's) while the ~480 quotes refresh in the background (about a minute from
+  Yahoo; one FYERS call per 50 symbols, within the budget the scans keep). A line under the title gives the count from
+  each source and the quotes' time; a stock's tooltip says where its move came from.
 
 ### Order flow (intraday chart > Order flow)
 Without FYERS Prime: the live service splits each tick's new volume into bought (at or above the ask) and sold (at or

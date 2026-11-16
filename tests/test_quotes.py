@@ -181,3 +181,116 @@ def test_event_stream_sends_a_snapshot_then_only_changes(monkeypatch):
     assert [(e["full"], [x["symbol"] for x in e["quotes"]]) for e in events[2:]] == [(False, ["AAA"])]
     assert calls[:3] == [False, True, False]               # cache first, snapshot with REST, then the fast path
     assert published[0][:3] == live_subs.ALWAYS and "AAA" in published[0] and published[-1] == live_subs.ALWAYS
+
+
+# ---- wait=False: answer from what is at hand, fetch the stale symbols in the background (the heatmap) ----------------
+
+@pytest.fixture
+def slow_yahoo(market, monkeypatch):
+    """Yahoo that answers only once the test opens the gate (as a ~1 minute fetch of the universe would), with
+    today's quotes; FYERS logged out. Joins the background refresh before the test ends."""
+    import threading
+
+    class Calls(list):
+        inside = threading.Event()                        # set once a fetch is inside Yahoo
+
+    gate, calls = threading.Event(), Calls()
+    today = q.now_ist().date().isoformat()
+
+    def fetch(syms):
+        calls.append(list(syms))
+        calls.inside.set()
+        assert gate.wait(5), "the test never opened the gate"
+        return {s: {"symbol": s, "price": 50.0, "prev_close": 49.0, "change_pct": 2.04, "time": today} for s in syms}
+
+    monkeypatch.setattr(q, "_from_yahoo", fetch)
+    monkeypatch.setattr(q, "get_fyers", lambda cfg: (None, "not logged in"))
+    monkeypatch.setattr(q, "_bg_thread", None)
+    yield gate, calls
+    gate.set()
+    if q._bg_thread is not None:
+        q._bg_thread.join(5)
+
+
+def _done():
+    q._bg_thread.join(5)
+    assert not q.refreshing()
+
+
+def test_wait_false_answers_at_once_and_fetches_in_the_background(slow_yahoo):
+    import time as _t
+    gate, calls = slow_yahoo
+    t0 = _t.monotonic()
+    r = q.quotes(["AAA", "BBB"], wait=False)
+    assert _t.monotonic() - t0 < 1.0                     # Yahoo is still busy: not waited for
+    assert r["refreshing"] and {x["source"] for x in r["quotes"]} == {"close"}
+    gate.set()
+    _done()
+    r = q.quotes(["AAA", "BBB"], wait=False)              # the next load shows them, with when they were fetched
+    assert not r["refreshing"] and {x["source"] for x in r["quotes"]} == {"yahoo"} and calls == [["AAA", "BBB"]]
+    assert all(x["fetched"][:10] == q.now_ist().date().isoformat() for x in r["quotes"])
+    assert "fetched" not in q.quotes(["AAA"])["quotes"][0]   # the waiting callers' answers are unchanged
+
+
+def test_a_stale_quote_is_shown_until_its_refresh_lands(slow_yahoo, monkeypatch):
+    gate, calls = slow_yahoo
+    gate.set()
+    q.quotes(["AAA"], wait=False)
+    _done()
+    monkeypatch.setattr(q, "_cache", {s: (v[0] - 120, v[1], v[2]) for s, v in q._cache.items()})   # 2 min old
+    gate.clear()
+    r = q.quotes(["AAA"], wait=False)
+    assert r["refreshing"] and r["quotes"][0]["source"] == "yahoo"     # the old Yahoo price, not the stored close
+    from datetime import datetime
+    age = q.now_ist() - datetime.fromisoformat(r["quotes"][0]["fetched"])
+    assert 110 <= age.total_seconds() <= 130                           # and it says how old it is
+    gate.set()
+    _done()
+    assert calls == [["AAA"], ["AAA"]]
+
+
+def test_cache_readers_never_wait_for_a_running_fetch(slow_yahoo):
+    import time as _t
+    gate, calls = slow_yahoo
+    q.quotes(["AAA", "BBB"], wait=False)
+    assert calls.inside.wait(5)                           # the refresh is now stuck inside Yahoo
+    t0 = _t.monotonic()
+    q.quotes(["AAA"], allow_network=False)                # the event stream's fast path
+    again = q.quotes(["AAA", "BBB", "CCC"], wait=False)   # another load: no second refresh while one runs
+    assert _t.monotonic() - t0 < 1.0 and again["refreshing"] and calls == [["AAA", "BBB"]]
+    gate.set()
+    _done()
+
+
+def test_background_refresh_goes_a_chunk_at_a_time(slow_yahoo, monkeypatch):
+    gate, calls = slow_yahoo
+    gate.set()
+    monkeypatch.setattr(q, "REFRESH_CHUNK", 2)
+    q.quotes(["A1", "A2", "A3", "A4", "A5"], wait=False)
+    _done()
+    assert calls == [["A1", "A2"], ["A3", "A4"], ["A5"]]  # a page that needs one quote meanwhile waits one chunk
+    assert not q.quotes(["A1", "A5"], wait=False)["refreshing"]   # all fresh: nothing to fetch
+
+
+def test_background_refresh_keeps_the_fyers_reserve_and_a_call_per_chunk(slow_yahoo, monkeypatch):
+    gate, calls = slow_yahoo
+    gate.set()
+    fy = FakeFyers(known=[f"S{i}" for i in range(120)])
+    monkeypatch.setattr(q, "get_fyers", lambda cfg: (fy, "ok"))
+    q.quotes([f"S{i}" for i in range(120)], wait=False)
+    _done()
+    assert [len(c) for c in fy.calls] == [50, 50, 20] and not calls    # one FYERS call (50 symbols) per chunk
+    low = FakeFyers(left=q.FYERS_RESERVE - 1)
+    monkeypatch.setattr(q, "get_fyers", lambda cfg: (low, "ok"))
+    monkeypatch.setattr(q, "_cache", {})
+    q.quotes(["AAA"], wait=False)
+    _done()
+    assert not low.calls and calls == [["AAA"]]           # below the reserve: Yahoo, the budget stays for the scans
+
+
+def test_wait_false_outside_market_hours_is_the_stored_close(monkeypatch):
+    monkeypatch.setattr(clock, "market_clock", lambda now=None: {"session": "closed"})
+    monkeypatch.setattr(q, "refresh_in_background", lambda *a: pytest.fail("no refresh while the market is shut"))
+    monkeypatch.setattr(q, "_from_store", lambda syms: {"AAA": {"symbol": "AAA", "price": 9.0}})
+    r = q.quotes(["AAA"], wait=False)
+    assert r["source"] == "close" and r["refreshing"] is False

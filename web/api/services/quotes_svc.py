@@ -13,6 +13,12 @@ While the market is open every source is tried in that order. From 15:30 to 18:0
 its last trade of the day (live feed, else one REST fetch cached 5 minutes) instead of jumping back to the
 last scan's price. Outside those hours: the last stored close, with no network call. Prices only: signals
 still come from the scans.
+
+One network fetch runs at a time (no duplicate calls for a symbol; yfinance is not thread-safe either), but the
+cache itself is locked only for a moment, so reading it never waits for the network. A page that lists the whole
+universe (the heatmap: ~480 symbols, about a minute from Yahoo) asks with `wait=False`: it gets what is already
+there at once and the stale symbols are fetched in a background thread, a chunk at a time, so a page that needs
+one quote meanwhile waits for one chunk at most.
 """
 from __future__ import annotations
 
@@ -38,8 +44,12 @@ TTL = {"fyers": 30.0, "yahoo": 60.0}
 POST_CLOSE_TTL = 300.0       # after 15:30 the last trade no longer changes: one REST fetch per 5 minutes is plenty
 FYERS_RESERVE = 600          # FYERS data calls left today below which the screen switches to Yahoo
 SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9&_.-]{0,24}$")
+REFRESH_CHUNK = 50           # symbols per fetch in a background refresh: one FYERS call (50 a call), Yahoo a few s
 _cache: dict[str, tuple[float, str, dict | None]] = {}     # symbol -> (monotonic time, source, quote)
-_lock = threading.Lock()
+_lock = threading.Lock()     # the cache dict: held for a moment only, never across a network call
+_fetch_lock = threading.Lock()   # one network fetch at a time
+_bg_lock = threading.Lock()
+_bg_thread: threading.Thread | None = None
 _RANK = {"live": 0, "fyers": 1, "yahoo": 2, "close": 3}
 NOTES = {"live": "Real-time FYERS live feed.", "fyers": "Real-time FYERS prices (refreshed every 30 s).",
          "yahoo": "Yahoo prices, ~15 min delayed: log in to FYERS for real time.",
@@ -97,13 +107,18 @@ def hub_info() -> dict | None:
     return info
 
 
-def cached(syms: list[str]) -> dict[str, dict]:
+def cached(syms: list[str], aged: bool = False) -> dict[str, dict]:
     """The last REST / Yahoo quote of each symbol from today, however old (no network): what the event stream
-    shows for a symbol between its REST refreshes."""
+    shows for a symbol between its REST refreshes. `aged`: copies, each with `fetched` (when it was fetched)."""
     today = now_ist().date().isoformat()
     with _lock:
-        return {s: _cache[s][2] for s in syms
-                if s in _cache and _cache[s][2] and str(_cache[s][2].get("time", "")).startswith(today)}
+        hit = {s: _cache[s] for s in syms
+               if s in _cache and _cache[s][2] and str(_cache[s][2].get("time", "")).startswith(today)}
+    if not aged:
+        return {s: q for s, (_, _, q) in hit.items()}
+    mono, wall = time.monotonic(), now_ist()
+    return {s: {**q, "fetched": (wall - timedelta(seconds=max(0.0, mono - t))).isoformat(timespec="seconds")}
+            for s, (t, _, q) in hit.items()}
 
 
 def _from_hub(syms: list[str], info: dict | None) -> dict[str, dict]:
@@ -179,11 +194,12 @@ def _rest(syms: list[str], ttl_override: float | None = None) -> dict[str, dict]
     except Exception:           # never let a broken login take down the page: Yahoo instead
         log.exception("Fyers login check for live quotes failed")
     source = "fyers" if fy is not None else "yahoo"
-    with _lock:                                          # one fetch at a time: no duplicate calls for a symbol
+    with _fetch_lock:            # one fetch at a time: a symbol another call just fetched is fresh by now, no 2nd call
         now = time.monotonic()
         ttl = ttl_override if ttl_override is not None else TTL[source]
-        fresh = {sym: q for sym, (t, src, q) in _cache.items()
-                 if sym in syms and src == source and now - t < ttl}
+        with _lock:
+            fresh = {sym: q for sym, (t, src, q) in _cache.items()
+                     if sym in syms and src == source and now - t < ttl}
         need = [x for x in syms if x not in fresh]
         got: dict[str, dict] = {}
         if need:
@@ -196,26 +212,71 @@ def _rest(syms: list[str], ttl_override: float | None = None) -> dict[str, dict]
                 log.exception("Live quotes failed")
             if source == "fyers" and len(got) < len(need):   # FYERS answered for part of the list only
                 got.update(_safe_yahoo([x for x in need if x not in got]))
-            for sym in need:                             # no trade yet today is remembered too (None)
-                _cache[sym] = (now, source, got.get(sym))
-            if len(_cache) > 2000:
-                _cache.clear()
+            with _lock:
+                for sym in need:                         # no trade yet today is remembered too (None)
+                    _cache[sym] = (now, source, got.get(sym))
+                if len(_cache) > 2000:
+                    _cache.clear()
         return {k: v for k, v in {**fresh, **got}.items() if v}
 
 
-def quotes(syms: list[str], allow_network: bool = True) -> dict:
+def _stale(syms: list[str], ttl_override: float | None = None) -> list[str]:
+    """The symbols with no cached quote, or one older than its source's cache time (no network)."""
+    now = time.monotonic()
+    with _lock:
+        return [s for s in syms if s not in _cache or now - _cache[s][0] >= (
+            ttl_override if ttl_override is not None else TTL.get(_cache[s][1], 0.0))]
+
+
+def _refresh(syms: list[str], ttl_override: float | None) -> None:
+    for k in range(0, len(syms), REFRESH_CHUNK):
+        try:
+            _rest(syms[k:k + REFRESH_CHUNK], ttl_override)
+        except Exception:
+            log.exception("Background quote refresh failed")
+        time.sleep(0.05)         # between chunks a page waiting for a quote of its own gets its turn
+
+
+def refresh_in_background(syms: list[str], ttl_override: float | None = None) -> bool:
+    """Fetch the stale ones of `syms` (FYERS or Yahoo, as _rest picks) in a background thread, one refresh at a
+    time. True while a refresh runs."""
+    global _bg_thread
+    with _bg_lock:
+        if _bg_thread is not None and _bg_thread.is_alive():
+            return True
+        stale = _stale(syms, ttl_override)
+        if not stale:
+            return False
+        _bg_thread = threading.Thread(target=_refresh, args=(stale, ttl_override), name="quotes-refresh", daemon=True)
+        _bg_thread.start()
+        return True
+
+
+def refreshing() -> bool:
+    t = _bg_thread
+    return t is not None and t.is_alive()
+
+
+def quotes(syms: list[str], allow_network: bool = True, wait: bool = True) -> dict:
     """The best quote for each symbol (see the module docstring). `allow_network=False` (the event stream's
-    fast path) uses only the live feed and the cache, never a REST call."""
+    fast path) uses only the live feed and the cache, never a REST call. `wait=False`: never waits for the
+    network either - the live feed and today's cached quotes (each with `fetched`) at once, the stale symbols
+    fetched in the background (`refreshing` says whether a refresh runs)."""
     clk = clock.market_clock()
     session = clk["session"]
     out: dict[str, dict] = {}
+    busy = False
     if session in ("open", "post_close"):
         info = hub_info()
         if session == "post_close" or quote_hub.feed_live(info):
             out.update(_from_hub(syms, info))            # after 15:30 the feed's last trades are the day's last prices
         rest = [x for x in syms if x not in out]
-        if rest and allow_network:
-            out.update(_rest(rest, ttl_override=POST_CLOSE_TTL if session == "post_close" else None))
+        ttl = POST_CLOSE_TTL if session == "post_close" else None
+        if rest and allow_network and wait:
+            out.update(_rest(rest, ttl_override=ttl))
+        elif rest and allow_network:
+            out.update(cached(rest, aged=True))
+            busy = refresh_in_background(rest, ttl)
         elif rest:
             out.update(cached(rest))
     missing = [x for x in syms if x not in out]
@@ -230,5 +291,8 @@ def quotes(syms: list[str], allow_network: bool = True) -> dict:
         note = "Market closed at 15:30: last trades of the day (official close after ~18:00)."
     elif best == "live" and delayed:
         note = "Real-time FYERS live feed; some symbols from Yahoo (~15 min delayed)."
-    return {"as_of": now_ist().isoformat(timespec="seconds"), "session": session, "source": best,
-            "delayed": delayed, "note": note, "quotes": got}
+    res = {"as_of": now_ist().isoformat(timespec="seconds"), "session": session, "source": best,
+           "delayed": delayed, "note": note, "quotes": got}
+    if not wait:
+        res["refreshing"] = busy
+    return res
