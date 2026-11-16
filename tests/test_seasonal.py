@@ -207,3 +207,49 @@ def test_seasonal_route(market):
     assert c.get("/api/seasonal?period=budget").json()["period"]["months"] == [1, 2]
     assert c.get("/api/seasonal?period=13").status_code == 422 or c.get("/api/seasonal?period=13").status_code == 400
     assert c.get("/api/seasonal?period=DROP;").status_code == 422          # only a-z, 0-9, _
+
+
+# ---- data checks ------------------------------------------------------------------------------------------------
+def test_months_the_two_histories_disagree_on_are_left_out_of_both():
+    idx = pd.PeriodIndex(["2022-09", "2022-10", "2022-11"], freq="M")
+    store = pd.DataFrame({"NMDC": [1.0, 1.6, 2.0], "SBIN": [3.0, -1.0, 4.0], "ONLY": [5.0, 5.0, 5.0]}, index=idx)
+    files = pd.DataFrame({"NMDC": [1.1, 10.7, 2.0], "SBIN": [3.0, -1.5, 4.0], "PIT": [0.0, 0.0, 0.0]}, index=idx)
+    a, b, cells = sz.drop_disagreements(store, files, tol=2.0)
+    assert [(c, str(r)) for c, r, _x, _y in cells] == [("NMDC", "2022-10")]       # a demerger month: 9 points apart
+    assert np.isnan(a.at[idx[1], "NMDC"]) and np.isnan(b.at[idx[1], "NMDC"])
+    assert a.at[idx[0], "NMDC"] == 1.0 and a.at[idx[1], "SBIN"] == -1.0            # small differences stay
+    assert a["ONLY"].tolist() == [5.0, 5.0, 5.0] and store.at[idx[1], "NMDC"] == 1.6   # inputs untouched
+
+
+def test_year_counts_are_exact():
+    per = pd.DataFrame({"A": [5.0, -1.0, 2.0, 0.0, 3.0, 4.0, 1.0]}, index=range(2019, 2026))
+    st = sz.stock_stats(per, pd.Series(0.0, index=per.index)).iloc[0]
+    assert (st["beat_years"], st["lag_years"], st["n"]) == (5, 1, 7)               # a flat year is neither
+
+
+def test_shuffles_move_months_within_each_year_including_the_partial_ones():
+    c = closes({"A": pattern(n_years=3, noise=1.0, seed=1), BENCH: pattern(n_years=3, noise=0.5, seed=2)},
+               start="2018-07-31")
+    mret = sz.monthly_returns(c).dropna()
+    assert mret.index[0] == pd.Period("2018-08", "M") and (mret.index.year == 2018).sum() == 5   # Aug-Dec 2018 only
+    sh = sz.shuffle_months(mret, np.random.default_rng(3))
+    assert list(sh.index) == list(mret.index)                                     # same calendar slots
+    for y in sorted(set(mret.index.year)):
+        a, b = mret[mret.index.year == y], sh[sh.index.year == y]
+        assert sorted(a["A"]) == pytest.approx(sorted(b["A"]))                    # values stay inside their year
+        assert (a["A"] - a[BENCH]).tolist() != [] and sorted((b["A"] - b[BENCH]).round(9)) ==             pytest.approx(sorted((a["A"] - a[BENCH]).round(9)))                   # stock and index move together
+    moved = sh[sh.index.year == 2018]["A"].to_numpy() != mret[mret.index.year == 2018]["A"].to_numpy()
+    assert moved.any()                                                            # the partial year is shuffled too
+
+
+def test_the_fast_chance_count_is_exactly_the_shuffled_count():
+    data = {f"S{i}": pattern(nov=[4.0, -4.0, 0.0][i % 3], noise=2.5, seed=i) for i in range(30)}
+    data[BENCH] = pattern(noise=1.0, seed=77)
+    mret = sz.monthly_returns(closes(data, start="2018-07-31"))           # a partial first year too
+    for months in ((11,), (10, 11)):
+        rng = np.random.default_rng(5)
+        slow = [sz.consistent_counts(sz.shuffle_months(mret, rng), BENCH, months) for _ in range(12)]
+        fast = sz.chance_counts(mret, BENCH, months, n_perm=12, seed=5)
+        assert fast["bullish"] == pytest.approx(round(np.mean([x[0] for x in slow]), 1))
+        assert fast["bearish"] == pytest.approx(round(np.mean([x[1] for x in slow]), 1))
+        assert fast["bullish_p95"] == int(np.percentile([x[0] for x in slow], 95))

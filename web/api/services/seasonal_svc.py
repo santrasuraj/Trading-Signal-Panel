@@ -82,10 +82,16 @@ def _build() -> dict:
     meta = data.symbol_meta()
     industry = {s: (meta.get(s) or {}).get("industry") for s in syms}
     pit_mret, member, universe = _pit_panel(close)
+    left_out = []
+    if universe == "point_in_time":           # months the two adjusted histories disagree on (demergers): left out
+        mret, pit_mret, left_out = sz.drop_disagreements(mret, pit_mret)
     cfg = data.config()
     return {"close": close, "syms": syms, "mret": mret, "meta": meta, "industry": industry,
             "sectors": sz.sector_grid(mret, BENCH, industry), "pit_mret": pit_mret, "member": member,
-            "universe": universe, "cost_pct": _cost_pct(cfg), "pooled": {}}
+            "universe": universe, "cost_pct": _cost_pct(cfg), "pooled": {},
+            "data": {"left_out": len(left_out), "tolerance_pts": sz.DISAGREE_PTS,
+                     "examples": [f"{c} {r.strftime('%b %Y')} ({va:+.1f}% vs {vb:+.1f}%)"
+                                  for c, r, va, vb in sorted(left_out, key=lambda x: -abs(x[2] - x[3]))[:8]]}}
 
 
 def _base_data() -> dict:
@@ -148,7 +154,7 @@ def view(period: str | None = None) -> dict:
             _periods[p["key"]] = cached
     return {**cached, "periods": [{k: x[k] for k in ("key", "kind", "name", "short", "months")} for x in sz.period_list()],
             "current": {"month": str(today.month), "season": sz.season_of(today.month)["key"]},
-            "sectors": b["sectors"], "as_of": str(b["close"].index[-1].date()), "note": NOTE}
+            "sectors": b["sectors"], "as_of": str(b["close"].index[-1].date()), "data": b["data"], "note": NOTE}
 
 
 def _period(b: dict, p: dict) -> dict:
@@ -161,7 +167,8 @@ def _period(b: dict, p: dict) -> dict:
     for r in st.to_dict("records"):
         m = b["meta"].get(r["symbol"]) or {}
         row = {"symbol": r["symbol"], "company": m.get("company"), "industry": m.get("industry"),
-               "side": "bullish" if r["excess_pct"] > 0 else "bearish", "n": r["n"], "avg_pct": sz._r(r["avg_pct"]),
+               "side": "bullish" if r["excess_pct"] > 0 else "bearish", "n": r["n"], "beat_years": r["beat_years"],
+               "lag_years": r["lag_years"], "avg_pct": sz._r(r["avg_pct"]),
                "median_pct": sz._r(r["median_pct"]), "excess_pct": sz._r(r["excess_pct"]),
                "median_excess_pct": sz._r(r["median_excess_pct"]), "beat_pct": sz._r(r["beat_pct"], 0),
                "up_pct": sz._r(r["up_pct"], 0), "t": sz._r(r["t"]), "strength": r["strength"],

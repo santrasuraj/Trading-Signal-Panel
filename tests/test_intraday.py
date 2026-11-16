@@ -372,3 +372,19 @@ def test_signals_never_come_from_unproven_strategies(tmp_path, monkeypatch):
     out = r.run_intraday_signals({}, log=lambda m: None)
     assert out["signals"] == [] and out["proven"] == [] and out["tested"] == 2
     assert json.loads((tmp_path / "intraday_signals.json").read_text(encoding="utf-8"))["note"] == out["note"]
+
+
+def test_build_days_checks_a_late_first_trade_without_an_empty_mean_warning():
+    import warnings
+    from scanner.intraday.run import build_days
+    idx = pd.bdate_range("2026-09-01", periods=30)
+    frames = {k: pd.DataFrame({"AAA": v}, index=idx)
+              for k, v in (("high", 101.0), ("low", 99.0), ("close", 100.0), ("volume", 2e6))}
+    late = _session(idx[25], 100.0).iloc[4:]                     # no bar before 09:35 (the 09:15-09:25 slots empty)
+    split = _session(idx[27], 50.0).iloc[4:]                     # late start AND half the store's price: unadjusted
+    bars = pd.concat([late, split], ignore_index=True)
+    info = {"fno": {"AAA"}, "etfs": set(), "min_turnover_cr": 10.0}
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)           # "Mean of empty slice" used to fire here
+        out = build_days(bars, frames, info, set(), {})
+    assert [d.date for d in out["AAA"]] == [idx[25]]             # the late day kept, the unadjusted one skipped

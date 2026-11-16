@@ -10,6 +10,8 @@ export type SeasonStrength = 'consistent' | 'lean' | 'noise'
 export interface SeasonPeriod { key: string; kind: 'month' | 'season'; name: string; short: string; months: number[]; why?: string | null }
 export interface SeasonRow {
   symbol: string; company: string | null; industry: string | null; side: 'bullish' | 'bearish'; n: number
+  /** Years above / below the NIFTY 500 (exact counts). */
+  beat_years: number; lag_years: number
   avg_pct: number | null; median_pct: number | null; excess_pct: number | null; median_excess_pct: number | null
   beat_pct: number | null; up_pct: number | null; t: number | null; strength: SeasonStrength
   /** Each year's return over the NIFTY 500, by year. */
@@ -37,6 +39,8 @@ export interface SeasonView {
   }
   test: { rows: SeasonTestRow[]; summary: SeasonSummary; pooled: SeasonSummary; universe: 'point_in_time' | 'current'; cost_pct: number; top_n: number; train_min_years: number }
   sectors: { industry: string; stocks: number; cells: SectorCell[] }[]
+  /** Stock-months left out: the two NSE-based price histories disagree there (demergers). */
+  data: { left_out: number; tolerance_pts: number; examples: string[] }
   note: string
 }
 

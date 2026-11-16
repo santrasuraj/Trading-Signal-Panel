@@ -51,8 +51,8 @@ function cols(d: SeasonView): Col<SeasonRow>[] {
     { id: 'ind', header: 'Sector', value: (r) => r.industry ?? '', hideBelow: 900, cell: (r) => <span className="block max-w-[160px] truncate text-xs text-muted">{r.industry ?? '—'}</span> },
     { id: 'ex', header: 'vs NIFTY 500', align: 'right', mobile: 'change', title: 'Average return over the NIFTY 500 in this period, over the years shown', value: (r) => r.excess_pct,
       cell: (r) => <span className={cn('num font-semibold', (r.excess_pct ?? 0) >= 0 ? 'text-profit' : 'text-loss')}>{pct(r.excess_pct)}</span> },
-    { id: 'beat', header: 'Years', align: 'right', title: 'Years it beat (rising list) or lagged (falling list) the NIFTY 500, of the years it was listed', value: (r) => (r.side === 'bullish' ? r.beat_pct : 100 - (r.beat_pct ?? 0)),
-      cell: (r) => { const k = Math.round(((r.side === 'bullish' ? r.beat_pct : 100 - (r.beat_pct ?? 0)) ?? 0) * r.n / 100); return <span className="num">{k}/{r.n}</span> } },
+    { id: 'beat', header: 'Years', align: 'right', title: 'Years it beat (rising list) or lagged (falling list) the NIFTY 500, of the years it was listed', value: (r) => (r.side === 'bullish' ? r.beat_years : r.lag_years) / Math.max(r.n, 1),
+      cell: (r) => <span className="num">{r.side === 'bullish' ? r.beat_years : r.lag_years}/{r.n}</span> },
     { id: 't', header: 't', align: 'right', title: 'How far the average is from zero given how much the years vary: about 2 or more is unlikely to be pure luck for ONE stock (but see the chance check above)', value: (r) => r.t, cell: (r) => <span className="num text-muted">{num(r.t, 1)}</span> },
     { id: 'str', header: 'Record', mobile: 'secondary', value: (r) => ['consistent', 'lean', 'noise'].indexOf(r.strength), cell: (r) => <StrengthBadge s={r.strength} /> },
     { id: 'strip', header: 'Each year', sortable: false, hideBelow: 640, value: () => 0, cell: (r) => <YearStrip years={r.years} first={d.first_year} last={d.last_year} /> },
@@ -195,7 +195,9 @@ export default function Seasonality() {
             </Card>
           </div>
           <SectorGrid d={d} kind={d.period.kind} onPick={pick} />
-          <Banner tone="info" icon={<Info className="h-4 w-4 text-info" />}><span className="text-muted">{d.note} Stocks need {d.counts.min_years}+ years of the period to be listed. Research, not advice: you decide.</span></Banner>
+          <Banner tone="info" icon={<Info className="h-4 w-4 text-info" />}><span className="text-muted">{d.note} Stocks need {d.counts.min_years}+ years of the period to be listed.
+            {d.data.left_out > 0 && <> {d.data.left_out} stock-months are left out because the two NSE-based price histories adjust a corporate action there (a demerger or rights issue) differently, by over {num(d.data.tolerance_pts, 0)} points, so neither can be trusted: {d.data.examples.join(', ')}{d.data.left_out > d.data.examples.length ? ` and ${d.data.left_out - d.data.examples.length} more` : ''}.</>}
+            {' '}Research, not advice: you decide.</span></Banner>
         </>}
     </div>
   )

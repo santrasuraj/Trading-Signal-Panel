@@ -47,7 +47,7 @@ CONSISTENT_T, CONSISTENT_RATE = 2.0, 75.0     # |t| and the share of years beati
 LEAN_T, LEAN_RATE = 1.5, 70.0
 TOP_N = 10                    # walk-forward: stocks bought (and tracked at the bottom)
 TRAIN_MIN_YEARS = 4           # ... each with at least this many earlier years of the period
-PERMUTATIONS = 30
+PERMUTATIONS = 200          # 30 left the 95th percentile of the chance count swinging by +-5 stocks
 SEED = 7
 
 
@@ -86,6 +86,30 @@ def monthly_returns(close: pd.DataFrame) -> pd.DataFrame:
     """Calendar-month returns (%) per symbol, indexed by month (PeriodIndex); NaN where a month-end close is missing."""
     me = month_end_closes(close)
     return (me / me.shift(1) - 1) * 100
+
+
+DISAGREE_PTS = 2.0          # a stock-month whose two adjusted histories differ by more is left out
+
+
+def drop_disagreements(a: pd.DataFrame, b: pd.DataFrame, tol: float = DISAGREE_PTS
+                       ) -> tuple[pd.DataFrame, pd.DataFrame, list[tuple[str, pd.Period, float, float]]]:
+    """Monthly returns from two independently adjusted price histories (the price store and the point-in-time NSE
+    files): where both have a month and they differ by more than `tol` points - in practice the months of a demerger or
+    rights issue, which each history adjusts differently - neither can be trusted, so the month is set to NaN
+    in both. Returns (a, b, [(symbol, month, a_value, b_value), ...])."""
+    cols = a.columns.intersection(b.columns)
+    rows = a.index.intersection(b.index)
+    if not len(cols) or not len(rows):
+        return a, b, []
+    x, y = a.loc[rows, cols], b.loc[rows, cols]
+    bad = (x - y).abs().gt(tol) & x.notna() & y.notna()
+    cells = [(c, r, float(x.at[r, c]), float(y.at[r, c])) for r, c in bad.stack().loc[lambda v: v].index]
+    if cells:
+        a, b = a.copy(), b.copy()
+        for c, r, _va, _vb in cells:
+            a.at[r, c] = np.nan
+            b.at[r, c] = np.nan
+    return a, b, cells
 
 
 def period_returns(mret: pd.DataFrame, months: tuple[int, ...]) -> pd.DataFrame:
@@ -139,7 +163,8 @@ def stock_stats(per: pd.DataFrame, bench: pd.Series) -> pd.DataFrame:
         t = _t(e.to_numpy(float))
         beat = float((e > 0).mean() * 100)
         side = 1 if e.mean() > 0 else -1
-        rows.append({"symbol": sym, "n": n, "avg_pct": float(r.mean()), "median_pct": float(r.median()),
+        rows.append({"symbol": sym, "n": n, "beat_years": int((e > 0).sum()), "lag_years": int((e < 0).sum()),
+                     "avg_pct": float(r.mean()), "median_pct": float(r.median()),
                      "up_pct": float((r > 0).mean() * 100), "excess_pct": float(e.mean()),
                      "median_excess_pct": float(e.median()), "beat_pct": beat, "t": t,
                      "strength": strength(n, t, beat, side), "years": {int(y): float(v) for y, v in e.items()}})
@@ -181,18 +206,15 @@ def sector_grid(mret: pd.DataFrame, bench: str, industry: dict[str, str], min_st
 
 
 # ------------------------------------------------------------------ chance: how many "consistent" stocks noise gives
-def consistent_counts(mret: pd.DataFrame, bench: str, months: tuple[int, ...]) -> tuple[int, int]:
-    """How many stocks pass as consistent bullish and bearish (vectorised: the chance test runs it many times)."""
-    per = period_returns(mret, months)
-    if per.empty:
-        return 0, 0
-    e = per.drop(columns=[bench]).sub(per[bench], axis=0).to_numpy(float)
+def _count_consistent(e: np.ndarray) -> tuple[int, int]:
+    """Consistent bullish / bearish counts from a years x stocks array of excess returns (NaN = no year)."""
     ok = np.isfinite(e)
     n = ok.sum(axis=0)
     with np.errstate(invalid="ignore", divide="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        mean = np.nanmean(np.where(ok, e, np.nan), axis=0)
-        sd = np.nanstd(np.where(ok, e, np.nan), axis=0, ddof=1)
+        x = np.where(ok, e, np.nan)
+        mean = np.nanmean(x, axis=0)
+        sd = np.nanstd(x, axis=0, ddof=1)
         t = mean / (sd / np.sqrt(n))
         beat = np.where(ok, e > 0, False).sum(axis=0) / np.maximum(n, 1) * 100
     good = (n >= MIN_YEARS) & np.isfinite(t)
@@ -201,28 +223,58 @@ def consistent_counts(mret: pd.DataFrame, bench: str, months: tuple[int, ...]) -
     return int(bull.sum()), int(bear.sum())
 
 
+def consistent_counts(mret: pd.DataFrame, bench: str, months: tuple[int, ...]) -> tuple[int, int]:
+    """How many stocks pass as consistent bullish and bearish."""
+    per = period_returns(mret, months)
+    if per.empty:
+        return 0, 0
+    return _count_consistent(per.drop(columns=[bench]).sub(per[bench], axis=0).to_numpy(float))
+
+
+def shuffle_months(mret: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
+    """The month labels shuffled within each calendar year - the same shuffle for every column, so the market's moves
+    and sectors stay together; a partial first or last year shuffles among the months it has."""
+    parts = []
+    for y in sorted(set(mret.index.year)):
+        block = mret[mret.index.year == y]
+        if len(block) < 2:
+            parts.append(block)
+            continue
+        shuffled = block.iloc[rng.permutation(len(block))].copy()
+        shuffled.index = block.index                      # month m now holds another month's returns
+        parts.append(shuffled)
+    return pd.concat(parts)
+
+
 def chance_counts(mret: pd.DataFrame, bench: str, months: tuple[int, ...], n_perm: int = PERMUTATIONS,
                   seed: int = SEED) -> dict:
-    """Average consistent bullish / bearish counts after shuffling the 12 month labels within each year (one shuffle
-    per year for all stocks and the index alike)."""
-    full = mret
-    years = sorted(set(full.index.year))
+    """Average consistent bullish / bearish counts over `n_perm` shuffles of the month labels - exactly
+    shuffle_months's shuffles (same random draws, same order), done on a years x 12 x stocks array for speed."""
+    years = sorted(set(mret.index.year))
+    yi = {y: k for k, y in enumerate(years)}
+    R = np.full((len(years), 12, mret.shape[1]), np.nan)
+    present = np.zeros((len(years), 12), dtype=bool)
+    vals = mret.to_numpy(float)
+    for k, per in enumerate(mret.index):
+        R[yi[per.year], per.month - 1] = vals[k]
+        present[yi[per.year], per.month - 1] = True
+    slots = [np.flatnonzero(present[k]) for k in range(len(years))]
+    b = mret.columns.get_loc(bench)
+    stocks = np.array([c for c in range(mret.shape[1]) if c != b])
     rng = np.random.default_rng(seed)
     bull, bear = [], []
     for _ in range(n_perm):
-        parts = []
-        for y in years:
-            block = full[full.index.year == y]
-            if len(block) < 12:
-                parts.append(block)                       # a partial year keeps its own months
-                continue
-            order = rng.permutation(12)
-            shuffled = block.iloc[order].copy()
-            shuffled.index = block.index                  # month m now holds another month's returns
-            parts.append(shuffled)
-        b, s = consistent_counts(pd.concat(parts), bench, months)
-        bull.append(b)
-        bear.append(s)
+        S = R.copy()
+        for k, pos in enumerate(slots):
+            if len(pos) >= 2:
+                S[k, pos] = R[k, pos[rng.permutation(len(pos))]]
+        g = np.ones((len(years), mret.shape[1]))
+        for m in months:
+            g = g * (1 + S[:, m - 1, :] / 100)            # NaN anywhere -> NaN: no period that year
+        per = (g - 1) * 100
+        x, y = _count_consistent(per[:, stocks] - per[:, [b]])
+        bull.append(x)
+        bear.append(y)
     return {"bullish": _r(float(np.mean(bull)), 1), "bearish": _r(float(np.mean(bear)), 1),
             "bullish_p95": int(np.percentile(bull, 95)), "bearish_p95": int(np.percentile(bear, 95)),
             "permutations": n_perm}

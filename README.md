@@ -423,13 +423,16 @@ correlation matrix with pairs that move together.
   against the NIFTY 500 (6+ years each): average return over the index, the years it beat or lagged it, a t-statistic,
   a Consistent / Lean / Noise label, a square per year and, while the period is under way, this year's move so far.
   Below: every sector against every period (click a column to open it) and NIFTY 500's own record. Two checks keep it
-  honest. **More than luck?** shuffles the month labels within each year (the same shuffle for every stock, so market
-  moves and sectors stay intact) and counts how many "consistent" stocks noise alone gives: in Nov 2026, 6 consistent
-  risers against ~14 by chance, but in the festive season 21 consistent fallers against ~12 (95% of shuffles under 18).
-  **Did buying them work?** walks forward from the fifth year: each month the 10 stocks with the best record in it over
-  the EARLIER years, from the point-in-time top 500 (delisted stocks included), bought at its start and sold at its end
-  after ~0.55% round-trip costs. To Oct 2026: +0.39% a month over the NIFTY 500 in 50 months (t 0.5), +2.2% a season in
-  24 seasons (t 1.0) - positive, not proven. Descriptive base rates, not a forecast.
+  honest. **More than luck?** shuffles the month labels within each year 200 times (the same shuffle for every stock,
+  so market moves and sectors stay intact) and counts how many "consistent" stocks noise alone gives. In November,
+  6 consistent risers against ~12 by chance; of all 12 months and 6 seasons only two lists clear the 95% chance level:
+  February's fallers (37 vs 29) and the Summer season's risers (43 vs 32). **Did buying them work?** walks forward
+  from the fifth year: each month the 10 stocks with the best record in it over the EARLIER years, from the
+  point-in-time top 500 (delisted stocks included), bought at its start and sold at its end after ~0.55% round-trip
+  costs. To Oct 2026: +0.39% a month over the NIFTY 500 in 50 months (t 0.5), +2.1% a season in 24 seasons (t 0.9) -
+  positive, not proven. Data checks: NIFTY 500 matches NSE's index file in all 98 months, and each stock-month is
+  compared with the point-in-time NSE history; the 16 where the two differ by over 2 points (demergers such as SIEMENS
+  Apr 2025 and rights issues, adjusted differently by each) are left out. Descriptive base rates, not a forecast.
 - **Market heatmap** (`g v`): today's universe by industry, sized by 20-day traded value (NSE's day files carry no
   market cap), coloured by today's live move or the 1W / 1M / 3M / 12M return; click a stock for its chart.
 

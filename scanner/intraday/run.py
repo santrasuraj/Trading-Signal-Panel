@@ -241,8 +241,10 @@ def build_days(bars: pd.DataFrame, frames: dict, info: dict, large: set[str], re
                 if not abs(f - 1) <= 0.03:
                     continue
             prev_close = float(c_vals[pi])
-            # skip days where intraday prices and the (adjusted) daily store disagree (corporate action)
-            if abs(np.nanmean(c[:3]) / prev_close - 1) > 0.25:
+            # skip days where intraday prices and the (adjusted) daily store disagree (corporate action): the day's
+            # first three traded bars, so a stock that first trades after 09:25 is still checked (and no empty mean)
+            first = c[~np.isnan(c)][:3]
+            if abs(float(first.mean()) / prev_close - 1) > 0.25:
                 continue
             ev = float(np.nansum(v[1:3]))
             recent = early_vol[-14:]
